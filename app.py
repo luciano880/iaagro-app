@@ -3900,23 +3900,45 @@ elif menu == "Estoque de Insumos":
 
         # ── Câmera do celular ─────────────────────────────────────────
         st.subheader("📷 Escanear pela Câmera")
-        try:
-            from streamlit_barcode_reader import st_barcode_reader
-            codigo_camera = st_barcode_reader()
-            if codigo_camera and codigo_camera.strip():
-                st.session_state.bc_codigo = codigo_camera.strip()
-                produto_encontrado = None
-                for item in st.session_state.estoque:
-                    if item.get("Codigo_Barras", "") == codigo_camera.strip():
-                        produto_encontrado = item
-                        break
-                st.session_state.bc_produto = produto_encontrado
-                success_box(f"✅ Código lido pela câmera: {codigo_camera}")
-        except Exception:
-            st.markdown('''<div style="background:#78350f;color:#fff;padding:10px 16px;
-            border-radius:8px;border-left:4px solid #f59e0b;font-size:13px;font-weight:600;">
-            ⚠️ Scanner de câmera não disponível neste dispositivo. Use o campo abaixo.
-            </div>''', unsafe_allow_html=True)
+        st.markdown("""
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.19.1/zxing.min.js"></script>
+        <div style="background:#0f3460;border-radius:12px;padding:16px;margin-bottom:12px;">
+          <video id="video" style="width:100%;border-radius:8px;max-height:260px;background:#000;" autoplay muted playsinline></video>
+          <div id="scan-result" style="color:#6ee7b7;font-weight:700;font-size:15px;margin-top:10px;text-align:center;min-height:24px;"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button onclick="startScan()" style="flex:1;padding:12px;background:#16a34a;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">📷 Ativar Câmera</button>
+            <button onclick="stopScan()" style="flex:1;padding:12px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">⏹ Parar</button>
+          </div>
+        </div>
+        <input type="text" id="barcode-output" style="width:100%;padding:10px;border-radius:8px;border:2px solid #22c55e;background:#0d1b2a;color:#fff;font-size:16px;text-align:center;" placeholder="Código aparece aqui..." readonly>
+        <script>
+        let codeReader = null;
+        let stream = null;
+        function startScan() {
+            if (typeof ZXing === 'undefined') {
+                document.getElementById('scan-result').innerText = '⚠️ Biblioteca carregando, tente novamente em 2s';
+                return;
+            }
+            codeReader = new ZXing.BrowserMultiFormatReader();
+            codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
+                if (result) {
+                    const code = result.getText();
+                    document.getElementById('scan-result').innerText = '✅ Lido: ' + code;
+                    document.getElementById('barcode-output').value = code;
+                    stopScan();
+                }
+            });
+        }
+        function stopScan() {
+            if (codeReader) { codeReader.reset(); codeReader = null; }
+        }
+        </script>
+        """, unsafe_allow_html=True)
+
+        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:10px 16px;
+        border-radius:8px;font-size:12px;font-weight:600;margin:8px 0;">
+        💡 Após escanear, copie o código que aparece no campo acima e cole no campo abaixo para buscar o produto.
+        </div>''', unsafe_allow_html=True)
 
         # ── Leitor USB ou digitação manual ────────────────────────────
         st.subheader("⌨️ Leitor USB ou Digitação Manual")
