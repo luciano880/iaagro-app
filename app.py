@@ -77,6 +77,19 @@ def adicionar_logo_fundo():
 adicionar_logo_fundo()
 
 # ─────────────────────────────────────────────
+# PWA — manifest + ícone + meta tags mobile
+# ─────────────────────────────────────────────
+st.markdown("""
+<link rel="manifest" href="/app/static/manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IAAgro Pro">
+<meta name="theme-color" content="#22c55e">
+<link rel="apple-touch-icon" href="/app/static/IAAgrologo.jpeg">
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
 # CSS UNIFICADO (sem conflitos e sem duplicatas)
 # ─────────────────────────────────────────────
 st.markdown("""
