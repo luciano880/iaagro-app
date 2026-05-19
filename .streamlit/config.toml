@@ -1,0 +1,14 @@
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+
+[theme]
+base = "dark"
+primaryColor = "#22c55e"
+backgroundColor = "#0d2137"
+secondaryBackgroundColor = "#0a1f35"
+textColor = "#f1f5f9"
+
+[browser]
+gatherUsageStats = false
