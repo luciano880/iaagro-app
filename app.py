@@ -3901,9 +3901,9 @@ elif menu == "Estoque de Insumos":
         # ── Câmera do celular ─────────────────────────────────────────
         st.subheader("📷 Escanear pela Câmera")
         try:
-            from streamlit_qrcode_scanner import qrcode_scanner
-            codigo_camera = qrcode_scanner(key="scanner_camera")
-            if codigo_camera:
+            from streamlit_barcode_reader import st_barcode_reader
+            codigo_camera = st_barcode_reader()
+            if codigo_camera and codigo_camera.strip():
                 st.session_state.bc_codigo = codigo_camera.strip()
                 produto_encontrado = None
                 for item in st.session_state.estoque:
