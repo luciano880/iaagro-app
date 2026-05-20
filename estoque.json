@@ -1,0 +1,16 @@
+[
+    {
+        "Insumo": "kcl",
+        "Categoria": "Cloreto de Potássio",
+        "Quantidade": 1.0,
+        "Unidade": "kg",
+        "Valor Unitário R$": 0.0,
+        "Valor Total R$": 0.0,
+        "Estoque Mínimo": 0.0,
+        "Observação": "",
+        "Cultura": "Soja",
+        "Dose ha": 0.0,
+        "Litros ha": 100.0,
+        "Tanque litros": 2000
+    }
+]

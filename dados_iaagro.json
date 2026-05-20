@@ -1,0 +1,60 @@
+{
+    "dados": {},
+    "areas": [],
+    "estoque": [],
+    "aplicacoes": [
+        {
+            "ID Área": "AREA-001",
+            "Aplicação": "Pré-plantio",
+            "Data": "2026-05-16",
+            "Área aplicada ha": 14.7,
+            "Volume calda L/ha": 100.0,
+            "Capacidade tanque L": 1500.0,
+            "Área por tanque ha": 15.0,
+            "Número tanques": 0.98,
+            "Produtos": [
+                {
+                    "Produto": "kcl",
+                    "Dose por ha": 100.0,
+                    "Unidade": "kg/ha",
+                    "Produto por tanque": 1500.0,
+                    "Total usado": 1470.0,
+                    "Observação": ""
+                }
+            ]
+        }
+    ],
+    "historico_produtividade": [],
+    "pluviometro": [
+        {
+            "Área": "AREA-001 - lopes",
+            "Mês": "Março",
+            "Chuva Real": 70.0,
+            "Chuva Ideal": 120.0,
+            "Perda Estimada": 7.5,
+            "Status": "⚠️ Déficit hídrico"
+        },
+        {
+            "Área": "AREA-001 - lopes",
+            "Mês": "Janeiro",
+            "Chuva Real": 90.0,
+            "Chuva Ideal": 120.0,
+            "Perda Estimada": 0,
+            "Status": "✅ Chuva adequada"
+        },
+        {
+            "Área": "AREA-001 - lopes",
+            "Mês": "Fevereiro",
+            "Chuva Real": 130.0,
+            "Chuva Ideal": 120.0,
+            "Perda Estimada": 0,
+            "Status": "✅ Chuva adequada"
+        }
+    ],
+    "carencia_registros": [],
+    "dre_registros": [],
+    "calendario_eventos": [],
+    "harvest_historico": [],
+    "receituarios": [],
+    "notas_fiscal": []
+}
