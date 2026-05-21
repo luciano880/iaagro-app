@@ -6265,7 +6265,7 @@ elif menu == "📊 Comparativo de Safras":
             import plotly.graph_objects as go
             from plotly.subplots import make_subplots
             PLOTLY_OK = True
-        except ImportError:
+        except Exception:
             PLOTLY_OK = False
 
         tab_prod, tab_fin, tab_completo, tab_ia = st.tabs([
