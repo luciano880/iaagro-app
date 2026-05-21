@@ -707,69 +707,30 @@ def alerta_clima_aplicacao(codigo_clima, velocidade_vento, precipitacao):
 # PREÇOS DE COMMODITIES — CEPEA/ESALQ via scraping
 # ─────────────────────────────────────────────
 def buscar_dolar_awesomeapi():
-    """Busca cotação real do dólar — 3 fontes em cascata."""
-    headers_yf = {
+    """Busca cotação real do dólar — tenta 4 fontes em sequência."""
+    headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://finance.yahoo.com/",
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
     }
-
-    # Fonte 1: AwesomeAPI
+    # 1. Banco Central do Brasil — PTAX
     try:
-        r = requests.get(
-            "https://economia.awesomeapi.com.br/json/last/USD-BRL",
-            timeout=6, headers={"User-Agent": "iaagro/2.0"}
-        )
-        if r.status_code == 200:
-            d = r.json()
-            bid = float(d["USDBRL"]["bid"])
-            if bid > 0:
-                return {"preco": round(bid, 4),
-                        "fonte": "AwesomeAPI (tempo real)",
-                        "horario": d["USDBRL"].get("create_date", "")}
+        from datetime import datetime as _dt2, timedelta as _td
+        for delta in [0, 1, 2]:
+            data = (_dt2.now() - _td(days=delta)).strftime("%m-%d-%Y")
+            url_bcb = (f"https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+                       f"CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao='{data}'"
+                       f"&$top=1&$format=json&$select=cotacaoVenda")
+            r = requests.get(url_bcb, timeout=8, headers=headers)
+            if r.status_code == 200:
+                val = r.json().get("value", [])
+                if val and float(val[0].get("cotacaoVenda", 0)) > 0:
+                    return {"preco": round(float(val[0]["cotacaoVenda"]), 4),
+                            "fonte": "Banco Central do Brasil PTAX (tempo real)",
+                            "horario": data}
     except Exception:
         pass
-
-    # Fonte 2: Yahoo Finance direto (USDBRL=X)
-    try:
-        for ep in [
-            "https://query2.finance.yahoo.com/v8/finance/chart/USDBRL=X?interval=1d&range=1d",
-            "https://query1.finance.yahoo.com/v8/finance/chart/USDBRL=X?interval=1d&range=1d",
-        ]:
-            r2 = requests.get(ep, headers=headers_yf, timeout=7)
-            if r2.status_code == 200:
-                meta = r2.json().get("chart",{}).get("result",[{}])[0].get("meta",{})
-                preco = meta.get("regularMarketPrice") or meta.get("previousClose")
-                if preco and float(preco) > 0:
-                    return {"preco": round(float(preco), 4),
-                            "fonte": "Yahoo Finance (tempo real)",
-                            "horario": ""}
-    except Exception:
-        pass
-
-    # Fonte 3: VatComply
-    try:
-        r3 = requests.get("https://api.vatcomply.com/rates?base=USD", timeout=5)
-        if r3.status_code == 200:
-            brl = r3.json().get("rates", {}).get("BRL", 0)
-            if brl > 0:
-                return {"preco": round(brl, 4),
-                        "fonte": "VatComply (tempo real)",
-                        "horario": ""}
-    except Exception:
-        pass
-
-    return {"preco": 5.80, "fonte": "Referência offline"}
-
-
-
-def buscar_dolar_awesomeapi():
-    """Busca cotação real do dólar — tenta 3 APIs gratuitas em sequência."""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-
-    # 1. AwesomeAPI
+    # 2. AwesomeAPI
     try:
         r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
                          timeout=6, headers=headers)
@@ -777,207 +738,166 @@ def buscar_dolar_awesomeapi():
             d = r.json()
             bid = float(d["USDBRL"]["bid"])
             if bid > 0:
-                return {"preco": round(bid, 4),
-                        "fonte": "AwesomeAPI (tempo real)",
+                return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
                         "horario": d["USDBRL"].get("create_date", "")}
     except Exception:
         pass
-
-    # 2. VatComply
+    # 3. ExchangeRate-API
     try:
-        r2 = requests.get("https://api.vatcomply.com/rates?base=USD",
-                          timeout=5, headers=headers)
-        if r2.status_code == 200:
-            brl = r2.json().get("rates", {}).get("BRL", 0)
-            if brl > 0:
-                return {"preco": round(brl, 4),
-                        "fonte": "VatComply (tempo real)", "horario": ""}
-    except Exception:
-        pass
-
-    # 3. ExchangeRate-API (gratuita sem chave)
-    try:
-        r3 = requests.get("https://open.er-api.com/v6/latest/USD",
-                          timeout=5, headers=headers)
+        r3 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5, headers=headers)
         if r3.status_code == 200:
             brl = r3.json().get("rates", {}).get("BRL", 0)
             if brl > 0:
-                return {"preco": round(brl, 4),
-                        "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
+                return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
     except Exception:
         pass
+    return {"preco": 5.80, "fonte": "Offline"}
 
-    return {"preco": 5.80, "fonte": "Offline — sem acesso às APIs"}
 
-
-def buscar_precos_scraping():
+def buscar_precos_cepea_ia():
     """
-    Busca cotações CBOT/ICE via Stooq (mais permissivo que Yahoo Finance).
-    Retorna dicionário com preços ou None se tudo falhar.
+    Usa Claude API com web_search para buscar preços CEPEA em tempo real.
+    Esta chamada funciona no Streamlit Cloud pois vai para api.anthropic.com.
     """
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-               "Accept": "text/html,application/xhtml+xml,*/*"}
-    resultado = {}
-
-    # Mapa: ticker Stooq → chave interna
-    stooq_map = {
-        "zs.f":  "soja_cbot",    # Soja CBOT
-        "zc.f":  "milho_cbot",   # Milho CBOT
-        "zw.f":  "trigo_cbot",   # Trigo CBOT
-        "kc.f":  "cafe_cbot",    # Café ICE
-        "ct.f":  "algodao_ice",  # Algodão ICE
-        "gf.f":  "boi_cme",      # Boi CME
-    }
-
-    for ticker, chave in stooq_map.items():
-        try:
-            url = f"https://stooq.com/q/l/?s={ticker}&f=sd2t2ohlcv&h&e=csv"
-            r = requests.get(url, headers=headers, timeout=8)
-            if r.status_code == 200:
-                linhas = r.text.strip().split("\n")
-                if len(linhas) >= 2:
-                    campos = linhas[1].split(",")
-                    # Formato CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
-                    if len(campos) >= 7:
-                        preco_str = campos[6].strip()  # Close
-                        if preco_str and preco_str not in ("N/D", "0", ""):
-                            preco = float(preco_str)
-                            if preco > 0:
-                                resultado[chave] = preco
-        except Exception:
-            continue
-
-    # Fallback: tentar Yahoo Finance se Stooq falhou
-    if not resultado:
-        yahoo_map = {
-            "ZS=F": "soja_cbot",
-            "ZC=F": "milho_cbot",
-            "ZW=F": "trigo_cbot",
-            "KC=F": "cafe_cbot",
-            "CT=F": "algodao_ice",
-            "GF=F": "boi_cme",
-        }
-        yheaders = {**headers,
-                    "Accept": "application/json",
-                    "Referer": "https://finance.yahoo.com/"}
-        for ticker, chave in yahoo_map.items():
-            for ep in [
-                f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d",
-                f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d",
-            ]:
-                try:
-                    r = requests.get(ep, headers=yheaders, timeout=8)
-                    if r.status_code == 200:
-                        meta  = r.json()["chart"]["result"][0]["meta"]
-                        preco = meta.get("regularMarketPrice") or meta.get("previousClose", 0)
-                        if preco and float(preco) > 0:
-                            resultado[chave] = float(preco)
-                            break
-                except Exception:
-                    continue
-
-    return resultado if resultado else None
+    try:
+        prompt = (
+            "Pesquise AGORA os precos mais recentes das commodities agricolas brasileiras "
+            "(CEPEA/ESALQ ou indicador de mercado, data de hoje). "
+            "Responda SOMENTE com JSON valido sem markdown:\n"
+            '{"soja":0.0,"milho":0.0,"trigo":0.0,"cafe":0.0,"algodao":0.0,"boi":0.0,"arroz":0.0,'
+            '"fonte":"CEPEA/ESALQ","data":"DD/MM/AAAA"}\n'
+            "Unidades: soja/milho/trigo/cafe em R$/sc 60kg (PR/SP), "
+            "algodao e boi em R$/arroba (MT/SP), arroz R$/sc 50kg (RS)."
+        )
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"Content-Type": "application/json"},
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 300,
+                "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=45
+        )
+        if resp.status_code == 200:
+            texto = "".join(b.get("text","") for b in resp.json().get("content",[]) if b.get("type")=="text")
+            inicio = texto.find("{")
+            fim    = texto.rfind("}") + 1
+            if inicio >= 0 and fim > inicio:
+                dados = json.loads(texto[inicio:fim])
+                campos = ["soja","milho","trigo","cafe","algodao","boi","arroz"]
+                if all(isinstance(dados.get(c,0),(int,float)) and dados.get(c,0) > 0 for c in campos):
+                    return dados
+    except Exception:
+        pass
+    return None
 
 
 def converter_para_reais(precos_cbot, dolar):
-    """Converte cotações internacionais para R$ usando câmbio atual."""
+    """Converte cotações CBOT/ICE para R$."""
     resultado = {}
-    dolar_val = dolar if isinstance(dolar, (int, float)) and dolar > 0 else 5.80
-
-    # Soja: CBOT em cents/bushel → R$/sc 60kg
-    # 1 bushel soja = 27.216 kg → 1 sc 60kg = 2.2046 bushels
-    # Fórmula: preco_rs = (cbot_cents / 100) * 2.2046 * dolar
-    if "soja_cbot" in precos_cbot and precos_cbot["soja_cbot"] > 0:
-        soja_rs = round((precos_cbot["soja_cbot"] / 100) * 2.2046 * dolar_val, 2)
-        resultado["soja_sc"] = {"preco": soja_rs, "unidade": "R$/sc 60kg", "praca": "CBOT→BRL",
-                                 "fonte": f"CBOT + Dólar R$ {dolar_val:.2f}"}
-
-    # Milho: CBOT em cents/bushel → R$/sc 60kg
-    # 1 bushel milho = 25.401 kg → 1 sc 60kg = 2.3621 bushels
-    if "milho_cbot" in precos_cbot and precos_cbot["milho_cbot"] > 0:
-        milho_rs = round((precos_cbot["milho_cbot"] / 100) * 2.3621 * dolar_val, 2)
-        resultado["milho_sc"] = {"preco": milho_rs, "unidade": "R$/sc 60kg", "praca": "CBOT→BRL",
-                                  "fonte": f"CBOT + Dólar R$ {dolar_val:.2f}"}
-
-    # Trigo: CBOT em cents/bushel → R$/sc 60kg
-    # 1 bushel trigo = 27.216 kg → mesmo fator que soja
-    if "trigo_cbot" in precos_cbot and precos_cbot["trigo_cbot"] > 0:
-        trigo_rs = round((precos_cbot["trigo_cbot"] / 100) * 2.2046 * dolar_val, 2)
-        resultado["trigo_sc"] = {"preco": trigo_rs, "unidade": "R$/sc 60kg", "praca": "CBOT→BRL",
-                                  "fonte": f"CBOT + Dólar R$ {dolar_val:.2f}"}
-
-    # Café: ICE em cents/lb → R$/sc 60kg
-    # 1 sc 60kg = 132.277 lbs
-    if "cafe_cbot" in precos_cbot and precos_cbot["cafe_cbot"] > 0:
-        cafe_rs = round((precos_cbot["cafe_cbot"] / 100) * 132.277 * dolar_val, 2)
-        resultado["cafe_sc"] = {"preco": cafe_rs, "unidade": "R$/sc 60kg", "praca": "ICE→BRL",
-                                 "fonte": f"ICE + Dólar R$ {dolar_val:.2f}"}
-
-    # Algodão: ICE em cents/lb → R$/arroba (15kg)
-    # 1 arroba = 15 kg = 33.069 lbs
-    if "algodao_ice" in precos_cbot and precos_cbot["algodao_ice"] > 0:
-        algodao_rs = round((precos_cbot["algodao_ice"] / 100) * 33.069 * dolar_val, 2)
-        resultado["algodao_at"] = {"preco": algodao_rs, "unidade": "R$/@", "praca": "ICE→BRL",
-                                    "fonte": f"ICE + Dólar R$ {dolar_val:.2f}"}
-
-    # Boi gordo: CME em USD/cwt (100 lbs) → R$/@ (15kg = 33.069 lbs)
-    if "boi_cme" in precos_cbot and precos_cbot["boi_cme"] > 0:
-        boi_rs = round((precos_cbot["boi_cme"] / 100) * 33.069 * dolar_val, 2)
-        resultado["boi_at"] = {"preco": boi_rs, "unidade": "R$/@", "praca": "CME→BRL",
-                                "fonte": f"CME + Dólar R$ {dolar_val:.2f}"}
-
+    dv = dolar if isinstance(dolar,(int,float)) and dolar > 0 else 5.80
+    if precos_cbot.get("soja_cbot",0)  > 0:
+        resultado["soja_sc"]    = {"preco": round((precos_cbot["soja_cbot"]/100)*2.2046*dv,2),   "unidade":"R$/sc 60kg","praca":"CBOT","fonte":f"CBOT+USD {dv:.2f}"}
+    if precos_cbot.get("milho_cbot",0) > 0:
+        resultado["milho_sc"]   = {"preco": round((precos_cbot["milho_cbot"]/100)*2.3621*dv,2),  "unidade":"R$/sc 60kg","praca":"CBOT","fonte":f"CBOT+USD {dv:.2f}"}
+    if precos_cbot.get("trigo_cbot",0) > 0:
+        resultado["trigo_sc"]   = {"preco": round((precos_cbot["trigo_cbot"]/100)*2.2046*dv,2),  "unidade":"R$/sc 60kg","praca":"CBOT","fonte":f"CBOT+USD {dv:.2f}"}
+    if precos_cbot.get("cafe_cbot",0)  > 0:
+        resultado["cafe_sc"]    = {"preco": round((precos_cbot["cafe_cbot"]/100)*132.277*dv,2),   "unidade":"R$/sc 60kg","praca":"ICE","fonte":f"ICE+USD {dv:.2f}"}
+    if precos_cbot.get("algodao_ice",0)> 0:
+        resultado["algodao_at"] = {"preco": round((precos_cbot["algodao_ice"]/100)*33.069*dv,2),  "unidade":"R$/@","praca":"ICE","fonte":f"ICE+USD {dv:.2f}"}
+    if precos_cbot.get("boi_cme",0)    > 0:
+        resultado["boi_at"]     = {"preco": round((precos_cbot["boi_cme"]/100)*33.069*dv,2),      "unidade":"R$/@","praca":"CME","fonte":f"CME+USD {dv:.2f}"}
     return resultado
+
+
+def buscar_precos_scraping():
+    """Fallback: Stooq CSV e Yahoo Finance."""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    resultado = {}
+    stooq_map = {"zs.f":"soja_cbot","zc.f":"milho_cbot","zw.f":"trigo_cbot",
+                 "kc.f":"cafe_cbot","ct.f":"algodao_ice","gf.f":"boi_cme"}
+    for tk, ch in stooq_map.items():
+        try:
+            r = requests.get(f"https://stooq.com/q/l/?s={tk}&f=sd2t2ohlcv&h&e=csv",
+                             headers=headers, timeout=8)
+            if r.status_code == 200:
+                lns = r.text.strip().split("\n")
+                if len(lns) >= 2:
+                    cs = lns[1].split(",")
+                    if len(cs) >= 7:
+                        ps = cs[6].strip()
+                        if ps and ps not in ("N/D","0",""):
+                            pv = float(ps)
+                            if pv > 0: resultado[ch] = pv
+        except Exception:
+            continue
+    if not resultado:
+        ym = {"ZS=F":"soja_cbot","ZC=F":"milho_cbot","ZW=F":"trigo_cbot",
+              "KC=F":"cafe_cbot","CT=F":"algodao_ice","GF=F":"boi_cme"}
+        yh = {**headers,"Accept":"application/json","Referer":"https://finance.yahoo.com/"}
+        for tk, ch in ym.items():
+            for ep in [f"https://query2.finance.yahoo.com/v8/finance/chart/{tk}?interval=1d&range=1d",
+                       f"https://query1.finance.yahoo.com/v8/finance/chart/{tk}?interval=1d&range=1d"]:
+                try:
+                    r = requests.get(ep, headers=yh, timeout=8)
+                    if r.status_code == 200:
+                        meta = r.json()["chart"]["result"][0]["meta"]
+                        pv   = meta.get("regularMarketPrice") or meta.get("previousClose",0)
+                        if pv and float(pv) > 0:
+                            resultado[ch] = float(pv)
+                            break
+                except Exception:
+                    continue
+    return resultado if resultado else None
 
 
 def buscar_precos_commodities():
     """
-    Busca preços reais em tempo real:
-    1. Dólar via AwesomeAPI (gratuita)
-    2. Commodities via BrapiDev/Yahoo Finance (gratuita, sem chave)
-    3. Conversão CBOT/ICE → R$ com câmbio real
-    4. Fallback: referências de mai/2026
+    Busca preços em tempo real:
+    1. Dólar via BCB PTAX / AwesomeAPI / ExchangeRate-API
+    2. Commodities via IA + web_search CEPEA (principal — funciona no Streamlit Cloud)
+    3. Fallback: CBOT/ICE via Stooq / Yahoo Finance
+    4. Fallback final: referências offline
     """
     resultado = {}
-
-    # 1. Dólar em tempo real
     dolar_data = buscar_dolar_awesomeapi()
     resultado["dolar"] = dolar_data
-    dolar_val = dolar_data.get("preco", 5.80)
+    dolar_val  = dolar_data.get("preco", 5.80)
 
-    # 2. Commodities internacionais via BrapiDev
-    precos_cbot = buscar_precos_scraping() or {}
+    # Prioridade 1: IA com CEPEA
+    dados_cepea = buscar_precos_cepea_ia()
+    if dados_cepea:
+        fc = f"{dados_cepea.get('fonte','CEPEA')} — {dados_cepea.get('data','')}"
+        resultado["soja_sc"]    = {"preco":float(dados_cepea["soja"]),    "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
+        resultado["milho_sc"]   = {"preco":float(dados_cepea["milho"]),   "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
+        resultado["trigo_sc"]   = {"preco":float(dados_cepea["trigo"]),   "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
+        resultado["cafe_sc"]    = {"preco":float(dados_cepea["cafe"]),    "unidade":"R$/sc 60kg","praca":"SP","fonte":fc}
+        resultado["algodao_at"] = {"preco":float(dados_cepea["algodao"]), "unidade":"R$/@",      "praca":"MT","fonte":fc}
+        resultado["boi_at"]     = {"preco":float(dados_cepea["boi"]),     "unidade":"R$/@",      "praca":"SP","fonte":fc}
+        resultado["arroz_sc"]   = {"preco":float(dados_cepea["arroz"]),   "unidade":"R$/sc 50kg","praca":"RS","fonte":fc}
+    else:
+        # Prioridade 2: CBOT convertido
+        precos_cbot = buscar_precos_scraping() or {}
+        resultado.update(converter_para_reais(precos_cbot, dolar_val))
 
-    # 3. Converter para R$
-    convertidos = converter_para_reais(precos_cbot, dolar_val)
-    resultado.update(convertidos)
-
-    # 4. Fallback para commodities que não vieram da API
     hoje = datetime.now().strftime("%d/%m/%Y")
-    fallbacks = {
-        "soja_sc":    {"preco": 142.0, "unidade": "R$/sc 60kg", "praca": "PR",
-                       "fonte": f"Referência offline {hoje}"},
-        "milho_sc":   {"preco":  74.0, "unidade": "R$/sc 60kg", "praca": "PR",
-                       "fonte": f"Referência offline {hoje}"},
-        "trigo_sc":   {"preco": 100.0, "unidade": "R$/sc 60kg", "praca": "PR",
-                       "fonte": f"Referência offline {hoje}"},
-        "cafe_sc":    {"preco": 2250.0,"unidade": "R$/sc 60kg", "praca": "SP",
-                       "fonte": f"Referência offline {hoje}"},
-        "algodao_at": {"preco":  120.0,"unidade": "R$/@",       "praca": "MT",
-                       "fonte": f"Referência offline {hoje}"},
-        "boi_at":     {"preco":  320.0,"unidade": "R$/@",       "praca": "SP",
-                       "fonte": f"Referência offline {hoje}"},
-        "arroz_sc":   {"preco":   74.0,"unidade": "R$/sc 50kg", "praca": "RS",
-                       "fonte": f"Referência offline {hoje}"},
-    }
-    for chave, fallback in fallbacks.items():
-        resultado.setdefault(chave, fallback)
+    for chave, fb in {
+        "soja_sc":    {"preco":142.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "milho_sc":   {"preco": 74.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "trigo_sc":   {"preco":100.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "cafe_sc":    {"preco":2250.0,"unidade":"R$/sc 60kg","praca":"SP","fonte":f"Referência {hoje}"},
+        "algodao_at": {"preco":120.0, "unidade":"R$/@",      "praca":"MT","fonte":f"Referência {hoje}"},
+        "boi_at":     {"preco":320.0, "unidade":"R$/@",      "praca":"SP","fonte":f"Referência {hoje}"},
+        "arroz_sc":   {"preco": 74.0, "unidade":"R$/sc 50kg","praca":"RS","fonte":f"Referência {hoje}"},
+    }.items():
+        resultado.setdefault(chave, fb)
 
     resultado["_atualizado_em"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     return resultado
 
-# ─────────────────────────────────────────────
-# OCR DE LAUDO DE SOLO — PDF e Imagem
 # ─────────────────────────────────────────────
 def extrair_texto_pdf(arquivo_pdf):
     """Extrai texto de PDF de laudo de solo."""
