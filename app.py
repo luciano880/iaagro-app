@@ -4918,17 +4918,27 @@ elif menu == "🌤️ Clima & Alertas":
                 ), secondary_y=True)
                 fig_clima.update_layout(
                     title="Temperatura (°C) x Chuva (mm) x Probabilidade (%)",
-                    paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                    font_color="#f1f5f9", height=350,
+                    paper_bgcolor="#0f3460",
+                    plot_bgcolor="#0d2137",
+                    font_color="#f1f5f9",
+                    height=350,
                     legend=dict(bgcolor="#0f3460", bordercolor="#22c55e33"),
-                    xaxis=dict(gridcolor="#1e3a5f"),
                 )
-                fig_clima.update_yaxes(title_text="Temperatura °C", secondary_y=False,
-                                       gridcolor="#1e3a5f")
-                fig_clima.update_yaxes(title_text="Chuva mm / Prob %", secondary_y=True)
+                # update_xaxes e update_yaxes são o jeito correto para subplots
+                fig_clima.update_xaxes(gridcolor="#1e3a5f")
+                fig_clima.update_yaxes(
+                    title_text="Temperatura °C",
+                    secondary_y=False,
+                    gridcolor="#1e3a5f"
+                )
+                fig_clima.update_yaxes(
+                    title_text="Chuva mm / Prob %",
+                    secondary_y=True
+                )
                 st.plotly_chart(fig_clima, use_container_width=True)
-            except ImportError:
-                st.line_chart(df_prev.set_index("Data")[["Máx °C","Mín °C","Chuva mm"]])
+            except Exception:
+                # Fallback sem plotly
+                st.line_chart(df_prev.set_index("Data")[["Máx °C", "Mín °C", "Chuva mm"]])
 
             # Melhores dias para aplicação
             dias_bons = [datas[i] for i in range(n_dias)
