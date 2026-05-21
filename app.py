@@ -482,12 +482,20 @@ def error_box(msg):
 
 # ─────────────────────────────────────────────
 # ARQUIVOS DE PERSISTÊNCIA
+# Usa pasta /tmp no Streamlit Cloud (persiste entre reruns da sessão)
+# Para persistência total entre deploys, usar backup manual via Configurações
 # ─────────────────────────────────────────────
-ARQUIVO_USUARIOS = "usuarios.json"
-ARQUIVO_ESTOQUE  = "estoque.json"
-ARQUIVO_AREAS    = "areas.json"
-ARQUIVO_DADOS_IAAGRO = "dados_iaagro.json"
-DB_FILE              = "iaagro.db"
+import pathlib
+
+# Detecta se está no Streamlit Cloud ou local
+_BASE_DIR = pathlib.Path("/tmp/iaagro_data")
+_BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+ARQUIVO_USUARIOS     = str(_BASE_DIR / "usuarios.json")
+ARQUIVO_ESTOQUE      = str(_BASE_DIR / "estoque.json")
+ARQUIVO_AREAS        = str(_BASE_DIR / "areas.json")
+ARQUIVO_DADOS_IAAGRO = str(_BASE_DIR / "dados_iaagro.json")
+DB_FILE              = str(_BASE_DIR / "iaagro.db")
 
 # ─────────────────────────────────────────────
 # CORREÇÃO 9: senhas com hash (hashlib)
@@ -629,6 +637,50 @@ def enviar_email_alerta(destinatario, assunto, corpo):
         return True
     except Exception:
         return False
+
+
+def enviar_email_recuperacao(email_destino, usuario, token):
+    """Envia email com token de 6 dígitos para recuperação de senha."""
+    try:
+        cfg = st.session_state.get("email_config", {})
+        if not cfg.get("ativo") or not cfg.get("remetente"):
+            return False, "Email não configurado. Vá em ⚙️ Configurações → Email SMTP."
+        corpo = f"""
+        <div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;
+        background:#0f2744;color:#fff;border-radius:14px;padding:30px;">
+        <h2 style="color:#22c55e;text-align:center;">🌿 IAAgro Pro</h2>
+        <h3 style="text-align:center;color:#fff;">Recuperação de Senha</h3>
+        <p>Olá, <b>{usuario}</b>!</p>
+        <p>Recebemos uma solicitação para redefinir sua senha.</p>
+        <p>Use o código abaixo para criar uma nova senha:</p>
+        <div style="background:#1e3a5f;border-radius:10px;padding:20px;text-align:center;
+        margin:20px 0;">
+          <span style="font-size:36px;font-weight:900;letter-spacing:10px;color:#22c55e;">
+          {token}
+          </span>
+        </div>
+        <p style="color:#93c5fd;font-size:13px;">
+        ⏱️ Este código expira em <b>15 minutos</b>.<br>
+        Se não foi você, ignore este email.
+        </p>
+        <hr style="border-color:#1e3a5f;margin:20px 0;">
+        <p style="color:#6b7280;font-size:11px;text-align:center;">
+        IAAgro Pro — Sistema de Gestão Agrícola Inteligente
+        </p>
+        </div>
+        """
+        msg = MIMEMultipart()
+        msg["From"]    = cfg["remetente"]
+        msg["To"]      = email_destino
+        msg["Subject"] = "🌿 IAAgro Pro — Código de recuperação de senha"
+        msg.attach(MIMEText(corpo, "html"))
+        with smtplib.SMTP(cfg.get("smtp","smtp.gmail.com"), int(cfg.get("porta",587))) as s:
+            s.starttls()
+            s.login(cfg["remetente"], cfg.get("senha",""))
+            s.send_message(msg)
+        return True, "ok"
+    except Exception as e:
+        return False, str(e)
 
 def checar_alertas_estoque():
     cfg = st.session_state.get("email_config", {})
@@ -1109,10 +1161,133 @@ def tela_login():
     with aba_recuperar:
         st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
         border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 14px 0;font-size:13px;">
-        🔐 Informe o usuário e o e-mail cadastrado para redefinir sua senha.
+        🔐 Informe seu usuário e e-mail cadastrado. Enviaremos um código de 6 dígitos para redefinir sua senha.
         </div>''', unsafe_allow_html=True)
 
-        # Mostrar mensagem de sucesso persistente se senha foi redefinida
+        # Session state do fluxo de recuperação
+        if "rec_etapa"      not in st.session_state: st.session_state.rec_etapa      = 1
+        if "rec_token"      not in st.session_state: st.session_state.rec_token      = ""
+        if "rec_token_exp"  not in st.session_state: st.session_state.rec_token_exp  = None
+        if "rec_usuario_ok" not in st.session_state: st.session_state.rec_usuario_ok = ""
+
+        # ── ETAPA 1: Solicitar código ──────────────────────────────────
+        if st.session_state.rec_etapa == 1:
+            st.markdown("#### 📧 Etapa 1 — Solicitar código por e-mail")
+            rec_user  = st.text_input("👤 Usuário cadastrado", key="rec_u1")
+            rec_email = st.text_input("📧 E-mail cadastrado",  key="rec_e1",
+                                       placeholder="email@exemplo.com")
+
+            cfg_email = st.session_state.get("email_config", {})
+            if not cfg_email.get("ativo") or not cfg_email.get("remetente"):
+                st.markdown('''<div style="background:#78350f;color:#fff;padding:10px 14px;
+                border-radius:8px;border-left:4px solid #f59e0b;font-size:12px;font-weight:600;">
+                ⚠️ Email SMTP não configurado. Configure em <b>⚙️ Configurações → Email SMTP</b>
+                para usar a recuperação por email.
+                </div>''', unsafe_allow_html=True)
+
+            if st.button("📨 Enviar código por e-mail", key="btn_enviar_token",
+                         use_container_width=True):
+                if not rec_user.strip():
+                    st.error("❌ Digite seu usuário.")
+                elif rec_user not in st.session_state.usuarios:
+                    st.error("❌ Usuário ou e-mail incorretos.")
+                elif not rec_email.strip() or "@" not in rec_email:
+                    st.error("❌ Digite um e-mail válido.")
+                elif st.session_state.usuarios[rec_user].get("email","").strip().lower() \
+                        != rec_email.strip().lower():
+                    st.error("❌ Usuário ou e-mail incorretos.")
+                else:
+                    # Gerar token de 6 dígitos
+                    import random, datetime as _dt_mod
+                    token = str(random.randint(100000, 999999))
+                    exp   = _dt_mod.datetime.now() + _dt_mod.timedelta(minutes=15)
+                    ok, msg_err = enviar_email_recuperacao(rec_email.strip(), rec_user, token)
+                    if ok:
+                        st.session_state.rec_token      = token
+                        st.session_state.rec_token_exp  = exp
+                        st.session_state.rec_usuario_ok = rec_user
+                        st.session_state.rec_etapa      = 2
+                        st.rerun()
+                    else:
+                        if "não configurado" in msg_err.lower() or "não config" in msg_err.lower():
+                            st.error(f"❌ {msg_err}")
+                        else:
+                            st.error(f"❌ Falha ao enviar email: {msg_err}")
+
+        # ── ETAPA 2: Inserir código ────────────────────────────────────
+        elif st.session_state.rec_etapa == 2:
+            st.markdown("#### 🔢 Etapa 2 — Digite o código recebido")
+            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
+            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
+            ✅ Código enviado para o e-mail cadastrado do usuário <b>{st.session_state.rec_usuario_ok}</b>.<br>
+            ⏱️ Válido por 15 minutos.
+            </div>''', unsafe_allow_html=True)
+
+            token_digitado = st.text_input("🔢 Código de 6 dígitos",
+                                            placeholder="000000", key="rec_token_input",
+                                            max_chars=6)
+
+            col_et2a, col_et2b = st.columns(2)
+            with col_et2a:
+                if st.button("✅ Validar código", key="btn_validar_token",
+                             use_container_width=True):
+                    import datetime as _dt_mod
+                    agora = _dt_mod.datetime.now()
+                    if st.session_state.rec_token_exp and agora > st.session_state.rec_token_exp:
+                        st.error("❌ Código expirado. Solicite um novo.")
+                        st.session_state.rec_etapa = 1
+                        st.rerun()
+                    elif token_digitado.strip() == st.session_state.rec_token:
+                        st.session_state.rec_etapa = 3
+                        st.rerun()
+                    else:
+                        st.error("❌ Código incorreto. Verifique o email e tente novamente.")
+            with col_et2b:
+                if st.button("🔄 Reenviar código", key="btn_reenviar_token",
+                             use_container_width=True):
+                    st.session_state.rec_etapa = 1
+                    st.rerun()
+
+        # ── ETAPA 3: Nova senha ────────────────────────────────────────
+        elif st.session_state.rec_etapa == 3:
+            st.markdown("#### 🔑 Etapa 3 — Criar nova senha")
+            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
+            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
+            ✅ Código validado! Crie uma nova senha para <b>{st.session_state.rec_usuario_ok}</b>.
+            </div>''', unsafe_allow_html=True)
+
+            nova_senha1 = st.text_input("🔑 Nova senha (mín. 6 caracteres)",
+                                         type="password", key="rec_ns1")
+            nova_senha2 = st.text_input("🔑 Confirmar nova senha",
+                                         type="password", key="rec_ns2")
+
+            # Feedback em tempo real
+            if nova_senha1 and len(nova_senha1) < 6:
+                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Mínimo 6 caracteres.</div>', unsafe_allow_html=True)
+            if nova_senha1 and nova_senha2 and nova_senha1 != nova_senha2:
+                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Senhas não coincidem.</div>', unsafe_allow_html=True)
+            if nova_senha1 and nova_senha2 and nova_senha1 == nova_senha2 and len(nova_senha1) >= 6:
+                st.markdown('<div style="color:#86efac;font-size:12px;font-weight:600;">✅ Senhas coincidem.</div>', unsafe_allow_html=True)
+
+            if st.button("🔐 Salvar nova senha", key="btn_salvar_nova_senha",
+                         use_container_width=True):
+                if len(nova_senha1) < 6:
+                    st.error("❌ Senha precisa ter pelo menos 6 caracteres.")
+                elif nova_senha1 != nova_senha2:
+                    st.error("❌ As senhas não coincidem.")
+                else:
+                    usuario_rec = st.session_state.rec_usuario_ok
+                    st.session_state.usuarios[usuario_rec]["senha"] = hash_senha(nova_senha1)
+                    salvar_usuarios(st.session_state.usuarios)
+                    # Limpar fluxo
+                    st.session_state.rec_etapa      = 1
+                    st.session_state.rec_token      = ""
+                    st.session_state.rec_token_exp  = None
+                    st.session_state.rec_usuario_ok = ""
+                    st.session_state.senha_redefinida = True
+                    st.rerun()
+
+        # Mensagem de sucesso persistente
         if st.session_state.get("senha_redefinida"):
             st.markdown('''<div style="background:#14532d;color:#fff;padding:14px 18px;
             border-radius:10px;border-left:5px solid #22c55e;font-weight:700;font-size:15px;margin:8px 0;">
@@ -1121,41 +1296,6 @@ def tela_login():
             if st.button("🔓 Ir para Login", key="btn_ir_login", use_container_width=True):
                 st.session_state.senha_redefinida = False
                 st.rerun()
-        else:
-            usuario_recuperar        = st.text_input("👤 Usuário cadastrado",   key="rec_usuario")
-            email_recuperar          = st.text_input("📧 E-mail de recuperação", key="rec_email")
-            nova_senha_rec           = st.text_input("🔑 Nova senha (mín. 6 caracteres)",
-                                                      type="password", key="rec_nova_senha")
-            confirmar_nova_senha_rec = st.text_input("🔑 Confirmar nova senha",
-                                                      type="password", key="rec_confirmar_senha")
-
-            # Validações em tempo real
-            if nova_senha_rec and len(nova_senha_rec) < 6:
-                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Senha precisa ter pelo menos 6 caracteres.</div>', unsafe_allow_html=True)
-            if nova_senha_rec and confirmar_nova_senha_rec and nova_senha_rec != confirmar_nova_senha_rec:
-                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ As senhas não coincidem.</div>', unsafe_allow_html=True)
-            if nova_senha_rec and confirmar_nova_senha_rec and nova_senha_rec == confirmar_nova_senha_rec and len(nova_senha_rec) >= 6:
-                st.markdown('<div style="color:#86efac;font-size:12px;font-weight:600;">✅ Senhas coincidem.</div>', unsafe_allow_html=True)
-
-            if st.button("🔄 Redefinir Senha", key="btn_redefinir_senha", use_container_width=True):
-                if not usuario_recuperar.strip():
-                    st.error("❌ Digite o usuário cadastrado.")
-                elif usuario_recuperar not in st.session_state.usuarios:
-                    st.error("❌ Usuário ou e-mail incorretos. Verifique os dados.")
-                elif not email_recuperar.strip() or "@" not in email_recuperar:
-                    st.error("❌ Digite um e-mail válido.")
-                elif st.session_state.usuarios[usuario_recuperar].get("email", "").strip().lower() \
-                        != email_recuperar.strip().lower():
-                    st.error("❌ Usuário ou e-mail incorretos. Verifique os dados.")
-                elif len(nova_senha_rec) < 6:
-                    st.error("❌ A nova senha precisa ter pelo menos 6 caracteres.")
-                elif nova_senha_rec != confirmar_nova_senha_rec:
-                    st.error("❌ As senhas não coincidem.")
-                else:
-                    st.session_state.usuarios[usuario_recuperar]["senha"] = hash_senha(nova_senha_rec)
-                    salvar_usuarios(st.session_state.usuarios)
-                    st.session_state.senha_redefinida = True
-                    st.rerun()
 
 
 if not st.session_state.logado:
@@ -7229,10 +7369,22 @@ elif menu == "⚙️ Configurações":
 
     # ── TAB 1: BACKUP & RESTORE ──
     with tab1:
-        st.subheader("💾 Backup de Dados")
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-        ℹ️ O backup salva todos os dados: áreas, estoque, aplicações, histórico e pluviômetro.
+        st.subheader("💾 Backup & Restauração de Dados")
+
+        st.markdown('''<div style="background:#7f1d1d;color:#fff;padding:14px 18px;
+        border-radius:10px;border-left:5px solid #ef4444;font-weight:700;margin:8px 0 16px 0;font-size:14px;">
+        ⚠️ <b>IMPORTANTE — Antes de atualizar o app:</b><br>
+        O Streamlit Cloud não persiste arquivos entre deploys. Sempre faça backup
+        antes de enviar uma atualização via Git. Após atualizar, restaure o backup para
+        recuperar seus dados (usuários, estoque, áreas, histórico).
+        </div>''', unsafe_allow_html=True)
+
+        # Auto-backup ao abrir a aba
+        st.markdown("#### 📥 Fazer Backup Agora")
+        st.markdown('''<div style="background:#0f3460;color:#93c5fd;padding:10px 14px;
+        border-radius:8px;font-size:12px;font-weight:600;margin:4px 0 12px 0;">
+        💡 Salve este arquivo no seu computador. Ele contém todos os seus dados:
+        usuários, estoque, áreas cadastradas, histórico, aplicações e configurações.
         </div>''', unsafe_allow_html=True)
 
         backup_data = gerar_backup()
@@ -7245,10 +7397,10 @@ elif menu == "⚙️ Configurações":
         )
 
         st.divider()
-        st.subheader("📂 Restaurar Backup")
-        st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;margin:8px 0;">
-        ⚠️ A restauração substituirá TODOS os dados atuais pelo backup selecionado.
+        st.markdown("#### 📂 Restaurar Backup")
+        st.markdown('''<div style="background:#78350f;color:#fff;padding:11px 14px;
+        border-radius:8px;border-left:4px solid #f59e0b;font-weight:600;margin:4px 0 12px 0;font-size:13px;">
+        ⚠️ A restauração substitui TODOS os dados atuais. Use após atualizar o app.
         </div>''', unsafe_allow_html=True)
 
         st.markdown("""
@@ -7293,6 +7445,23 @@ elif menu == "⚙️ Configurações":
                     st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:13px 18px;
                     border-radius:10px;border-left:5px solid #ef4444;font-weight:600;">
                     ❌ {msg}</div>''', unsafe_allow_html=True)
+
+        # Passo a passo
+        st.divider()
+        st.markdown("#### 📋 Passo a passo para atualizar sem perder dados")
+        passos_bk = [
+            ("1️⃣", "Acesse ⚙️ Configurações → Backup & Restauração"),
+            ("2️⃣", "Clique em **📥 Baixar Backup Completo** e salve no computador"),
+            ("3️⃣", "Atualize o app normalmente via Git (git add → commit → push)"),
+            ("4️⃣", "Aguarde o Streamlit Cloud reiniciar (1-2 minutos)"),
+            ("5️⃣", "Acesse o app → ⚙️ Configurações → Backup & Restauração"),
+            ("6️⃣", "Faça upload do arquivo backup e clique em **🔄 Restaurar**"),
+            ("7️⃣", "Todos os dados estarão de volta ✅"),
+        ]
+        for num, desc in passos_bk:
+            st.markdown(f'<div style="background:#0f3460;color:#f1f5f9;padding:8px 14px;'
+                        f'border-radius:8px;margin:4px 0;font-size:13px;">'
+                        f'<b>{num}</b> {desc}</div>', unsafe_allow_html=True)
 
     # ── TAB 2: EMAIL & ALERTAS ──
     with tab2:
