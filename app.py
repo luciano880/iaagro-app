@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
+import random
 import json
 import os
 import sqlite3
@@ -594,6 +595,7 @@ def gerar_backup():
         "carencia_registros": st.session_state.get("carencia_registros", []),
         "dre_registros":      st.session_state.get("dre_registros", []),
         "calendario_eventos": st.session_state.get("calendario_eventos", []),
+        "email_config":       st.session_state.get("email_config", {}),
         "backup_data": str(datetime.now())
     }
     return json.dumps(dados, ensure_ascii=False, indent=2).encode("utf-8")
@@ -611,9 +613,13 @@ def restaurar_backup(arquivo):
         st.session_state.carencia_registros  = dados.get("carencia_registros", [])
         st.session_state.dre_registros       = dados.get("dre_registros", [])
         st.session_state.calendario_eventos  = dados.get("calendario_eventos", [])
+        st.session_state.harvest_historico   = dados.get("harvest_historico", [])
+        st.session_state.receituarios        = dados.get("receituarios", [])
+        if dados.get("email_config"):
+            st.session_state.email_config    = dados["email_config"]
         salvar_dados_iaagro()
         salvar_usuarios(st.session_state.usuarios)
-        return True, f"Backup de {dados.get('backup_data','?')} restaurado!"
+        return True, f"Backup de {dados.get('backup_data','?')} restaurado com sucesso!"
     except Exception as e:
         return False, f"Erro ao restaurar: {e}"
 
@@ -1198,9 +1204,8 @@ def tela_login():
                     st.error("❌ Usuário ou e-mail incorretos.")
                 else:
                     # Gerar token de 6 dígitos
-                    import random, datetime as _dt_mod
                     token = str(random.randint(100000, 999999))
-                    exp   = _dt_mod.datetime.now() + _dt_mod.timedelta(minutes=15)
+                    exp   = datetime.now() + __import__('datetime').timedelta(minutes=15)
                     ok, msg_err = enviar_email_recuperacao(rec_email.strip(), rec_user, token)
                     if ok:
                         st.session_state.rec_token      = token
@@ -1231,8 +1236,7 @@ def tela_login():
             with col_et2a:
                 if st.button("✅ Validar código", key="btn_validar_token",
                              use_container_width=True):
-                    import datetime as _dt_mod
-                    agora = _dt_mod.datetime.now()
+                    agora = datetime.now()
                     if st.session_state.rec_token_exp and agora > st.session_state.rec_token_exp:
                         st.error("❌ Código expirado. Solicite um novo.")
                         st.session_state.rec_etapa = 1
