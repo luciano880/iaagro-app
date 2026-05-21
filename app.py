@@ -764,46 +764,118 @@ def buscar_dolar_awesomeapi():
 
 
 
+def buscar_dolar_awesomeapi():
+    """Busca cotação real do dólar — tenta 3 APIs gratuitas em sequência."""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+
+    # 1. AwesomeAPI
+    try:
+        r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
+                         timeout=6, headers=headers)
+        if r.status_code == 200:
+            d = r.json()
+            bid = float(d["USDBRL"]["bid"])
+            if bid > 0:
+                return {"preco": round(bid, 4),
+                        "fonte": "AwesomeAPI (tempo real)",
+                        "horario": d["USDBRL"].get("create_date", "")}
+    except Exception:
+        pass
+
+    # 2. VatComply
+    try:
+        r2 = requests.get("https://api.vatcomply.com/rates?base=USD",
+                          timeout=5, headers=headers)
+        if r2.status_code == 200:
+            brl = r2.json().get("rates", {}).get("BRL", 0)
+            if brl > 0:
+                return {"preco": round(brl, 4),
+                        "fonte": "VatComply (tempo real)", "horario": ""}
+    except Exception:
+        pass
+
+    # 3. ExchangeRate-API (gratuita sem chave)
+    try:
+        r3 = requests.get("https://open.er-api.com/v6/latest/USD",
+                          timeout=5, headers=headers)
+        if r3.status_code == 200:
+            brl = r3.json().get("rates", {}).get("BRL", 0)
+            if brl > 0:
+                return {"preco": round(brl, 4),
+                        "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
+    except Exception:
+        pass
+
+    return {"preco": 5.80, "fonte": "Offline — sem acesso às APIs"}
+
+
 def buscar_precos_scraping():
     """
-    Busca cotações reais via Yahoo Finance API v8 — sem autenticação, sem intermediário.
-    Endpoint público: query2.finance.yahoo.com/v8/finance/chart/{ticker}
+    Busca cotações CBOT/ICE via Stooq (mais permissivo que Yahoo Finance).
+    Retorna dicionário com preços ou None se tudo falhar.
     """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-        "Referer": "https://finance.yahoo.com/",
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+               "Accept": "text/html,application/xhtml+xml,*/*"}
     resultado = {}
 
-    commodities_map = {
-        "ZS=F": "soja_cbot",    # Soja CBOT (cents/bushel)
-        "ZC=F": "milho_cbot",   # Milho CBOT (cents/bushel)
-        "ZW=F": "trigo_cbot",   # Trigo CBOT (cents/bushel)
-        "KC=F": "cafe_cbot",    # Café Arábica ICE (cents/lb)
-        "CT=F": "algodao_ice",  # Algodão ICE (cents/lb)
-        "GF=F": "boi_cme",      # Feeder Cattle CME (USD/cwt)
+    # Mapa: ticker Stooq → chave interna
+    stooq_map = {
+        "zs.f":  "soja_cbot",    # Soja CBOT
+        "zc.f":  "milho_cbot",   # Milho CBOT
+        "zw.f":  "trigo_cbot",   # Trigo CBOT
+        "kc.f":  "cafe_cbot",    # Café ICE
+        "ct.f":  "algodao_ice",  # Algodão ICE
+        "gf.f":  "boi_cme",      # Boi CME
     }
 
-    for ticker, chave in commodities_map.items():
-        for endpoint in [
-            f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d",
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d",
-        ]:
-            try:
-                r = requests.get(endpoint, headers=headers, timeout=8)
-                if r.status_code == 200:
-                    d = r.json()
-                    meta = d.get("chart", {}).get("result", [{}])[0].get("meta", {})
-                    preco = meta.get("regularMarketPrice") or meta.get("previousClose")
-                    if preco and float(preco) > 0:
-                        resultado[chave] = float(preco)
-                        break  # Sucesso — não tentar o outro endpoint
-            except Exception:
-                continue
+    for ticker, chave in stooq_map.items():
+        try:
+            url = f"https://stooq.com/q/l/?s={ticker}&f=sd2t2ohlcv&h&e=csv"
+            r = requests.get(url, headers=headers, timeout=8)
+            if r.status_code == 200:
+                linhas = r.text.strip().split("\n")
+                if len(linhas) >= 2:
+                    campos = linhas[1].split(",")
+                    # Formato CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
+                    if len(campos) >= 7:
+                        preco_str = campos[6].strip()  # Close
+                        if preco_str and preco_str not in ("N/D", "0", ""):
+                            preco = float(preco_str)
+                            if preco > 0:
+                                resultado[chave] = preco
+        except Exception:
+            continue
+
+    # Fallback: tentar Yahoo Finance se Stooq falhou
+    if not resultado:
+        yahoo_map = {
+            "ZS=F": "soja_cbot",
+            "ZC=F": "milho_cbot",
+            "ZW=F": "trigo_cbot",
+            "KC=F": "cafe_cbot",
+            "CT=F": "algodao_ice",
+            "GF=F": "boi_cme",
+        }
+        yheaders = {**headers,
+                    "Accept": "application/json",
+                    "Referer": "https://finance.yahoo.com/"}
+        for ticker, chave in yahoo_map.items():
+            for ep in [
+                f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d",
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d",
+            ]:
+                try:
+                    r = requests.get(ep, headers=yheaders, timeout=8)
+                    if r.status_code == 200:
+                        meta  = r.json()["chart"]["result"][0]["meta"]
+                        preco = meta.get("regularMarketPrice") or meta.get("previousClose", 0)
+                        if preco and float(preco) > 0:
+                            resultado[chave] = float(preco)
+                            break
+                except Exception:
+                    continue
 
     return resultado if resultado else None
 
@@ -1120,46 +1192,50 @@ def tela_login():
         🔐 Informe o usuário e o e-mail cadastrado para redefinir sua senha.
         </div>''', unsafe_allow_html=True)
 
-        usuario_recuperar        = st.text_input("👤 Usuário cadastrado",   key="rec_usuario")
-        email_recuperar          = st.text_input("📧 E-mail de recuperação", key="rec_email")
-        nova_senha_rec           = st.text_input("🔑 Nova senha (mín. 6 caracteres)",
-                                                  type="password", key="rec_nova_senha")
-        confirmar_nova_senha_rec = st.text_input("🔑 Confirmar nova senha",
-                                                  type="password", key="rec_confirmar_senha")
+        # Mostrar mensagem de sucesso persistente se senha foi redefinida
+        if st.session_state.get("senha_redefinida"):
+            st.markdown('''<div style="background:#14532d;color:#fff;padding:14px 18px;
+            border-radius:10px;border-left:5px solid #22c55e;font-weight:700;font-size:15px;margin:8px 0;">
+            ✅ Senha redefinida com sucesso! Vá para a aba <b>Entrar</b> e faça login com a nova senha.
+            </div>''', unsafe_allow_html=True)
+            if st.button("🔓 Ir para Login", key="btn_ir_login", use_container_width=True):
+                st.session_state.senha_redefinida = False
+                st.rerun()
+        else:
+            usuario_recuperar        = st.text_input("👤 Usuário cadastrado",   key="rec_usuario")
+            email_recuperar          = st.text_input("📧 E-mail de recuperação", key="rec_email")
+            nova_senha_rec           = st.text_input("🔑 Nova senha (mín. 6 caracteres)",
+                                                      type="password", key="rec_nova_senha")
+            confirmar_nova_senha_rec = st.text_input("🔑 Confirmar nova senha",
+                                                      type="password", key="rec_confirmar_senha")
 
-        # Validações em tempo real
-        if nova_senha_rec and len(nova_senha_rec) < 6:
-            st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Senha precisa ter pelo menos 6 caracteres.</div>', unsafe_allow_html=True)
-        if nova_senha_rec and confirmar_nova_senha_rec and nova_senha_rec != confirmar_nova_senha_rec:
-            st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ As senhas não coincidem.</div>', unsafe_allow_html=True)
-        if nova_senha_rec and confirmar_nova_senha_rec and nova_senha_rec == confirmar_nova_senha_rec and len(nova_senha_rec) >= 6:
-            st.markdown('<div style="color:#86efac;font-size:12px;font-weight:600;">✅ Senhas coincidem.</div>', unsafe_allow_html=True)
+            # Validações em tempo real
+            if nova_senha_rec and len(nova_senha_rec) < 6:
+                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Senha precisa ter pelo menos 6 caracteres.</div>', unsafe_allow_html=True)
+            if nova_senha_rec and confirmar_nova_senha_rec and nova_senha_rec != confirmar_nova_senha_rec:
+                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ As senhas não coincidem.</div>', unsafe_allow_html=True)
+            if nova_senha_rec and confirmar_nova_senha_rec and nova_senha_rec == confirmar_nova_senha_rec and len(nova_senha_rec) >= 6:
+                st.markdown('<div style="color:#86efac;font-size:12px;font-weight:600;">✅ Senhas coincidem.</div>', unsafe_allow_html=True)
 
-        if st.button("🔄 Redefinir Senha", key="btn_redefinir_senha", use_container_width=True):
-            # Validações
-            if not usuario_recuperar.strip():
-                st.error("❌ Digite o usuário cadastrado.")
-            elif usuario_recuperar not in st.session_state.usuarios:
-                # Mensagem genérica por segurança (não revela se usuário existe)
-                st.error("❌ Usuário ou e-mail incorretos. Verifique os dados.")
-            elif not email_recuperar.strip() or "@" not in email_recuperar:
-                st.error("❌ Digite um e-mail válido.")
-            elif st.session_state.usuarios[usuario_recuperar].get("email", "").strip().lower() \
-                    != email_recuperar.strip().lower():
-                # Mesma mensagem genérica — não revela qual está errado
-                st.error("❌ Usuário ou e-mail incorretos. Verifique os dados.")
-            elif len(nova_senha_rec) < 6:
-                st.error("❌ A nova senha precisa ter pelo menos 6 caracteres.")
-            elif nova_senha_rec != confirmar_nova_senha_rec:
-                st.error("❌ As senhas não coincidem.")
-            else:
-                # Tudo OK — redefinir senha
-                st.session_state.usuarios[usuario_recuperar]["senha"] = hash_senha(nova_senha_rec)
-                salvar_usuarios(st.session_state.usuarios)
-                st.markdown('''<div style="background:#14532d;color:#fff;padding:14px 18px;
-                border-radius:10px;border-left:5px solid #22c55e;font-weight:700;font-size:15px;margin:8px 0;">
-                ✅ Senha redefinida com sucesso! Vá para a aba <b>Entrar</b> e faça login com a nova senha.
-                </div>''', unsafe_allow_html=True)
+            if st.button("🔄 Redefinir Senha", key="btn_redefinir_senha", use_container_width=True):
+                if not usuario_recuperar.strip():
+                    st.error("❌ Digite o usuário cadastrado.")
+                elif usuario_recuperar not in st.session_state.usuarios:
+                    st.error("❌ Usuário ou e-mail incorretos. Verifique os dados.")
+                elif not email_recuperar.strip() or "@" not in email_recuperar:
+                    st.error("❌ Digite um e-mail válido.")
+                elif st.session_state.usuarios[usuario_recuperar].get("email", "").strip().lower() \
+                        != email_recuperar.strip().lower():
+                    st.error("❌ Usuário ou e-mail incorretos. Verifique os dados.")
+                elif len(nova_senha_rec) < 6:
+                    st.error("❌ A nova senha precisa ter pelo menos 6 caracteres.")
+                elif nova_senha_rec != confirmar_nova_senha_rec:
+                    st.error("❌ As senhas não coincidem.")
+                else:
+                    st.session_state.usuarios[usuario_recuperar]["senha"] = hash_senha(nova_senha_rec)
+                    salvar_usuarios(st.session_state.usuarios)
+                    st.session_state.senha_redefinida = True
+                    st.rerun()
 
 
 if not st.session_state.logado:
@@ -1241,6 +1317,7 @@ if "harvest_historico" not in st.session_state: st.session_state.harvest_histori
 if "clima_data"        not in st.session_state: st.session_state.clima_data        = None
 if "precos_data"       not in st.session_state: st.session_state.precos_data       = None
 if "receituarios"      not in st.session_state: st.session_state.receituarios      = dados_carregados.get("receituarios", [])
+if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinida  = False
 
 # ─────────────────────────────────────────────
 
@@ -2768,14 +2845,38 @@ elif menu == "Cadastro da Área":
     produtividade = st.number_input("Meta de produtividade em sacas/ha", min_value=0.0,
                                     value=float(st.session_state.dados.get("produtividade", 60.0)))
 
-    # CORREÇÃO: latitude/longitude com geolocalização ou padrão (eram usadas sem definição neste menu)
-    geo = get_geolocation()
-    if geo:
-        latitude  = geo["coords"]["latitude"]
-        longitude = geo["coords"]["longitude"]
-    else:
-        latitude  = st.session_state.dados.get("latitude", -26.88)
-        longitude = st.session_state.dados.get("longitude", -52.40)
+    # ── Geolocalização com tratamento robusto ────────────────────────
+    # Inicializa com coordenadas salvas ou padrão Brasil-Sul
+    latitude  = st.session_state.dados.get("latitude",  -26.88)
+    longitude = st.session_state.dados.get("longitude", -52.40)
+
+    col_geo_a, col_geo_b = st.columns([2, 1])
+    with col_geo_a:
+        latitude  = st.number_input("📍 Latitude",  value=float(latitude),
+                                     format="%.6f", key="cad_lat")
+        longitude = st.number_input("📍 Longitude", value=float(longitude),
+                                     format="%.6f", key="cad_lon")
+    with col_geo_b:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("📡 Usar GPS do celular", key="btn_gps_cad", use_container_width=True):
+            try:
+                geo = get_geolocation()
+                if geo and geo.get("coords"):
+                    st.session_state["_gps_lat"] = geo["coords"]["latitude"]
+                    st.session_state["_gps_lon"] = geo["coords"]["longitude"]
+                    st.rerun()
+            except Exception:
+                warning_box("GPS indisponível. Insira as coordenadas manualmente.")
+        if st.session_state.get("_gps_lat"):
+            latitude  = st.session_state["_gps_lat"]
+            longitude = st.session_state["_gps_lon"]
+            st.markdown(f'<div style="background:#14532d;color:#fff;padding:6px 10px;'
+                        f'border-radius:8px;font-size:11px;font-weight:700;">'
+                        f'✅ GPS: {latitude:.5f}, {longitude:.5f}</div>',
+                        unsafe_allow_html=True)
+        st.markdown('<div style="color:#94a3b8;font-size:11px;margin-top:4px;">'
+                    'Dica: use Google Maps para obter as coordenadas da área.</div>',
+                    unsafe_allow_html=True)
 
     if st.button("Salvar Nova Área"):
         id_area  = f"AREA-{st.session_state.contador_area:03d}"
@@ -3022,13 +3123,33 @@ elif menu == "Mapa de Fertilidade":
         st.subheader("📊 Ranking de Fertilidade")
         st.bar_chart(df_mapa.set_index("Talhão")["Score"])
         st.subheader("🛰️ Mapa GPS dos Talhões")
-        geo = get_geolocation()
-        if geo:
-            latitude  = geo["coords"]["latitude"]
-            longitude = geo["coords"]["longitude"]
-        else:
-            latitude  = -26.88
-            longitude = -52.40
+
+        # Coordenadas — prioridade: GPS salvo > área cadastrada > padrão
+        latitude  = st.session_state.dados.get("latitude",  -26.88)
+        longitude = st.session_state.dados.get("longitude", -52.40)
+
+        col_mf1, col_mf2, col_mf3 = st.columns([2, 2, 1])
+        with col_mf1:
+            latitude  = st.number_input("Latitude",  value=float(latitude),
+                                         format="%.6f", key="mapa_fert_lat")
+        with col_mf2:
+            longitude = st.number_input("Longitude", value=float(longitude),
+                                         format="%.6f", key="mapa_fert_lon")
+        with col_mf3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("📡 GPS", key="btn_gps_mapa_fert", use_container_width=True,
+                         help="Clique para usar localização do celular"):
+                try:
+                    geo = get_geolocation()
+                    if geo and geo.get("coords"):
+                        st.session_state["_gps_mf_lat"] = geo["coords"]["latitude"]
+                        st.session_state["_gps_mf_lon"] = geo["coords"]["longitude"]
+                        st.rerun()
+                except Exception:
+                    pass
+        if st.session_state.get("_gps_mf_lat"):
+            latitude  = st.session_state["_gps_mf_lat"]
+            longitude = st.session_state["_gps_mf_lon"]
         mapa_folium = folium.Map(location=[latitude, longitude], zoom_start=13, tiles=None)
         folium.TileLayer(
             tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -4491,23 +4612,48 @@ elif menu == "🌤️ Clima & Alertas":
     </div>''', unsafe_allow_html=True)
 
     # ── Geolocalização ──────────────────────────────────────────────────
-    geo = get_geolocation()
-    if geo:
-        lat = geo["coords"]["latitude"]
-        lon = geo["coords"]["longitude"]
-        fonte_loc = "📍 GPS do navegador"
-    else:
-        lat = st.session_state.dados.get("latitude", -26.88)
-        lon = st.session_state.dados.get("longitude", -52.40)
-        fonte_loc = "📌 Coordenadas da área cadastrada"
+    # Usa coordenadas salvas por padrão — GPS só quando o usuário pede
+    lat = st.session_state.dados.get("latitude",  -26.88)
+    lon = st.session_state.dados.get("longitude", -52.40)
+    fonte_loc = "📌 Coordenadas da área cadastrada"
 
-    # Permitir ajuste manual
-    with st.expander("📍 Ajustar localização manualmente", expanded=False):
-        col_geo1, col_geo2 = st.columns(2)
-        with col_geo1:
-            lat = st.number_input("Latitude", value=float(lat), format="%.4f", key="lat_clima")
-        with col_geo2:
-            lon = st.number_input("Longitude", value=float(lon), format="%.4f", key="lon_clima")
+    # Verificar se já buscou GPS nesta sessão
+    if st.session_state.get("_gps_clima_lat"):
+        lat = st.session_state["_gps_clima_lat"]
+        lon = st.session_state["_gps_clima_lon"]
+        fonte_loc = "📍 GPS do navegador"
+
+    # Painel de localização
+    col_loc1, col_loc2, col_loc3 = st.columns([2, 2, 1])
+    with col_loc1:
+        lat = st.number_input("Latitude",  value=float(lat),
+                               format="%.4f", key="lat_clima")
+    with col_loc2:
+        lon = st.number_input("Longitude", value=float(lon),
+                               format="%.4f", key="lon_clima")
+    with col_loc3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("📡 GPS", key="btn_gps_clima", use_container_width=True,
+                     help="Usar localização atual do celular"):
+            try:
+                geo = get_geolocation()
+                if geo and geo.get("coords"):
+                    st.session_state["_gps_clima_lat"] = geo["coords"]["latitude"]
+                    st.session_state["_gps_clima_lon"] = geo["coords"]["longitude"]
+                    st.session_state.clima_data = None  # Força rebuscar com nova localização
+                    st.rerun()
+            except Exception:
+                warning_box("GPS indisponível. Use as coordenadas manuais.")
+
+    st.markdown(
+        f'<div style="background:#0f3460;color:#6ee7b7;padding:7px 14px;border-radius:8px;'
+        f'font-size:12px;font-weight:700;margin:4px 0 8px 0;">'
+        f'{fonte_loc} &nbsp;|&nbsp; {lat:.4f}, {lon:.4f}</div>',
+        unsafe_allow_html=True
+    )
+
+    # Permitir ajuste manual via expander (compatibilidade com versão anterior)
+    # Removido — agora os campos ficam visíveis direto acima
 
     # ── Botão atualizar + info ──────────────────────────────────────────
     col_cb1, col_cb2 = st.columns([1, 3])
