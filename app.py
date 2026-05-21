@@ -3119,7 +3119,20 @@ elif menu == "Mapa de Fertilidade":
         st.subheader("🌡️ Heatmap de Fertilidade")
         df_heatmap = df_mapa[["Talhão","Score"]].copy()
         st.write("Quanto mais alto o score, melhor a fertilidade do talhão.")
-        st.dataframe(df_heatmap.style.background_gradient(cmap="RdYlGn", subset=["Score"]), use_container_width=True)
+
+        # Colorir manualmente sem depender de matplotlib/cmap
+        def cor_score(val):
+            if val >= 70:   return "background-color: #14532d; color: white"
+            elif val >= 40: return "background-color: #78350f; color: white"
+            else:           return "background-color: #7f1d1d; color: white"
+
+        try:
+            st.dataframe(
+                df_heatmap.style.applymap(cor_score, subset=["Score"]),
+                use_container_width=True
+            )
+        except Exception:
+            st.dataframe(df_heatmap, use_container_width=True)
         st.subheader("📊 Ranking de Fertilidade")
         st.bar_chart(df_mapa.set_index("Talhão")["Score"])
         st.subheader("🛰️ Mapa GPS dos Talhões")
