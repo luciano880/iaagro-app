@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import random
 import json
 import os
@@ -1127,10 +1127,12 @@ def tela_login():
     )
 
     with aba_login:
-        usuario = st.text_input("Usuário", key="login_usuario")
-        senha   = st.text_input("Senha", type="password", key="login_senha")
+        with st.form("form_login", clear_on_submit=False):
+            usuario = st.text_input("Usuário", key="login_usuario")
+            senha   = st.text_input("Senha", type="password", key="login_senha")
+            entrar  = st.form_submit_button("Entrar", use_container_width=True)
 
-        if st.button("Entrar"):
+        if entrar:
             u = st.session_state.usuarios.get(usuario)
             if u and verificar_senha(senha, u["senha"]):
                 st.session_state.logado = True
@@ -1141,13 +1143,13 @@ def tela_login():
                 st.error("Usuário ou senha incorretos.")
 
     with aba_cadastro:
-        novo_nome     = st.text_input("Nome completo")
-        novo_email    = st.text_input("Email de recuperação")
-        novo_usuario  = st.text_input("Criar usuário")
-        nova_senha    = st.text_input("Criar senha", type="password")
-        confirmar_senha = st.text_input("Confirmar senha", type="password")
+        novo_nome       = st.text_input("Nome completo",       key="cad_nome")
+        novo_email      = st.text_input("Email de recuperação", key="cad_email")
+        novo_usuario    = st.text_input("Criar usuário",        key="cad_usuario")
+        nova_senha      = st.text_input("Criar senha",          type="password", key="cad_senha")
+        confirmar_senha = st.text_input("Confirmar senha",      type="password", key="cad_confirmar")
 
-        if st.button("Cadastrar"):
+        if st.button("Cadastrar", use_container_width=True, key="btn_cadastrar"):
             if novo_nome.strip() == "":
                 st.error("Digite seu nome.")
             elif novo_email.strip() == "" or "@" not in novo_email or "." not in novo_email:
@@ -1164,11 +1166,13 @@ def tela_login():
                 st.session_state.usuarios[novo_usuario] = {
                     "nome":  novo_nome,
                     "email": novo_email,
-                    "senha": hash_senha(nova_senha)   # CORREÇÃO 9: hash
+                    "senha": hash_senha(nova_senha)
                 }
-                # CORREÇÃO 8: salvar após cadastro
                 salvar_usuarios(st.session_state.usuarios)
-                st.success("Conta criada com sucesso. Agora faça login.")
+                st.success("✅ Conta criada com sucesso!")
+                st.info("👆 Clique na aba **Entrar** para fazer login com sua nova conta.")
+                if st.button("🔓 Ir para Login", key="btn_pos_cadastro"):
+                    st.rerun()
 
     with aba_recuperar:
         st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
@@ -1211,7 +1215,7 @@ def tela_login():
                 else:
                     # Gerar token de 6 dígitos
                     token = str(random.randint(100000, 999999))
-                    exp   = datetime.now() + __import__('datetime').timedelta(minutes=15)
+                    exp   = datetime.now() + timedelta(minutes=15)
                     ok, msg_err = enviar_email_recuperacao(rec_email.strip(), rec_user, token)
                     if ok:
                         st.session_state.rec_token      = token
