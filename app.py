@@ -3807,15 +3807,108 @@ elif menu == "Estoque de Insumos":
 
                         # Detecta chave de acesso NF-e (44 dígitos numéricos)
                         if valor_cod.isdigit() and len(valor_cod) == 44:
-                            st.error("⚠️ Este é o **código de barras da DANFE** (chave de acesso da NF-e), não o código de um produto individual.")
-                            st.info("👉 Para importar os produtos desta nota, use a aba **📄 Importar Nota Fiscal (XML)** e faça upload do arquivo XML.")
-                            st.markdown(f"""
-                            <div style='background:#0f3460;border-radius:10px;padding:12px 16px;border:1px solid #22c55e;margin-top:8px;'>
-                            <b style='color:#22c55e'>📋 Chave NF-e detectada:</b><br>
-                            <span style='color:#94a3b8;font-size:12px;word-break:break-all;'>{valor_cod}</span><br><br>
-                            <span style='color:#f1f5f9;font-size:13px;'>Para obter o XML: acesse <b>nfe.fazenda.gov.br</b> ou solicite ao fornecedor.</span>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.info(f"📋 Chave NF-e detectada: `{valor_cod[:10]}...` — buscando produtos automaticamente...")
+
+                            itens_nfe = []
+                            emit_nome = ""
+                            n_nf      = valor_cod[25:34]  # nNF dentro da chave
+                            erro_api  = ""
+
+                            # ── Tenta buscar XML via API pública da SEFAZ (nfe.fazenda.gov.br) ──
+                            with st.spinner("🌐 Consultando SEFAZ para obter os produtos da nota..."):
+                                try:
+                                    api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+                                    if api_key:
+                                        prompt = (
+                                            f"Consulte a API pública da NF-e brasileira (nfe.fazenda.gov.br) "
+                                            f"para a chave de acesso {valor_cod}. "
+                                            f"Extraia os produtos/itens da nota fiscal. "
+                                            f"Responda APENAS com JSON válido sem markdown:\n"
+                                            f'{{"emitente":"nome","numero":"nNF","itens":['
+                                            f'{{"nome":"xProd","quantidade":0.0,"unidade":"uCom","valor_unitario":0.0}}]}}'
+                                            f"\nSe não conseguir acessar, retorne itens vazio."
+                                        )
+                                        resp_ai = requests.post(
+                                            "https://api.anthropic.com/v1/messages",
+                                            headers={
+                                                "Content-Type":      "application/json",
+                                                "x-api-key":         api_key,
+                                                "anthropic-version": "2023-06-01",
+                                            },
+                                            json={
+                                                "model":    "claude-sonnet-4-20250514",
+                                                "max_tokens": 1000,
+                                                "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
+                                                "messages": [{"role": "user", "content": prompt}]
+                                            },
+                                            timeout=45
+                                        )
+                                        if resp_ai.status_code == 200:
+                                            blocos = resp_ai.json().get("content", [])
+                                            texto  = "".join(b.get("text","") for b in blocos if b.get("type")=="text")
+                                            texto  = texto.replace("```json","").replace("```","").strip()
+                                            idx_s  = texto.find("{")
+                                            idx_e  = texto.rfind("}") + 1
+                                            if idx_s >= 0 and idx_e > idx_s:
+                                                dados_ai = json.loads(texto[idx_s:idx_e])
+                                                emit_nome = dados_ai.get("emitente", "")
+                                                n_nf      = dados_ai.get("numero", n_nf)
+                                                itens_nfe = dados_ai.get("itens", [])
+                                except Exception as ex:
+                                    erro_api = str(ex)
+
+                            uni_map = {
+                                "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
+                                "L":"litros","LT":"litros","LTS":"litros",
+                                "SC":"sacos","SAC":"sacos","UN":"unidades",
+                                "UNI":"unidades","UND":"unidades","GAL":"galões",
+                                "BL":"unidades","PT":"unidades","CX":"unidades",
+                            }
+
+                            if itens_nfe:
+                                adicionados = 0
+                                for item in itens_nfe:
+                                    uni_raw  = str(item.get("unidade","UN")).upper()
+                                    uni_norm = uni_map.get(uni_raw, "unidades")
+                                    qtd      = float(item.get("quantidade", 1))
+                                    vul      = float(item.get("valor_unitario", 0))
+                                    nome_i   = str(item.get("nome","Produto"))
+                                    novo = {
+                                        "Insumo":            nome_i,
+                                        "Categoria":         "Outro",
+                                        "Quantidade":        qtd,
+                                        "Unidade":           uni_norm,
+                                        "Valor Unitário R$": vul,
+                                        "Valor Total R$":    round(qtd * vul, 2),
+                                        "Estoque Mínimo":    0.0,
+                                        "Observação":        f"NF-e {n_nf} — chave: {valor_cod[:20]}...",
+                                        "Cultura":           "Ambos",
+                                        "Dose ha":           0.0,
+                                        "Litros ha":         75.0,
+                                        "Tanque litros":     2000,
+                                        "Fabricante":        emit_nome,
+                                        "Ingrediente Ativo": "",
+                                    }
+                                    st.session_state.estoque.append(novo)
+                                    adicionados += 1
+                                salvar_dados_iaagro()
+                                st.success(f"✅ {adicionados} produto(s) importado(s) automaticamente da NF-e {n_nf}!")
+                                st.balloons()
+                                st.rerun()
+                            else:
+                                # Fallback: orienta baixar XML manualmente
+                                st.warning("⚠️ Não foi possível buscar os produtos automaticamente via SEFAZ.")
+                                st.markdown(f"""
+                                <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #f59e0b;margin-top:8px;'>
+                                <b style='color:#f59e0b'>📥 Importe o XML manualmente:</b><br>
+                                <span style='color:#f1f5f9;font-size:13px;'>
+                                1. Acesse <b>nfe.fazenda.gov.br/portal</b><br>
+                                2. Cole a chave abaixo e baixe o XML<br>
+                                3. Use a aba <b>📄 Importar Nota Fiscal (XML)</b>
+                                </span><br><br>
+                                <span style='color:#94a3b8;font-size:11px;word-break:break-all;'>{valor_cod}</span>
+                                </div>
+                                """, unsafe_allow_html=True)
                             continue
 
                         # Evita duplicar
