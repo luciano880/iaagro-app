@@ -11,9 +11,15 @@ import hashlib
 import smtplib
 import re
 import requests
+import xml.etree.ElementTree as ET
 from PIL import Image as PILImage
 import pdfplumber
 import pytesseract
+try:
+    from pyzbar.pyzbar import decode as pyzbar_decode
+    PYZBAR_OK = True
+except Exception:
+    PYZBAR_OK = False
 
 # ─────────────────────────────────────────────
 # TESSERACT — caminho para Windows
@@ -3742,471 +3748,683 @@ elif menu == "Custos":
 # ─────────────────────────────────────────────
 elif menu == "Estoque de Insumos":
     st.header("📦 Estoque de Insumos")
-    st.subheader("➕ Cadastrar Produto")
 
-    # ── CSS do autocomplete + tema escuro global ─────────────────────────
-    st.markdown("""
-    <style>
-    /* ── Selectbox — fundo escuro igual ao upload ── */
-    div[data-baseweb="select"] > div {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #f1f5f9 !important;
-    }
-    div[data-baseweb="select"] > div:focus-within {
-        border-color: #4ade80 !important;
-        box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
-    }
-    /* Texto dentro do selectbox */
-    div[data-baseweb="select"] span,
-    div[data-baseweb="select"] div {
-        color: #f1f5f9 !important;
-        background-color: transparent !important;
-    }
-    /* Dropdown do selectbox (lista de opções) */
-    ul[data-baseweb="menu"],
-    div[data-baseweb="popover"] > div,
-    div[data-baseweb="menu"] {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-    }
-    /* Itens do selectbox */
-    li[role="option"] {
-        background-color: #0d1b2a !important;
-        color: #f1f5f9 !important;
-    }
-    li[role="option"]:hover,
-    li[role="option"][aria-selected="true"] {
-        background-color: #0f3460 !important;
-        border-left: 3px solid #22c55e !important;
-        color: #6ee7b7 !important;
-    }
-    /* ── Text input — fundo escuro ── */
-    div[data-testid="stTextInput"] input,
-    div[data-testid="stTextArea"] textarea {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #f1f5f9 !important;
-        caret-color: #22c55e !important;
-    }
-    div[data-testid="stTextInput"] input:focus,
-    div[data-testid="stTextArea"] textarea:focus {
-        border-color: #4ade80 !important;
-        box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
-    }
-    div[data-testid="stTextInput"] input::placeholder,
-    div[data-testid="stTextArea"] textarea::placeholder {
-        color: #4a7b6f !important;
-    }
-    /* ── Number input ── */
-    div[data-testid="stNumberInput"] input {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #f1f5f9 !important;
-    }
-    div[data-testid="stNumberInput"] button {
-        background-color: #0f3460 !important;
-        border-color: #22c55e !important;
-        color: #22c55e !important;
-    }
-    /* ── Labels dos inputs ── */
-    div[data-testid="stTextInput"] label,
-    div[data-testid="stSelectbox"] label,
-    div[data-testid="stNumberInput"] label,
-    div[data-testid="stTextArea"] label {
-        color: #22c55e !important;
-        font-weight: 700 !important;
-        font-size: 13px !important;
-    }
-    /* ── Botões gerais ── */
-    div[data-testid="stButton"] > button {
-        background-color: #0f3460 !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #ffffff !important;
-        font-weight: 800 !important;
-        font-size: 13px !important;
-        transition: all 0.15s !important;
-        text-shadow: none !important;
-    }
-    div[data-testid="stButton"] > button * {
-        color: #ffffff !important;
-        font-weight: 800 !important;
-    }
-    div[data-testid="stButton"] > button p {
-        color: #ffffff !important;
-        font-weight: 800 !important;
-        font-size: 13px !important;
-    }
-    div[data-testid="stButton"] > button:hover {
-        background-color: #22c55e !important;
-        color: #0d1b2a !important;
-        border-color: #4ade80 !important;
-    }
-    div[data-testid="stButton"] > button:hover *,
-    div[data-testid="stButton"] > button:hover p {
-        color: #0d1b2a !important;
-    }
-    /* ── Botão primário "Usar este produto" / "Analisar" ── */
-    div[data-testid="stButton"] > button[kind="primary"],
-    div[data-testid="stButton"] > button.primary {
-        background-color: #16a34a !important;
-        border-color: #22c55e !important;
-        color: #fff !important;
-    }
-    /* ── Upload widget ── */
-    div[data-testid="stFileUploader"] > div {
-        background-color: #0d1b2a !important;
-        border: 2px dashed #22c55e !important;
-        border-radius: 12px !important;
-        color: #f1f5f9 !important;
-    }
-    div[data-testid="stFileUploader"] label {
-        color: #22c55e !important;
-        font-weight: 700 !important;
-    }
-    div[data-testid="stFileUploaderDropzone"] {
-        background-color: #0d1b2a !important;
-    }
-    div[data-testid="stFileUploaderDropzone"] span,
-    div[data-testid="stFileUploaderDropzone"] p {
-        color: #94a3b8 !important;
-    }
-    /* ── Checkbox ── */
-    div[data-testid="stCheckbox"] label {
-        color: #f1f5f9 !important;
-    }
-    /* ── Autocomplete dropdown HTML customizado ── */
-    .autocomplete-container { position: relative; margin-bottom: 6px; }
-    .autocomplete-dropdown {
-        position: absolute; top: 100%; left: 0; right: 0;
-        background: #0d1b2a; border: 2px solid #22c55e;
-        border-radius: 10px; max-height: 260px; overflow-y: auto;
-        z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-    }
-    .autocomplete-item {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 9px 14px; cursor: pointer;
-        border-left: 3px solid transparent;
-        transition: all 0.12s;
-        background: #0d1b2a;
-    }
-    .autocomplete-item:hover {
-        background: #0f3460 !important;
-        border-left: 3px solid #22c55e !important;
-    }
-    .autocomplete-item .prod-nome { font-size: 13px; font-weight: 600; color: #f1f5f9; }
-    .autocomplete-item .prod-ia   { font-size: 10px; color: #93c5fd; margin-top: 2px; }
-    .autocomplete-item .prod-badge {
-        font-size: 10px; font-weight: 700; padding: 2px 8px;
-        border-radius: 20px; white-space: nowrap; margin-left: 8px;
-    }
-    .badge-BASF       { background: #1e3a8a; color: #93c5fd; }
-    .badge-Syngenta   { background: #14532d; color: #86efac; }
-    .badge-Bayer      { background: #7f1d1d; color: #fca5a5; }
-    .badge-UPL        { background: #78350f; color: #fcd34d; }
-    .badge-Timac-Agro { background: #6b21a8; color: #f0abfc; }
-    .badge-Mosaic     { background: #065f46; color: #6ee7b7; }
-    .badge-Outros     { background: #1e293b; color: #94a3b8; }
-    .autocomplete-header {
-        padding: 6px 14px 4px; font-size: 10px; font-weight: 800;
-        color: #22c55e; letter-spacing: 1px;
-        border-bottom: 1px solid #0f3460;
-    }
-    /* ── Scrollbar do dropdown ── */
-    .autocomplete-dropdown::-webkit-scrollbar { width: 5px; }
-    .autocomplete-dropdown::-webkit-scrollbar-track { background: #0d1b2a; }
-    .autocomplete-dropdown::-webkit-scrollbar-thumb { background: #22c55e; border-radius: 4px; }
-    </style>
-    """, unsafe_allow_html=True)
+    # ── TABS principais ───────────────────────────────────────────────────
+    tab_manual, tab_barcode, tab_nfe = st.tabs([
+        "➕ Cadastrar Manualmente",
+        "📷 Leitor de Código de Barras",
+        "📄 Importar Nota Fiscal (XML)"
+    ])
 
-    # ── Autocomplete via session_state ───────────────────────────────────
-    if "ac_query"       not in st.session_state: st.session_state.ac_query       = ""
-    if "ac_selecionado" not in st.session_state: st.session_state.ac_selecionado = None
-    if "ac_fab"         not in st.session_state: st.session_state.ac_fab         = "Todos"
-
-    # Filtro por fabricante (botões em linha)
-    fabricantes = ["Todos", "BASF", "Syngenta", "Bayer", "UPL", "Timac Agro", "Mosaic",
-                   "Corteva", "FMC", "ADAMA", "Ouro Fino", "Ihara", "Nortox", "Outros"]
-    fab_cores = {
-        "Todos":      ("#22c55e","#0f3460"),
-        "BASF":       ("#93c5fd","#1e3a8a"),
-        "Syngenta":   ("#86efac","#14532d"),
-        "Bayer":      ("#fca5a5","#7f1d1d"),
-        "UPL":        ("#fcd34d","#78350f"),
-        "Timac Agro": ("#f0abfc","#6b21a8"),
-        "Mosaic":     ("#6ee7b7","#065f46"),
-        "Corteva":    ("#67e8f9","#164e63"),
-        "FMC":        ("#a5b4fc","#1e1b4b"),
-        "ADAMA":      ("#bef264","#365314"),
-        "Ouro Fino":  ("#fde68a","#713f12"),
-        "Ihara":      ("#f9a8d4","#4a044e"),
-        "Nortox":     ("#5eead4","#134e4a"),
-        "Outros":     ("#94a3b8","#1e293b"),
-    }
-
-    FAB_ESTILOS = {
-        "Todos":      {"bg":"#166534", "border":"#22c55e", "emoji":"🔎"},
-        "BASF":       {"bg":"#1e3a8a", "border":"#93c5fd", "emoji":"🔵"},
-        "Syngenta":   {"bg":"#14532d", "border":"#86efac", "emoji":"🟢"},
-        "Bayer":      {"bg":"#7f1d1d", "border":"#fca5a5", "emoji":"🔴"},
-        "UPL":        {"bg":"#92400e", "border":"#fcd34d", "emoji":"🟠"},
-        "Timac Agro": {"bg":"#6b21a8", "border":"#f0abfc", "emoji":"🟣"},
-        "Mosaic":     {"bg":"#065f46", "border":"#6ee7b7", "emoji":"🌊"},
-        "Corteva":    {"bg":"#164e63", "border":"#67e8f9", "emoji":"🔷"},
-        "FMC":        {"bg":"#1e1b4b", "border":"#a5b4fc", "emoji":"🟦"},
-        "ADAMA":      {"bg":"#365314", "border":"#bef264", "emoji":"🌿"},
-        "Ouro Fino":  {"bg":"#713f12", "border":"#fde68a", "emoji":"🟡"},
-        "Ihara":      {"bg":"#4a044e", "border":"#f9a8d4", "emoji":"🌸"},
-        "Nortox":     {"bg":"#134e4a", "border":"#5eead4", "emoji":"🌀"},
-        "Outros":     {"bg":"#374151", "border":"#9ca3af", "emoji":"⚪"},
-    }
-
-    st.markdown("**🏭 Filtrar por Fabricante:**")
-
-    # Renderiza todos os botões como forms HTML — fundo e texto totalmente controlados
-    cols_fab = st.columns(len(fabricantes)) if fabricantes else st.columns(1)
-    for i, fab in enumerate(fabricantes):
-        est   = FAB_ESTILOS[fab]
-        ativo = st.session_state.ac_fab == fab
-        bg    = est["bg"]
-        borda = f'4px solid {est["border"]}' if ativo else f'2px solid {est["border"]}55'
-        opac  = "1.0" if ativo else "0.65"
-        sombra= f'0 0 10px {est["border"]}88' if ativo else "none"
-        with cols_fab[i]:
-            with st.form(key=f"form_fab_{fab}", border=False):
-                st.markdown(
-                    f'<div style="'
-                    f'background:{bg};'
-                    f'border:{borda};'
-                    f'border-radius:10px;'
-                    f'padding:8px 4px;'
-                    f'text-align:center;'
-                    f'font-size:12px;'
-                    f'font-weight:900;'
-                    f'color:#ffffff;'
-                    f'opacity:{opac};'
-                    f'box-shadow:{sombra};'
-                    f'letter-spacing:0.3px;'
-                    f'margin-bottom:2px;'
-                    f'">{est["emoji"]} {fab}</div>',
-                    unsafe_allow_html=True
-                )
-                if st.form_submit_button("✔", use_container_width=True):
-                    st.session_state.ac_fab = fab
-                    st.session_state.ac_query = ""
-                    st.session_state.ac_selecionado = None
-                    st.rerun()
-
-    # Indicador visual do filtro ativo
-    fab_ativo = st.session_state.ac_fab
-    qtd_fab = len([p for p in CATALOGO_PRODUTOS if fab_ativo == "Todos" or p["fab"] == fab_ativo])
-    st.markdown(f"""
-    <div style="background:#0f3460;color:#93c5fd;padding:7px 14px;border-radius:8px;
-    font-size:12px;font-weight:700;margin:4px 0 10px 0;">
-    🔎 Fabricante ativo: <b>{fab_ativo}</b> — {qtd_fab} produtos disponíveis
-    </div>""", unsafe_allow_html=True)
-
-    # ── Campo de busca ────────────────────────────────────────────────────
-    query_input = st.text_input(
-        "🔍 Nome comercial, ingrediente ativo ou categoria",
-        value=st.session_state.ac_query,
-        placeholder="Ex: Fox Xpro, glifosato, fungicida...",
-        key="input_busca_produto"
-    )
-
-    if query_input != st.session_state.ac_query:
-        st.session_state.ac_query = query_input
-        if st.session_state.ac_selecionado and query_input != st.session_state.ac_selecionado["nome"]:
-            st.session_state.ac_selecionado = None
-
-    # ── Filtra catálogo ───────────────────────────────────────────────────
-    catalogo_filtrado = CATALOGO_PRODUTOS if fab_ativo == "Todos" else [
-        p for p in CATALOGO_PRODUTOS if p["fab"] == fab_ativo
-    ]
-
-    # ── Mostra resultados ao digitar ──────────────────────────────────────
-    if st.session_state.ac_query and not st.session_state.ac_selecionado:
-        q = st.session_state.ac_query.lower()
-        starts   = [p for p in catalogo_filtrado if p["nome"].lower().startswith(q)]
-        contains = [p for p in catalogo_filtrado
-                    if not p["nome"].lower().startswith(q)
-                    and (q in p["nome"].lower() or q in p["ia"].lower() or q in p["cat"].lower())]
-        resultados = (starts + contains)[:20]
-
-        if resultados:
-            FAB_EM = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠",
-                      "Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}
-            CAT_EM = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛",
-                      "Acaricida":"🕷️","Nematicida":"🪱","Fungicida Biológico":"🌱",
-                      "Inseticida Biológico":"🦠","Foliar / Nutrição":"💧",
-                      "Tratamento de Sementes":"🌾","Regulador de Crescimento":"📈",
-                      "Adjuvante":"⚗️","Fertilizante":"🧪","Bioestimulante":"✨"}
-
-            st.markdown(f'<div style="background:#0f3460;color:#22c55e;padding:6px 14px;'
-                        f'border-radius:8px 8px 0 0;font-size:11px;font-weight:800;letter-spacing:1px;">'
-                        f'🌿 {len(resultados)} RESULTADO{"S" if len(resultados)!=1 else ""} — clique para selecionar</div>',
-                        unsafe_allow_html=True)
-
-            # Opções formatadas para o radio
-            opcoes_labels = []
-            for p in resultados:
-                em_fab = FAB_EM.get(p["fab"], "⚪")
-                em_cat = CAT_EM.get(p["cat"], "🌱")
-                opcoes_labels.append(f"{em_cat} {p['nome']}  |  {em_fab} {p['fab']}  ·  {p['cat']}  —  {p['ia'][:50]}")
-
-            escolha_idx = st.radio(
-                "Resultados:",
-                range(len(opcoes_labels)),
-                format_func=lambda i: opcoes_labels[i],
-                key="radio_produto_catalogo",
-                label_visibility="collapsed"
+    # ════════════════════════════════════════════════════════════════════
+    # TAB 2 — LEITOR DE CÓDIGO DE BARRAS
+    # ════════════════════════════════════════════════════════════════════
+    with tab_barcode:
+        st.subheader("📷 Leitura de Código de Barras")
+        if not PYZBAR_OK:
+            st.error("❌ Biblioteca pyzbar não disponível. Verifique o requirements.txt e o redeploy.")
+        else:
+            st.info("Tire uma foto do código de barras do produto ou faça upload da imagem.")
+            img_barcode = st.file_uploader(
+                "📸 Upload da imagem com código de barras",
+                type=["jpg","jpeg","png","bmp","webp"],
+                key="uploader_barcode"
             )
+            if img_barcode:
+                img_pil = PILImage.open(img_barcode).convert("RGB")
+                st.image(img_pil, caption="Imagem enviada", use_container_width=True)
+                codigos = pyzbar_decode(img_pil)
+                if not codigos:
+                    st.warning("⚠️ Nenhum código de barras detectado. Tente uma imagem mais nítida e bem iluminada.")
+                else:
+                    for cod in codigos:
+                        valor_cod = cod.data.decode("utf-8")
+                        tipo_cod  = cod.type
+                        st.success(f"✅ Código detectado: **{valor_cod}** ({tipo_cod})")
 
-            if st.button("✅ Usar este produto", key="btn_usar_produto", use_container_width=True):
-                prod_sel = resultados[escolha_idx]
-                st.session_state.ac_selecionado = prod_sel
-                st.session_state.ac_query = prod_sel["nome"]
-                st.rerun()
+                        st.markdown("#### Preencha os dados do produto")
+                        col_b1, col_b2, col_b3 = st.columns(3)
+                        with col_b1:
+                            nome_bc  = st.text_input("Nome do produto", key=f"bc_nome_{valor_cod}")
+                            cat_bc   = st.selectbox("Categoria", [
+                                "Fertilizante","Cloreto de Potássio","Ureia","Fungicida",
+                                "Inseticida","Herbicida","Biológico","Foliar","Semente",
+                                "Calcário","Gesso Agrícola","Adjuvante","Outro"
+                            ], key=f"bc_cat_{valor_cod}")
+                            cult_bc  = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key=f"bc_cult_{valor_cod}")
+                        with col_b2:
+                            qtd_bc   = st.number_input("Quantidade", min_value=0.0, value=0.0, key=f"bc_qtd_{valor_cod}")
+                            uni_bc   = st.selectbox("Unidade", ["kg","ton","litros","sacos","galões","unidades"], key=f"bc_uni_{valor_cod}")
+                        with col_b3:
+                            vul_bc   = st.number_input("Valor unitário R$", min_value=0.0, value=0.0, key=f"bc_vul_{valor_cod}")
+                            min_bc   = st.number_input("Estoque mínimo", min_value=0.0, value=0.0, key=f"bc_min_{valor_cod}")
 
-        else:
-            st.markdown(f'<div style="background:#1e293b;color:#f87171;padding:10px 14px;'
-                        f'border-radius:8px;font-size:13px;font-weight:600;margin:4px 0;">'
-                        f'❌ Nenhum produto encontrado para "<b>{st.session_state.ac_query}</b>"</div>',
-                        unsafe_allow_html=True)
+                        if st.button("✅ Adicionar ao Estoque", key=f"bc_btn_{valor_cod}"):
+                            if not nome_bc.strip():
+                                st.error("Informe o nome do produto.")
+                            else:
+                                novo = {
+                                    "Insumo": nome_bc.strip(),
+                                    "Categoria": cat_bc,
+                                    "Quantidade": qtd_bc,
+                                    "Unidade": uni_bc,
+                                    "Valor Unitário R$": vul_bc,
+                                    "Valor Total R$": qtd_bc * vul_bc,
+                                    "Estoque Mínimo": min_bc,
+                                    "Observação": f"Código de barras: {valor_cod}",
+                                    "Cultura": cult_bc,
+                                    "Dose ha": 0.0,
+                                    "Litros ha": 75.0,
+                                    "Tanque litros": 2000,
+                                    "Fabricante": "",
+                                    "Ingrediente Ativo": "",
+                                }
+                                st.session_state.estoque.append(novo)
+                                salvar_dados_iaagro()
+                                st.success(f"✅ **{nome_bc}** adicionado ao estoque!")
+                                st.rerun()
 
-    # Card do produto selecionado
-    if st.session_state.ac_selecionado:
-        p = st.session_state.ac_selecionado
-        fab_bg = {"BASF":"#1e3a8a","Syngenta":"#14532d","Bayer":"#7f1d1d","UPL":"#78350f","Timac Agro":"#6b21a8","Mosaic":"#065f46","Outros":"#1e293b"}.get(p["fab"],"#1e293b")
-        fab_tx = {"BASF":"#93c5fd","Syngenta":"#86efac","Bayer":"#fca5a5","UPL":"#fcd34d","Timac Agro":"#f0abfc","Mosaic":"#6ee7b7","Outros":"#94a3b8"}.get(p["fab"],"#94a3b8")
-        fab_em = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠","Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}.get(p["fab"],"⚪")
-        cat_em = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛","Acaricida":"🕷️",
-                  "Tratamento de Sementes":"🌾","Foliar / Nutrição":"💧",
-                  "Regulador de Crescimento":"📈","Adjuvante":"⚗️","Nematicida":"🪱",
-                  "Inseticida Biológico":"🦠","Bioestimulante":"✨"}.get(p["cat"],"🌱")
-        st.markdown(f"""
-        <div style="background:{fab_bg};border:2px solid {fab_tx}33;border-radius:12px;
-        padding:12px 16px;margin:6px 0 12px 0;display:flex;align-items:center;gap:12px;">
-            <div style="font-size:26px;">{cat_em}</div>
-            <div style="flex:1;">
-                <div style="color:#ffffff;font-weight:800;font-size:15px;">{p['nome']}</div>
-                <div style="color:{fab_tx};font-size:12px;margin-top:3px;">{fab_em} {p['fab']} · {p['cat']}</div>
-                <div style="color:#94a3b8;font-size:11px;margin-top:2px;">I.A.: {p['ia']}</div>
-            </div>
-        </div>""", unsafe_allow_html=True)
+    # ════════════════════════════════════════════════════════════════════
+    # TAB 3 — IMPORTAR NOTA FISCAL XML (NF-e)
+    # ════════════════════════════════════════════════════════════════════
+    with tab_nfe:
+        st.subheader("📄 Importar Nota Fiscal Eletrônica (XML)")
+        st.info("Faça upload do arquivo XML da NF-e. Os produtos serão extraídos automaticamente e adicionados ao estoque.")
 
-        if st.button("🔄 Trocar produto", key="btn_trocar_produto"):
-            st.session_state.ac_selecionado = None
-            st.session_state.ac_query = ""
-            st.rerun()
+        xml_file = st.file_uploader("📎 Upload do XML da NF-e", type=["xml"], key="uploader_nfe")
 
-        nome_insumo = p["nome"]
-        # Mapeia categoria do catálogo para categoria do estoque
-        cat_map = {
-            "Fungicida":"Fungicida","Herbicida":"Herbicida","Inseticida":"Inseticida",
-            "Acaricida":"Outro","Nematicida":"Outro","Fungicida Biológico":"Biológico",
-            "Inseticida Biológico":"Biológico","Bioestimulante":"Foliar",
-            "Foliar / Nutrição":"Foliar","Regulador de Crescimento":"Outro",
-            "Adjuvante":"Adjuvante","Tratamento de Sementes":"Outro",
-            "Fertilizante":"Fertilizante",
+        if xml_file:
+            try:
+                conteudo_xml = xml_file.read()
+                root = ET.fromstring(conteudo_xml)
+
+                # Remove namespaces para facilitar busca
+                def _strip_ns(tag):
+                    return tag.split("}")[-1] if "}" in tag else tag
+
+                def _find_all(node, tag):
+                    return [c for c in node.iter() if _strip_ns(c.tag) == tag]
+
+                def _find_text(node, tag, default=""):
+                    els = _find_all(node, tag)
+                    return els[0].text.strip() if els and els[0].text else default
+
+                # Dados da nota
+                n_nf    = _find_text(root, "nNF",    "N/D")
+                emit    = _find_text(root, "xNome",  "Fornecedor não identificado")
+                dt_emis = _find_text(root, "dhEmi",  _find_text(root, "dEmi", ""))
+                dt_fmt  = dt_emis[:10] if dt_emis else "N/D"
+
+                st.markdown(f"""
+                <div style='background:#0f3460;border-radius:10px;padding:14px 18px;margin-bottom:12px;border:1px solid #22c55e'>
+                <b style='color:#22c55e'>📋 Nota Fiscal Nº {n_nf}</b><br>
+                <span style='color:#f1f5f9'>Emitente: {emit} &nbsp;|&nbsp; Data: {dt_fmt}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Extrai itens (det > prod)
+                itens_nfe = []
+                for det in _find_all(root, "det"):
+                    prod = None
+                    for child in det:
+                        if _strip_ns(child.tag) == "prod":
+                            prod = child
+                            break
+                    if prod is None:
+                        continue
+                    nome_prod = _find_text(prod, "xProd", "Produto sem nome")
+                    qtd_prod  = float(_find_text(prod, "qCom",  "0").replace(",",".") or 0)
+                    uni_prod  = _find_text(prod, "uCom",  "un")
+                    vul_prod  = float(_find_text(prod, "vUnCom","0").replace(",",".") or 0)
+                    itens_nfe.append({
+                        "Nome": nome_prod,
+                        "Quantidade": qtd_prod,
+                        "Unidade": uni_prod,
+                        "Valor Unitário R$": vul_prod,
+                        "Valor Total R$": round(qtd_prod * vul_prod, 2),
+                    })
+
+                if not itens_nfe:
+                    st.warning("⚠️ Nenhum produto encontrado no XML. Verifique se é um arquivo NF-e válido.")
+                else:
+                    st.markdown(f"### 🛒 {len(itens_nfe)} produto(s) encontrado(s) na nota")
+                    df_nfe = pd.DataFrame(itens_nfe)
+                    st.dataframe(df_nfe, use_container_width=True)
+
+                    st.markdown("#### ⚙️ Configurações de importação")
+                    col_n1, col_n2 = st.columns(2)
+                    with col_n1:
+                        cat_nfe  = st.selectbox("Categoria padrão", [
+                            "Fertilizante","Fungicida","Inseticida","Herbicida",
+                            "Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+                        ], key="nfe_categoria")
+                        cult_nfe = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="nfe_cultura")
+                    with col_n2:
+                        min_nfe  = st.number_input("Estoque mínimo padrão", min_value=0.0, value=0.0, key="nfe_minimo")
+
+                    # Seleção de quais itens importar
+                    st.markdown("#### ✅ Selecione os produtos para importar")
+                    selecionados = []
+                    for i, item in enumerate(itens_nfe):
+                        chk = st.checkbox(
+                            f"{item['Nome']}  —  {item['Quantidade']} {item['Unidade']}  —  R$ {item['Valor Unitário R$']:.2f}/un",
+                            value=True,
+                            key=f"nfe_chk_{i}"
+                        )
+                        if chk:
+                            selecionados.append(item)
+
+                    if st.button("📥 Importar Selecionados para o Estoque", key="btn_importar_nfe"):
+                        if not selecionados:
+                            st.warning("Selecione ao menos um produto.")
+                        else:
+                            # Mapeia unidades comuns de NF-e para o padrão do app
+                            uni_map = {
+                                "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
+                                "L":"litros","LT":"litros","LTS":"litros",
+                                "SC":"sacos","SAC":"sacos","UN":"unidades",
+                                "UNI":"unidades","UND":"unidades","GAL":"galões",
+                            }
+                            adicionados = 0
+                            for item in selecionados:
+                                uni_norm = uni_map.get(item["Unidade"].upper(), "unidades")
+                                novo = {
+                                    "Insumo": item["Nome"],
+                                    "Categoria": cat_nfe,
+                                    "Quantidade": item["Quantidade"],
+                                    "Unidade": uni_norm,
+                                    "Valor Unitário R$": item["Valor Unitário R$"],
+                                    "Valor Total R$": item["Valor Total R$"],
+                                    "Estoque Mínimo": min_nfe,
+                                    "Observação": f"Importado da NF-e nº {n_nf} — {emit}",
+                                    "Cultura": cult_nfe,
+                                    "Dose ha": 0.0,
+                                    "Litros ha": 75.0,
+                                    "Tanque litros": 2000,
+                                    "Fabricante": emit,
+                                    "Ingrediente Ativo": "",
+                                }
+                                st.session_state.estoque.append(novo)
+                                adicionados += 1
+                            salvar_dados_iaagro()
+                            st.success(f"✅ {adicionados} produto(s) importado(s) para o estoque com sucesso!")
+                            st.balloons()
+                            st.rerun()
+
+            except ET.ParseError as e:
+                st.error(f"❌ Erro ao ler o XML: {e}. Verifique se o arquivo é uma NF-e válida.")
+            except Exception as e:
+                st.error(f"❌ Erro inesperado: {e}")
+
+    # ════════════════════════════════════════════════════════════════════
+    # TAB 1 — CADASTRO MANUAL (conteúdo original)
+    # ════════════════════════════════════════════════════════════════════
+    with tab_manual:
+        st.subheader("➕ Cadastrar Produto")
+
+        # ── CSS do autocomplete + tema escuro global ─────────────────────────
+        st.markdown("""
+        <style>
+        /* ── Selectbox — fundo escuro igual ao upload ── */
+        div[data-baseweb="select"] > div {
+            background-color: #0d1b2a !important;
+            border: 2px solid #22c55e !important;
+            border-radius: 10px !important;
+            color: #f1f5f9 !important;
         }
-        cat_sugerida = cat_map.get(p["cat"], "Outro")
-    else:
-        nome_insumo  = st.session_state.ac_query if st.session_state.ac_query else ""
-        cat_sugerida = "Fungicida"
-
-    # ── Campos complementares ─────────────────────────────────────────────
-    st.divider()
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        # Nome editável (pré-preenchido pelo autocomplete)
-        nome_final = st.text_input("Nome do produto / insumo", value=nome_insumo, key="nome_insumo_final")
-        categoria  = st.selectbox("Categoria", [
-            "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-            "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-        ], index=["Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                  "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                 ].index(cat_sugerida) if cat_sugerida in [
-                  "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                  "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                 ] else 0)
-        cultura    = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="cultura_estoque")
-        litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
-        capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
-    with col2:
-        quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0)
-        unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"])
-    with col3:
-        valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0)
-        estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0)
-
-    observacao = st.text_area("Observação")
-
-    if st.button("Adicionar Produto ao Estoque"):
-        nome_usar = nome_final.strip() if nome_final.strip() else nome_insumo.strip()
-        if not nome_usar:
-            error_box("Digite ou selecione o nome do produto.")
-        else:
-            novo_item = {
-                "Insumo": nome_usar, "Categoria": categoria,
-                "Quantidade": quantidade, "Unidade": unidade,
-                "Valor Unitário R$": valor_unitario,
-                "Valor Total R$": quantidade * valor_unitario,
-                "Estoque Mínimo": estoque_minimo,
-                "Observação": observacao, "Cultura": cultura,
-                "Dose ha": dose_ha, "Litros ha": litros_ha,
-                "Tanque litros": capacidade_tanque,
-                "Fabricante": st.session_state.ac_selecionado["fab"] if st.session_state.ac_selecionado else "",
-                "Ingrediente Ativo": st.session_state.ac_selecionado["ia"] if st.session_state.ac_selecionado else "",
+        div[data-baseweb="select"] > div:focus-within {
+            border-color: #4ade80 !important;
+            box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
+        }
+        /* Texto dentro do selectbox */
+        div[data-baseweb="select"] span,
+        div[data-baseweb="select"] div {
+            color: #f1f5f9 !important;
+            background-color: transparent !important;
+        }
+        /* Dropdown do selectbox (lista de opções) */
+        ul[data-baseweb="menu"],
+        div[data-baseweb="popover"] > div,
+        div[data-baseweb="menu"] {
+            background-color: #0d1b2a !important;
+            border: 2px solid #22c55e !important;
+            border-radius: 10px !important;
+        }
+        /* Itens do selectbox */
+        li[role="option"] {
+            background-color: #0d1b2a !important;
+            color: #f1f5f9 !important;
+        }
+        li[role="option"]:hover,
+        li[role="option"][aria-selected="true"] {
+            background-color: #0f3460 !important;
+            border-left: 3px solid #22c55e !important;
+            color: #6ee7b7 !important;
+        }
+        /* ── Text input — fundo escuro ── */
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stTextArea"] textarea {
+            background-color: #0d1b2a !important;
+            border: 2px solid #22c55e !important;
+            border-radius: 10px !important;
+            color: #f1f5f9 !important;
+            caret-color: #22c55e !important;
+        }
+        div[data-testid="stTextInput"] input:focus,
+        div[data-testid="stTextArea"] textarea:focus {
+            border-color: #4ade80 !important;
+            box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
+        }
+        div[data-testid="stTextInput"] input::placeholder,
+        div[data-testid="stTextArea"] textarea::placeholder {
+            color: #4a7b6f !important;
+        }
+        /* ── Number input ── */
+        div[data-testid="stNumberInput"] input {
+            background-color: #0d1b2a !important;
+            border: 2px solid #22c55e !important;
+            border-radius: 10px !important;
+            color: #f1f5f9 !important;
+        }
+        div[data-testid="stNumberInput"] button {
+            background-color: #0f3460 !important;
+            border-color: #22c55e !important;
+            color: #22c55e !important;
+        }
+        /* ── Labels dos inputs ── */
+        div[data-testid="stTextInput"] label,
+        div[data-testid="stSelectbox"] label,
+        div[data-testid="stNumberInput"] label,
+        div[data-testid="stTextArea"] label {
+            color: #22c55e !important;
+            font-weight: 700 !important;
+            font-size: 13px !important;
+        }
+        /* ── Botões gerais ── */
+        div[data-testid="stButton"] > button {
+            background-color: #0f3460 !important;
+            border: 2px solid #22c55e !important;
+            border-radius: 10px !important;
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            font-size: 13px !important;
+            transition: all 0.15s !important;
+            text-shadow: none !important;
+        }
+        div[data-testid="stButton"] > button * {
+            color: #ffffff !important;
+            font-weight: 800 !important;
+        }
+        div[data-testid="stButton"] > button p {
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            font-size: 13px !important;
+        }
+        div[data-testid="stButton"] > button:hover {
+            background-color: #22c55e !important;
+            color: #0d1b2a !important;
+            border-color: #4ade80 !important;
+        }
+        div[data-testid="stButton"] > button:hover *,
+        div[data-testid="stButton"] > button:hover p {
+            color: #0d1b2a !important;
+        }
+        /* ── Botão primário "Usar este produto" / "Analisar" ── */
+        div[data-testid="stButton"] > button[kind="primary"],
+        div[data-testid="stButton"] > button.primary {
+            background-color: #16a34a !important;
+            border-color: #22c55e !important;
+            color: #fff !important;
+        }
+        /* ── Upload widget ── */
+        div[data-testid="stFileUploader"] > div {
+            background-color: #0d1b2a !important;
+            border: 2px dashed #22c55e !important;
+            border-radius: 12px !important;
+            color: #f1f5f9 !important;
+        }
+        div[data-testid="stFileUploader"] label {
+            color: #22c55e !important;
+            font-weight: 700 !important;
+        }
+        div[data-testid="stFileUploaderDropzone"] {
+            background-color: #0d1b2a !important;
+        }
+        div[data-testid="stFileUploaderDropzone"] span,
+        div[data-testid="stFileUploaderDropzone"] p {
+            color: #94a3b8 !important;
+        }
+        /* ── Checkbox ── */
+        div[data-testid="stCheckbox"] label {
+            color: #f1f5f9 !important;
+        }
+        /* ── Autocomplete dropdown HTML customizado ── */
+        .autocomplete-container { position: relative; margin-bottom: 6px; }
+        .autocomplete-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0;
+            background: #0d1b2a; border: 2px solid #22c55e;
+            border-radius: 10px; max-height: 260px; overflow-y: auto;
+            z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+        .autocomplete-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 9px 14px; cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: all 0.12s;
+            background: #0d1b2a;
+        }
+        .autocomplete-item:hover {
+            background: #0f3460 !important;
+            border-left: 3px solid #22c55e !important;
+        }
+        .autocomplete-item .prod-nome { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+        .autocomplete-item .prod-ia   { font-size: 10px; color: #93c5fd; margin-top: 2px; }
+        .autocomplete-item .prod-badge {
+            font-size: 10px; font-weight: 700; padding: 2px 8px;
+            border-radius: 20px; white-space: nowrap; margin-left: 8px;
+        }
+        .badge-BASF       { background: #1e3a8a; color: #93c5fd; }
+        .badge-Syngenta   { background: #14532d; color: #86efac; }
+        .badge-Bayer      { background: #7f1d1d; color: #fca5a5; }
+        .badge-UPL        { background: #78350f; color: #fcd34d; }
+        .badge-Timac-Agro { background: #6b21a8; color: #f0abfc; }
+        .badge-Mosaic     { background: #065f46; color: #6ee7b7; }
+        .badge-Outros     { background: #1e293b; color: #94a3b8; }
+        .autocomplete-header {
+            padding: 6px 14px 4px; font-size: 10px; font-weight: 800;
+            color: #22c55e; letter-spacing: 1px;
+            border-bottom: 1px solid #0f3460;
+        }
+        /* ── Scrollbar do dropdown ── */
+        .autocomplete-dropdown::-webkit-scrollbar { width: 5px; }
+        .autocomplete-dropdown::-webkit-scrollbar-track { background: #0d1b2a; }
+        .autocomplete-dropdown::-webkit-scrollbar-thumb { background: #22c55e; border-radius: 4px; }
+        </style>
+        """, unsafe_allow_html=True)
+    
+        # ── Autocomplete via session_state ───────────────────────────────────
+        if "ac_query"       not in st.session_state: st.session_state.ac_query       = ""
+        if "ac_selecionado" not in st.session_state: st.session_state.ac_selecionado = None
+        if "ac_fab"         not in st.session_state: st.session_state.ac_fab         = "Todos"
+    
+        # Filtro por fabricante (botões em linha)
+        fabricantes = ["Todos", "BASF", "Syngenta", "Bayer", "UPL", "Timac Agro", "Mosaic",
+                       "Corteva", "FMC", "ADAMA", "Ouro Fino", "Ihara", "Nortox", "Outros"]
+        fab_cores = {
+            "Todos":      ("#22c55e","#0f3460"),
+            "BASF":       ("#93c5fd","#1e3a8a"),
+            "Syngenta":   ("#86efac","#14532d"),
+            "Bayer":      ("#fca5a5","#7f1d1d"),
+            "UPL":        ("#fcd34d","#78350f"),
+            "Timac Agro": ("#f0abfc","#6b21a8"),
+            "Mosaic":     ("#6ee7b7","#065f46"),
+            "Corteva":    ("#67e8f9","#164e63"),
+            "FMC":        ("#a5b4fc","#1e1b4b"),
+            "ADAMA":      ("#bef264","#365314"),
+            "Ouro Fino":  ("#fde68a","#713f12"),
+            "Ihara":      ("#f9a8d4","#4a044e"),
+            "Nortox":     ("#5eead4","#134e4a"),
+            "Outros":     ("#94a3b8","#1e293b"),
+        }
+    
+        FAB_ESTILOS = {
+            "Todos":      {"bg":"#166534", "border":"#22c55e", "emoji":"🔎"},
+            "BASF":       {"bg":"#1e3a8a", "border":"#93c5fd", "emoji":"🔵"},
+            "Syngenta":   {"bg":"#14532d", "border":"#86efac", "emoji":"🟢"},
+            "Bayer":      {"bg":"#7f1d1d", "border":"#fca5a5", "emoji":"🔴"},
+            "UPL":        {"bg":"#92400e", "border":"#fcd34d", "emoji":"🟠"},
+            "Timac Agro": {"bg":"#6b21a8", "border":"#f0abfc", "emoji":"🟣"},
+            "Mosaic":     {"bg":"#065f46", "border":"#6ee7b7", "emoji":"🌊"},
+            "Corteva":    {"bg":"#164e63", "border":"#67e8f9", "emoji":"🔷"},
+            "FMC":        {"bg":"#1e1b4b", "border":"#a5b4fc", "emoji":"🟦"},
+            "ADAMA":      {"bg":"#365314", "border":"#bef264", "emoji":"🌿"},
+            "Ouro Fino":  {"bg":"#713f12", "border":"#fde68a", "emoji":"🟡"},
+            "Ihara":      {"bg":"#4a044e", "border":"#f9a8d4", "emoji":"🌸"},
+            "Nortox":     {"bg":"#134e4a", "border":"#5eead4", "emoji":"🌀"},
+            "Outros":     {"bg":"#374151", "border":"#9ca3af", "emoji":"⚪"},
+        }
+    
+        st.markdown("**🏭 Filtrar por Fabricante:**")
+    
+        # Renderiza todos os botões como forms HTML — fundo e texto totalmente controlados
+        cols_fab = st.columns(len(fabricantes)) if fabricantes else st.columns(1)
+        for i, fab in enumerate(fabricantes):
+            est   = FAB_ESTILOS[fab]
+            ativo = st.session_state.ac_fab == fab
+            bg    = est["bg"]
+            borda = f'4px solid {est["border"]}' if ativo else f'2px solid {est["border"]}55'
+            opac  = "1.0" if ativo else "0.65"
+            sombra= f'0 0 10px {est["border"]}88' if ativo else "none"
+            with cols_fab[i]:
+                with st.form(key=f"form_fab_{fab}", border=False):
+                    st.markdown(
+                        f'<div style="'
+                        f'background:{bg};'
+                        f'border:{borda};'
+                        f'border-radius:10px;'
+                        f'padding:8px 4px;'
+                        f'text-align:center;'
+                        f'font-size:12px;'
+                        f'font-weight:900;'
+                        f'color:#ffffff;'
+                        f'opacity:{opac};'
+                        f'box-shadow:{sombra};'
+                        f'letter-spacing:0.3px;'
+                        f'margin-bottom:2px;'
+                        f'">{est["emoji"]} {fab}</div>',
+                        unsafe_allow_html=True
+                    )
+                    if st.form_submit_button("✔", use_container_width=True):
+                        st.session_state.ac_fab = fab
+                        st.session_state.ac_query = ""
+                        st.session_state.ac_selecionado = None
+                        st.rerun()
+    
+        # Indicador visual do filtro ativo
+        fab_ativo = st.session_state.ac_fab
+        qtd_fab = len([p for p in CATALOGO_PRODUTOS if fab_ativo == "Todos" or p["fab"] == fab_ativo])
+        st.markdown(f"""
+        <div style="background:#0f3460;color:#93c5fd;padding:7px 14px;border-radius:8px;
+        font-size:12px;font-weight:700;margin:4px 0 10px 0;">
+        🔎 Fabricante ativo: <b>{fab_ativo}</b> — {qtd_fab} produtos disponíveis
+        </div>""", unsafe_allow_html=True)
+    
+        # ── Campo de busca ────────────────────────────────────────────────────
+        query_input = st.text_input(
+            "🔍 Nome comercial, ingrediente ativo ou categoria",
+            value=st.session_state.ac_query,
+            placeholder="Ex: Fox Xpro, glifosato, fungicida...",
+            key="input_busca_produto"
+        )
+    
+        if query_input != st.session_state.ac_query:
+            st.session_state.ac_query = query_input
+            if st.session_state.ac_selecionado and query_input != st.session_state.ac_selecionado["nome"]:
+                st.session_state.ac_selecionado = None
+    
+        # ── Filtra catálogo ───────────────────────────────────────────────────
+        catalogo_filtrado = CATALOGO_PRODUTOS if fab_ativo == "Todos" else [
+            p for p in CATALOGO_PRODUTOS if p["fab"] == fab_ativo
+        ]
+    
+        # ── Mostra resultados ao digitar ──────────────────────────────────────
+        if st.session_state.ac_query and not st.session_state.ac_selecionado:
+            q = st.session_state.ac_query.lower()
+            starts   = [p for p in catalogo_filtrado if p["nome"].lower().startswith(q)]
+            contains = [p for p in catalogo_filtrado
+                        if not p["nome"].lower().startswith(q)
+                        and (q in p["nome"].lower() or q in p["ia"].lower() or q in p["cat"].lower())]
+            resultados = (starts + contains)[:20]
+    
+            if resultados:
+                FAB_EM = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠",
+                          "Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}
+                CAT_EM = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛",
+                          "Acaricida":"🕷️","Nematicida":"🪱","Fungicida Biológico":"🌱",
+                          "Inseticida Biológico":"🦠","Foliar / Nutrição":"💧",
+                          "Tratamento de Sementes":"🌾","Regulador de Crescimento":"📈",
+                          "Adjuvante":"⚗️","Fertilizante":"🧪","Bioestimulante":"✨"}
+    
+                st.markdown(f'<div style="background:#0f3460;color:#22c55e;padding:6px 14px;'
+                            f'border-radius:8px 8px 0 0;font-size:11px;font-weight:800;letter-spacing:1px;">'
+                            f'🌿 {len(resultados)} RESULTADO{"S" if len(resultados)!=1 else ""} — clique para selecionar</div>',
+                            unsafe_allow_html=True)
+    
+                # Opções formatadas para o radio
+                opcoes_labels = []
+                for p in resultados:
+                    em_fab = FAB_EM.get(p["fab"], "⚪")
+                    em_cat = CAT_EM.get(p["cat"], "🌱")
+                    opcoes_labels.append(f"{em_cat} {p['nome']}  |  {em_fab} {p['fab']}  ·  {p['cat']}  —  {p['ia'][:50]}")
+    
+                escolha_idx = st.radio(
+                    "Resultados:",
+                    range(len(opcoes_labels)),
+                    format_func=lambda i: opcoes_labels[i],
+                    key="radio_produto_catalogo",
+                    label_visibility="collapsed"
+                )
+    
+                if st.button("✅ Usar este produto", key="btn_usar_produto", use_container_width=True):
+                    prod_sel = resultados[escolha_idx]
+                    st.session_state.ac_selecionado = prod_sel
+                    st.session_state.ac_query = prod_sel["nome"]
+                    st.rerun()
+    
+            else:
+                st.markdown(f'<div style="background:#1e293b;color:#f87171;padding:10px 14px;'
+                            f'border-radius:8px;font-size:13px;font-weight:600;margin:4px 0;">'
+                            f'❌ Nenhum produto encontrado para "<b>{st.session_state.ac_query}</b>"</div>',
+                            unsafe_allow_html=True)
+    
+        # Card do produto selecionado
+        if st.session_state.ac_selecionado:
+            p = st.session_state.ac_selecionado
+            fab_bg = {"BASF":"#1e3a8a","Syngenta":"#14532d","Bayer":"#7f1d1d","UPL":"#78350f","Timac Agro":"#6b21a8","Mosaic":"#065f46","Outros":"#1e293b"}.get(p["fab"],"#1e293b")
+            fab_tx = {"BASF":"#93c5fd","Syngenta":"#86efac","Bayer":"#fca5a5","UPL":"#fcd34d","Timac Agro":"#f0abfc","Mosaic":"#6ee7b7","Outros":"#94a3b8"}.get(p["fab"],"#94a3b8")
+            fab_em = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠","Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}.get(p["fab"],"⚪")
+            cat_em = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛","Acaricida":"🕷️",
+                      "Tratamento de Sementes":"🌾","Foliar / Nutrição":"💧",
+                      "Regulador de Crescimento":"📈","Adjuvante":"⚗️","Nematicida":"🪱",
+                      "Inseticida Biológico":"🦠","Bioestimulante":"✨"}.get(p["cat"],"🌱")
+            st.markdown(f"""
+            <div style="background:{fab_bg};border:2px solid {fab_tx}33;border-radius:12px;
+            padding:12px 16px;margin:6px 0 12px 0;display:flex;align-items:center;gap:12px;">
+                <div style="font-size:26px;">{cat_em}</div>
+                <div style="flex:1;">
+                    <div style="color:#ffffff;font-weight:800;font-size:15px;">{p['nome']}</div>
+                    <div style="color:{fab_tx};font-size:12px;margin-top:3px;">{fab_em} {p['fab']} · {p['cat']}</div>
+                    <div style="color:#94a3b8;font-size:11px;margin-top:2px;">I.A.: {p['ia']}</div>
+                </div>
+            </div>""", unsafe_allow_html=True)
+    
+            if st.button("🔄 Trocar produto", key="btn_trocar_produto"):
+                st.session_state.ac_selecionado = None
+                st.session_state.ac_query = ""
+                st.rerun()
+    
+            nome_insumo = p["nome"]
+            # Mapeia categoria do catálogo para categoria do estoque
+            cat_map = {
+                "Fungicida":"Fungicida","Herbicida":"Herbicida","Inseticida":"Inseticida",
+                "Acaricida":"Outro","Nematicida":"Outro","Fungicida Biológico":"Biológico",
+                "Inseticida Biológico":"Biológico","Bioestimulante":"Foliar",
+                "Foliar / Nutrição":"Foliar","Regulador de Crescimento":"Outro",
+                "Adjuvante":"Adjuvante","Tratamento de Sementes":"Outro",
+                "Fertilizante":"Fertilizante",
             }
-            st.session_state.estoque.append(novo_item)
-            # Reseta autocomplete após adicionar
-            st.session_state.ac_selecionado = None
-            st.session_state.ac_query = ""
-            salvar_dados_iaagro()
-            success_box(f"✅ {nome_usar} adicionado ao estoque.")
-
-    st.subheader("Estoque Atual")
-    if len(st.session_state.estoque) == 0:
-        info_box("Nenhum produto cadastrado ainda.")
-    else:
-        tabela_estoque = pd.DataFrame(st.session_state.estoque)
-
-        st.markdown("### 🗑️ Excluir Produto")
-        produto_excluir = st.selectbox(
-            "Selecione o produto",
-            [item["Insumo"] for item in st.session_state.estoque],
-            key="produto_excluir_estoque"
-        )
-        if st.button("❌ Excluir Produto", key="btn_excluir_produto"):
-            st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != produto_excluir]
-            salvar_dados_iaagro()
-            success_box(f"{produto_excluir} removido do estoque.")
-            st.rerun()
-
-        tabela_estoque["Status"] = tabela_estoque.apply(
-            lambda linha: "Estoque baixo" if linha["Quantidade"] <= linha["Estoque Mínimo"] else "OK", axis=1
-        )
-        st.dataframe(tabela_estoque, use_container_width=True)
-
-        st.subheader("🚨 Alertas Inteligentes")
-        for item in st.session_state.estoque:
-            qtd  = item.get("Quantidade", 0)
-            nome = item.get("Insumo", "Produto")
-            if   qtd <= 0:   error_box(f"❌ {nome}: estoque zerado!")
-            elif qtd <= 500: warning_box(f"⚠️ {nome}: estoque baixo ({qtd:.1f} kg/L)")
-            else:            success_box(f"✅ {nome}: estoque OK ({qtd:.1f} kg/L)")
-
-        col4, col5, col6 = st.columns(3)
-        col4.metric("Itens cadastrados",      len(tabela_estoque))
-        col5.metric("Valor total em estoque", f"R$ {tabela_estoque['Valor Total R$'].sum():,.2f}")
-        col6.metric("Itens com estoque baixo", len(tabela_estoque[tabela_estoque["Status"] == "Estoque baixo"]))
-
+            cat_sugerida = cat_map.get(p["cat"], "Outro")
+        else:
+            nome_insumo  = st.session_state.ac_query if st.session_state.ac_query else ""
+            cat_sugerida = "Fungicida"
+    
+        # ── Campos complementares ─────────────────────────────────────────────
+        st.divider()
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            # Nome editável (pré-preenchido pelo autocomplete)
+            nome_final = st.text_input("Nome do produto / insumo", value=nome_insumo, key="nome_insumo_final")
+            categoria  = st.selectbox("Categoria", [
+                "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
+                "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+            ], index=["Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
+                      "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+                     ].index(cat_sugerida) if cat_sugerida in [
+                      "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
+                      "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+                     ] else 0)
+            cultura    = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="cultura_estoque")
+            litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
+            capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
+        with col2:
+            quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0)
+            unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"])
+        with col3:
+            valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0)
+            estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0)
+    
+        observacao = st.text_area("Observação")
+    
+        if st.button("Adicionar Produto ao Estoque"):
+            nome_usar = nome_final.strip() if nome_final.strip() else nome_insumo.strip()
+            if not nome_usar:
+                error_box("Digite ou selecione o nome do produto.")
+            else:
+                novo_item = {
+                    "Insumo": nome_usar, "Categoria": categoria,
+                    "Quantidade": quantidade, "Unidade": unidade,
+                    "Valor Unitário R$": valor_unitario,
+                    "Valor Total R$": quantidade * valor_unitario,
+                    "Estoque Mínimo": estoque_minimo,
+                    "Observação": observacao, "Cultura": cultura,
+                    "Dose ha": dose_ha, "Litros ha": litros_ha,
+                    "Tanque litros": capacidade_tanque,
+                    "Fabricante": st.session_state.ac_selecionado["fab"] if st.session_state.ac_selecionado else "",
+                    "Ingrediente Ativo": st.session_state.ac_selecionado["ia"] if st.session_state.ac_selecionado else "",
+                }
+                st.session_state.estoque.append(novo_item)
+                # Reseta autocomplete após adicionar
+                st.session_state.ac_selecionado = None
+                st.session_state.ac_query = ""
+                salvar_dados_iaagro()
+                success_box(f"✅ {nome_usar} adicionado ao estoque.")
+    
+        st.subheader("Estoque Atual")
+        if len(st.session_state.estoque) == 0:
+            info_box("Nenhum produto cadastrado ainda.")
+        else:
+            tabela_estoque = pd.DataFrame(st.session_state.estoque)
+    
+            st.markdown("### 🗑️ Excluir Produto")
+            produto_excluir = st.selectbox(
+                "Selecione o produto",
+                [item["Insumo"] for item in st.session_state.estoque],
+                key="produto_excluir_estoque"
+            )
+            if st.button("❌ Excluir Produto", key="btn_excluir_produto"):
+                st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != produto_excluir]
+                salvar_dados_iaagro()
+                success_box(f"{produto_excluir} removido do estoque.")
+                st.rerun()
+    
+            tabela_estoque["Status"] = tabela_estoque.apply(
+                lambda linha: "Estoque baixo" if linha["Quantidade"] <= linha["Estoque Mínimo"] else "OK", axis=1
+            )
+            st.dataframe(tabela_estoque, use_container_width=True)
+    
+            st.subheader("🚨 Alertas Inteligentes")
+            for item in st.session_state.estoque:
+                qtd  = item.get("Quantidade", 0)
+                nome = item.get("Insumo", "Produto")
+                if   qtd <= 0:   error_box(f"❌ {nome}: estoque zerado!")
+                elif qtd <= 500: warning_box(f"⚠️ {nome}: estoque baixo ({qtd:.1f} kg/L)")
+                else:            success_box(f"✅ {nome}: estoque OK ({qtd:.1f} kg/L)")
+    
+            col4, col5, col6 = st.columns(3)
+            col4.metric("Itens cadastrados",      len(tabela_estoque))
+            col5.metric("Valor total em estoque", f"R$ {tabela_estoque['Valor Total R$'].sum():,.2f}")
+            col6.metric("Itens com estoque baixo", len(tabela_estoque[tabela_estoque["Status"] == "Estoque baixo"]))
+    
 # ─────────────────────────────────────────────
 # MENU: APLICAÇÕES
 # CORREÇÕES:
