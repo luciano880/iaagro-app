@@ -821,37 +821,50 @@ def buscar_dolar_awesomeapi():
 def buscar_precos_cepea_ia():
     """
     Usa Claude API com web_search para buscar preços CEPEA em tempo real.
-    Esta chamada funciona no Streamlit Cloud pois vai para api.anthropic.com.
+    Requer ANTHROPIC_API_KEY nos Secrets do Streamlit Cloud.
     """
     try:
+        api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            return None
+
+        hoje_str = datetime.now().strftime("%d/%m/%Y")
         prompt = (
-            "Pesquise AGORA os precos mais recentes das commodities agricolas brasileiras "
-            "(CEPEA/ESALQ ou indicador de mercado, data de hoje). "
-            "Responda SOMENTE com JSON valido sem markdown:\n"
+            f"Hoje é {hoje_str}. Pesquise AGORA os preços mais recentes das commodities "
+            "agrícolas brasileiras (CEPEA/ESALQ ou indicador de mercado). "
+            "Responda SOMENTE com JSON válido, sem markdown, sem texto extra:\n"
             '{"soja":0.0,"milho":0.0,"trigo":0.0,"cafe":0.0,"algodao":0.0,"boi":0.0,"arroz":0.0,'
             '"fonte":"CEPEA/ESALQ","data":"DD/MM/AAAA"}\n'
-            "Unidades: soja/milho/trigo/cafe em R$/sc 60kg (PR/SP), "
-            "algodao e boi em R$/arroba (MT/SP), arroz R$/sc 50kg (RS)."
+            "Unidades obrigatórias: soja/milho/trigo em R$/sc 60kg (Paraná), "
+            "cafe em R$/sc 60kg (SP), algodao e boi em R$/arroba, arroz R$/sc 50kg (RS). "
+            "Retorne apenas o JSON, nada mais."
         )
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers={"Content-Type": "application/json"},
-            json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 300,
-                "tools": [{"type": "web_search_20250305", "name": "web_search"}],
-                "messages": [{"role": "user", "content": prompt}]
+            headers={
+                "Content-Type":    "application/json",
+                "x-api-key":       api_key,
+                "anthropic-version": "2023-06-01",
             },
-            timeout=45
+            json={
+                "model":      "claude-sonnet-4-20250514",
+                "max_tokens": 400,
+                "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
+                "messages":   [{"role": "user", "content": prompt}]
+            },
+            timeout=50
         )
         if resp.status_code == 200:
-            texto = "".join(b.get("text","") for b in resp.json().get("content",[]) if b.get("type")=="text")
+            blocos = resp.json().get("content", [])
+            texto  = "".join(b.get("text", "") for b in blocos if b.get("type") == "text")
+            # Remove possíveis blocos de markdown
+            texto = texto.replace("```json", "").replace("```", "").strip()
             inicio = texto.find("{")
             fim    = texto.rfind("}") + 1
             if inicio >= 0 and fim > inicio:
                 dados = json.loads(texto[inicio:fim])
-                campos = ["soja","milho","trigo","cafe","algodao","boi","arroz"]
-                if all(isinstance(dados.get(c,0),(int,float)) and dados.get(c,0) > 0 for c in campos):
+                campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
+                if all(isinstance(dados.get(c, 0), (int, float)) and float(dados.get(c, 0)) > 0 for c in campos):
                     return dados
     except Exception:
         pass
@@ -949,9 +962,9 @@ def buscar_precos_commodities():
 
     hoje = datetime.now().strftime("%d/%m/%Y")
     for chave, fb in {
-        "soja_sc":    {"preco":142.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
-        "milho_sc":   {"preco": 74.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
-        "trigo_sc":   {"preco":100.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "soja_sc":    {"preco":115.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "milho_sc":   {"preco": 58.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "trigo_sc":   {"preco": 69.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
         "cafe_sc":    {"preco":2250.0,"unidade":"R$/sc 60kg","praca":"SP","fonte":f"Referência {hoje}"},
         "algodao_at": {"preco":120.0, "unidade":"R$/@",      "praca":"MT","fonte":f"Referência {hoje}"},
         "boi_at":     {"preco":320.0, "unidade":"R$/@",      "praca":"SP","fonte":f"Referência {hoje}"},
@@ -3469,7 +3482,7 @@ elif menu == "Diagnóstico Completo":
 
         st.subheader("💰 Inteligência Econômica")
         area          = float(d["area"])
-        preco_soja    = 135
+        preco_soja    = st.session_state.get("precos_data", {}).get("soja_sc", {}).get("preco", 115.0)
         custo_base    = 3200
         receita_estimada = produtividade_ia * preco_soja * area
         lucro_estimado   = receita_estimada - (custo_base * area)
@@ -5335,13 +5348,13 @@ elif menu == "💰 Preços de Mercado":
         )
 
     # ── Extrai todos os valores ──────────────────────────────────────
-    soja_p     = precos.get("soja_sc",    {}).get("preco", 142.0)
-    milho_p    = precos.get("milho_sc",   {}).get("preco",  74.0)
-    trigo_p    = precos.get("trigo_sc",   {}).get("preco",  98.0)
-    cafe_p     = precos.get("cafe_sc",    {}).get("preco", 2100.0)
-    algodao_p  = precos.get("algodao_at", {}).get("preco", 118.0)
-    boi_p      = precos.get("boi_at",     {}).get("preco", 310.0)
-    arroz_p    = precos.get("arroz_sc",   {}).get("preco",  72.0)
+    soja_p     = precos.get("soja_sc",    {}).get("preco", 115.0)
+    milho_p    = precos.get("milho_sc",   {}).get("preco",  58.0)
+    trigo_p    = precos.get("trigo_sc",   {}).get("preco",  69.0)
+    cafe_p     = precos.get("cafe_sc",    {}).get("preco", 2250.0)
+    algodao_p  = precos.get("algodao_at", {}).get("preco", 120.0)
+    boi_p      = precos.get("boi_at",     {}).get("preco", 320.0)
+    arroz_p    = precos.get("arroz_sc",   {}).get("preco",  74.0)
     dolar_p    = precos.get("dolar",      {}).get("preco",   5.80)
     fonte_dolar= precos.get("dolar",      {}).get("fonte", "")
     fonte_graos= precos.get("soja_sc",    {}).get("fonte", "")
