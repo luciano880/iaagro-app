@@ -3764,65 +3764,90 @@ elif menu == "Estoque de Insumos":
         if not PYZBAR_OK:
             st.error("❌ Biblioteca pyzbar não disponível. Verifique o requirements.txt e o redeploy.")
         else:
-            st.info("Tire uma foto do código de barras do produto ou faça upload da imagem.")
+            st.info("📸 Tire foto do código de barras do produto. Ao detectar, ele será adicionado automaticamente ao estoque.")
+
+            # Configurações rápidas antes do upload
+            col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+            with col_cfg1:
+                bc_qtd_cfg = st.number_input("Quantidade", min_value=0.0, value=1.0, key="bc_qtd_cfg")
+                bc_uni_cfg = st.selectbox("Unidade", ["kg","ton","litros","sacos","galões","unidades"], key="bc_uni_cfg")
+            with col_cfg2:
+                bc_cat_cfg = st.selectbox("Categoria", [
+                    "Fungicida","Inseticida","Herbicida","Fertilizante",
+                    "Cloreto de Potássio","Ureia","Biológico","Foliar",
+                    "Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+                ], key="bc_cat_cfg")
+                bc_cult_cfg = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="bc_cult_cfg")
+            with col_cfg3:
+                bc_vul_cfg = st.number_input("Valor unitário R$", min_value=0.0, value=0.0, key="bc_vul_cfg")
+                bc_min_cfg = st.number_input("Estoque mínimo", min_value=0.0, value=0.0, key="bc_min_cfg")
+
+            st.divider()
             img_barcode = st.file_uploader(
-                "📸 Upload da imagem com código de barras",
+                "📸 Envie a foto do código de barras",
                 type=["jpg","jpeg","png","bmp","webp"],
                 key="uploader_barcode"
             )
             if img_barcode:
+                # Tenta em resolução original e depois ampliada para melhorar detecção
                 img_pil = PILImage.open(img_barcode).convert("RGB")
                 st.image(img_pil, caption="Imagem enviada", use_container_width=True)
+
                 codigos = pyzbar_decode(img_pil)
                 if not codigos:
-                    st.warning("⚠️ Nenhum código de barras detectado. Tente uma imagem mais nítida e bem iluminada.")
+                    # Tenta ampliar a imagem para melhorar detecção
+                    w, h = img_pil.size
+                    img_grande = img_pil.resize((w * 2, h * 2), PILImage.LANCZOS)
+                    codigos = pyzbar_decode(img_grande)
+
+                if not codigos:
+                    st.warning("⚠️ Nenhum código detectado. Dicas: use boa iluminação, foco nítido e enquadre só o código.")
                 else:
                     for cod in codigos:
                         valor_cod = cod.data.decode("utf-8")
                         tipo_cod  = cod.type
-                        st.success(f"✅ Código detectado: **{valor_cod}** ({tipo_cod})")
 
-                        st.markdown("#### Preencha os dados do produto")
-                        col_b1, col_b2, col_b3 = st.columns(3)
-                        with col_b1:
-                            nome_bc  = st.text_input("Nome do produto", key=f"bc_nome_{valor_cod}")
-                            cat_bc   = st.selectbox("Categoria", [
-                                "Fertilizante","Cloreto de Potássio","Ureia","Fungicida",
-                                "Inseticida","Herbicida","Biológico","Foliar","Semente",
-                                "Calcário","Gesso Agrícola","Adjuvante","Outro"
-                            ], key=f"bc_cat_{valor_cod}")
-                            cult_bc  = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key=f"bc_cult_{valor_cod}")
-                        with col_b2:
-                            qtd_bc   = st.number_input("Quantidade", min_value=0.0, value=0.0, key=f"bc_qtd_{valor_cod}")
-                            uni_bc   = st.selectbox("Unidade", ["kg","ton","litros","sacos","galões","unidades"], key=f"bc_uni_{valor_cod}")
-                        with col_b3:
-                            vul_bc   = st.number_input("Valor unitário R$", min_value=0.0, value=0.0, key=f"bc_vul_{valor_cod}")
-                            min_bc   = st.number_input("Estoque mínimo", min_value=0.0, value=0.0, key=f"bc_min_{valor_cod}")
+                        # Busca nome do produto na Open Food Facts (base pública de EAN)
+                        nome_produto = valor_cod  # fallback: usa o próprio código como nome
+                        try:
+                            resp_off = requests.get(
+                                f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
+                                timeout=4
+                            )
+                            if resp_off.status_code == 200:
+                                data_off = resp_off.json()
+                                if data_off.get("status") == 1:
+                                    prod_off = data_off.get("product", {})
+                                    nome_produto = (
+                                        prod_off.get("product_name_pt")
+                                        or prod_off.get("product_name")
+                                        or valor_cod
+                                    )
+                        except Exception:
+                            pass
 
-                        if st.button("✅ Adicionar ao Estoque", key=f"bc_btn_{valor_cod}"):
-                            if not nome_bc.strip():
-                                st.error("Informe o nome do produto.")
-                            else:
-                                novo = {
-                                    "Insumo": nome_bc.strip(),
-                                    "Categoria": cat_bc,
-                                    "Quantidade": qtd_bc,
-                                    "Unidade": uni_bc,
-                                    "Valor Unitário R$": vul_bc,
-                                    "Valor Total R$": qtd_bc * vul_bc,
-                                    "Estoque Mínimo": min_bc,
-                                    "Observação": f"Código de barras: {valor_cod}",
-                                    "Cultura": cult_bc,
-                                    "Dose ha": 0.0,
-                                    "Litros ha": 75.0,
-                                    "Tanque litros": 2000,
-                                    "Fabricante": "",
-                                    "Ingrediente Ativo": "",
-                                }
-                                st.session_state.estoque.append(novo)
-                                salvar_dados_iaagro()
-                                st.success(f"✅ **{nome_bc}** adicionado ao estoque!")
-                                st.rerun()
+                        # Adiciona automaticamente ao estoque
+                        novo = {
+                            "Insumo": nome_produto,
+                            "Categoria": bc_cat_cfg,
+                            "Quantidade": bc_qtd_cfg,
+                            "Unidade": bc_uni_cfg,
+                            "Valor Unitário R$": bc_vul_cfg,
+                            "Valor Total R$": round(bc_qtd_cfg * bc_vul_cfg, 2),
+                            "Estoque Mínimo": bc_min_cfg,
+                            "Observação": f"Código de barras: {valor_cod} ({tipo_cod})",
+                            "Cultura": bc_cult_cfg,
+                            "Dose ha": 0.0,
+                            "Litros ha": 75.0,
+                            "Tanque litros": 2000,
+                            "Fabricante": "",
+                            "Ingrediente Ativo": "",
+                        }
+                        st.session_state.estoque.append(novo)
+                        salvar_dados_iaagro()
+                        st.success(f"✅ **{nome_produto}** adicionado ao estoque automaticamente! (Cód: {valor_cod})")
+                        st.balloons()
+                        st.rerun()
 
     # ════════════════════════════════════════════════════════════════════
     # TAB 3 — IMPORTAR NOTA FISCAL XML (NF-e)
