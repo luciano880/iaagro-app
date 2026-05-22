@@ -1,6 +1,7 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 from datetime import date, datetime
+import random
 import json
 import os
 import sqlite3
@@ -20,22 +21,6 @@ import pytesseract
 import platform
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-
-# ─────────────────────────────────────────────
-# API KEY ANTHROPIC — lê do Streamlit Secrets
-# ou variável de ambiente (para uso local)
-# ─────────────────────────────────────────────
-def get_anthropic_headers():
-    """Retorna headers completos para a API Anthropic, incluindo a chave."""
-    try:
-        api_key = st.secrets["ANTHROPIC_API_KEY"]
-    except Exception:
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    return {
-        "Content-Type": "application/json",
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-    }
 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -75,19 +60,6 @@ def adicionar_logo_fundo():
     )
 
 adicionar_logo_fundo()
-
-# ─────────────────────────────────────────────
-# PWA — manifest + ícone + meta tags mobile
-# ─────────────────────────────────────────────
-st.markdown("""
-<link rel="manifest" href="/app/static/manifest.json">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="IAAgro Pro">
-<meta name="theme-color" content="#22c55e">
-<link rel="apple-touch-icon" href="/app/static/IAAgrologo.jpeg">
-""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # CSS UNIFICADO (sem conflitos e sem duplicatas)
@@ -511,12 +483,20 @@ def error_box(msg):
 
 # ─────────────────────────────────────────────
 # ARQUIVOS DE PERSISTÊNCIA
+# Usa pasta /tmp no Streamlit Cloud (persiste entre reruns da sessão)
+# Para persistência total entre deploys, usar backup manual via Configurações
 # ─────────────────────────────────────────────
-ARQUIVO_USUARIOS = "usuarios.json"
-ARQUIVO_ESTOQUE  = "estoque.json"
-ARQUIVO_AREAS    = "areas.json"
-ARQUIVO_DADOS_IAAGRO = "dados_iaagro.json"
-DB_FILE              = "iaagro.db"
+import pathlib
+
+# Detecta se está no Streamlit Cloud ou local
+_BASE_DIR = pathlib.Path("/tmp/iaagro_data")
+_BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+ARQUIVO_USUARIOS     = str(_BASE_DIR / "usuarios.json")
+ARQUIVO_ESTOQUE      = str(_BASE_DIR / "estoque.json")
+ARQUIVO_AREAS        = str(_BASE_DIR / "areas.json")
+ARQUIVO_DADOS_IAAGRO = str(_BASE_DIR / "dados_iaagro.json")
+DB_FILE              = str(_BASE_DIR / "iaagro.db")
 
 # ─────────────────────────────────────────────
 # CORREÇÃO 9: senhas com hash (hashlib)
@@ -615,7 +595,7 @@ def gerar_backup():
         "carencia_registros": st.session_state.get("carencia_registros", []),
         "dre_registros":      st.session_state.get("dre_registros", []),
         "calendario_eventos": st.session_state.get("calendario_eventos", []),
-        "notas_fiscal":       st.session_state.get("notas_fiscal", []),
+        "email_config":       st.session_state.get("email_config", {}),
         "backup_data": str(datetime.now())
     }
     return json.dumps(dados, ensure_ascii=False, indent=2).encode("utf-8")
@@ -633,10 +613,13 @@ def restaurar_backup(arquivo):
         st.session_state.carencia_registros  = dados.get("carencia_registros", [])
         st.session_state.dre_registros       = dados.get("dre_registros", [])
         st.session_state.calendario_eventos  = dados.get("calendario_eventos", [])
-        st.session_state.notas_fiscal        = dados.get("notas_fiscal", [])
+        st.session_state.harvest_historico   = dados.get("harvest_historico", [])
+        st.session_state.receituarios        = dados.get("receituarios", [])
+        if dados.get("email_config"):
+            st.session_state.email_config    = dados["email_config"]
         salvar_dados_iaagro()
         salvar_usuarios(st.session_state.usuarios)
-        return True, f"Backup de {dados.get('backup_data','?')} restaurado!"
+        return True, f"Backup de {dados.get('backup_data','?')} restaurado com sucesso!"
     except Exception as e:
         return False, f"Erro ao restaurar: {e}"
 
@@ -660,6 +643,50 @@ def enviar_email_alerta(destinatario, assunto, corpo):
         return True
     except Exception:
         return False
+
+
+def enviar_email_recuperacao(email_destino, usuario, token):
+    """Envia email com token de 6 dígitos para recuperação de senha."""
+    try:
+        cfg = st.session_state.get("email_config", {})
+        if not cfg.get("ativo") or not cfg.get("remetente"):
+            return False, "Email não configurado. Vá em ⚙️ Configurações → Email SMTP."
+        corpo = f"""
+        <div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;
+        background:#0f2744;color:#fff;border-radius:14px;padding:30px;">
+        <h2 style="color:#22c55e;text-align:center;">🌿 IAAgro Pro</h2>
+        <h3 style="text-align:center;color:#fff;">Recuperação de Senha</h3>
+        <p>Olá, <b>{usuario}</b>!</p>
+        <p>Recebemos uma solicitação para redefinir sua senha.</p>
+        <p>Use o código abaixo para criar uma nova senha:</p>
+        <div style="background:#1e3a5f;border-radius:10px;padding:20px;text-align:center;
+        margin:20px 0;">
+          <span style="font-size:36px;font-weight:900;letter-spacing:10px;color:#22c55e;">
+          {token}
+          </span>
+        </div>
+        <p style="color:#93c5fd;font-size:13px;">
+        ⏱️ Este código expira em <b>15 minutos</b>.<br>
+        Se não foi você, ignore este email.
+        </p>
+        <hr style="border-color:#1e3a5f;margin:20px 0;">
+        <p style="color:#6b7280;font-size:11px;text-align:center;">
+        IAAgro Pro — Sistema de Gestão Agrícola Inteligente
+        </p>
+        </div>
+        """
+        msg = MIMEMultipart()
+        msg["From"]    = cfg["remetente"]
+        msg["To"]      = email_destino
+        msg["Subject"] = "🌿 IAAgro Pro — Código de recuperação de senha"
+        msg.attach(MIMEText(corpo, "html"))
+        with smtplib.SMTP(cfg.get("smtp","smtp.gmail.com"), int(cfg.get("porta",587))) as s:
+            s.starttls()
+            s.login(cfg["remetente"], cfg.get("senha",""))
+            s.send_message(msg)
+        return True, "ok"
+    except Exception as e:
+        return False, str(e)
 
 def checar_alertas_estoque():
     cfg = st.session_state.get("email_config", {})
@@ -738,115 +765,197 @@ def alerta_clima_aplicacao(codigo_clima, velocidade_vento, precipitacao):
 # PREÇOS DE COMMODITIES — CEPEA/ESALQ via scraping
 # ─────────────────────────────────────────────
 def buscar_dolar_awesomeapi():
-    """Busca cotação real do dólar via AwesomeAPI (gratuita, sem chave)."""
+    """Busca cotação real do dólar — tenta 4 fontes em sequência."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    }
+    # 1. Banco Central do Brasil — PTAX
     try:
-        r = requests.get(
-            "https://economia.awesomeapi.com.br/json/last/USD-BRL",
-            timeout=6, headers={"User-Agent": "iaagro/1.0"}
-        )
+        from datetime import datetime as _dt2, timedelta as _td
+        for delta in [0, 1, 2]:
+            data = (_dt2.now() - _td(days=delta)).strftime("%m-%d-%Y")
+            url_bcb = (f"https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+                       f"CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao='{data}'"
+                       f"&$top=1&$format=json&$select=cotacaoVenda")
+            r = requests.get(url_bcb, timeout=8, headers=headers)
+            if r.status_code == 200:
+                val = r.json().get("value", [])
+                if val and float(val[0].get("cotacaoVenda", 0)) > 0:
+                    return {"preco": round(float(val[0]["cotacaoVenda"]), 4),
+                            "fonte": "Banco Central do Brasil PTAX (tempo real)",
+                            "horario": data}
+    except Exception:
+        pass
+    # 2. AwesomeAPI
+    try:
+        r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
+                         timeout=6, headers=headers)
         if r.status_code == 200:
             d = r.json()
             bid = float(d["USDBRL"]["bid"])
-            return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)", "horario": d["USDBRL"].get("create_date","")}
+            if bid > 0:
+                return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
+                        "horario": d["USDBRL"].get("create_date", "")}
     except Exception:
         pass
-    return {"preco": 5.80, "fonte": "Fallback offline"}
-
-def buscar_precos_ia_cepea():
-    """Usa Claude para buscar cotações CEPEA/ESALQ via web search em tempo real."""
+    # 3. ExchangeRate-API
     try:
-        prompt = """Pesquise os preços atuais das seguintes commodities agrícolas no mercado brasileiro (CEPEA/ESALQ ou B3, data de hoje):
-- Soja (saca 60kg, Paraná ou Mato Grosso)
-- Milho (saca 60kg, Paraná ou Mato Grosso)
-- Trigo (saca 60kg, Paraná)
-- Café arábica (saca 60kg, CEPEA)
-- Algodão (@/lb ou R$/arroba, CEPEA)
-- Boi gordo (arroba, CEPEA, São Paulo)
-- Arroz em casca (saca 50kg, Rio Grande do Sul)
+        r3 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5, headers=headers)
+        if r3.status_code == 200:
+            brl = r3.json().get("rates", {}).get("BRL", 0)
+            if brl > 0:
+                return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
+    except Exception:
+        pass
+    return {"preco": 5.80, "fonte": "Offline"}
 
-Retorne APENAS um JSON válido, sem explicações, sem markdown, sem backticks, exatamente neste formato:
-{
-  "soja_sc":    {"preco": 0.0, "unidade": "R$/sc 60kg", "praça": "PR"},
-  "milho_sc":   {"preco": 0.0, "unidade": "R$/sc 60kg", "praça": "PR"},
-  "trigo_sc":   {"preco": 0.0, "unidade": "R$/sc 60kg", "praça": "PR"},
-  "cafe_sc":    {"preco": 0.0, "unidade": "R$/sc 60kg", "praça": "SP"},
-  "algodao_at": {"preco": 0.0, "unidade": "R$/@",       "praça": "MT"},
-  "boi_at":     {"preco": 0.0, "unidade": "R$/@",       "praça": "SP"},
-  "arroz_sc":   {"preco": 0.0, "unidade": "R$/sc 50kg", "praça": "RS"},
-  "fonte": "CEPEA/ESALQ",
-  "data": "DD/MM/AAAA"
-}"""
 
+def buscar_precos_cepea_ia():
+    """
+    Usa Claude API com web_search para buscar preços CEPEA em tempo real.
+    Esta chamada funciona no Streamlit Cloud pois vai para api.anthropic.com.
+    """
+    try:
+        prompt = (
+            "Pesquise AGORA os precos mais recentes das commodities agricolas brasileiras "
+            "(CEPEA/ESALQ ou indicador de mercado, data de hoje). "
+            "Responda SOMENTE com JSON valido sem markdown:\n"
+            '{"soja":0.0,"milho":0.0,"trigo":0.0,"cafe":0.0,"algodao":0.0,"boi":0.0,"arroz":0.0,'
+            '"fonte":"CEPEA/ESALQ","data":"DD/MM/AAAA"}\n'
+            "Unidades: soja/milho/trigo/cafe em R$/sc 60kg (PR/SP), "
+            "algodao e boi em R$/arroba (MT/SP), arroz R$/sc 50kg (RS)."
+        )
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers=get_anthropic_headers(),
+            headers={"Content-Type": "application/json"},
             json={
                 "model": "claude-sonnet-4-20250514",
-                "max_tokens": 600,
+                "max_tokens": 300,
                 "tools": [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages": [{"role": "user", "content": prompt}]
             },
-            timeout=40
+            timeout=45
         )
         if resp.status_code == 200:
-            texto = ""
-            for bloco in resp.json().get("content", []):
-                if bloco.get("type") == "text":
-                    texto += bloco.get("text", "")
-            # Limpar e parsear JSON
-            texto = texto.strip()
-            # Remover possíveis backticks ou prefixo "json"
-            if "```" in texto:
-                texto = texto.split("```")[1]
-                if texto.startswith("json"):
-                    texto = texto[4:]
-            # Extrair só o JSON (entre { })
+            texto = "".join(b.get("text","") for b in resp.json().get("content",[]) if b.get("type")=="text")
             inicio = texto.find("{")
             fim    = texto.rfind("}") + 1
             if inicio >= 0 and fim > inicio:
                 dados = json.loads(texto[inicio:fim])
-                dados["_fonte_ia"] = True
-                return dados
+                campos = ["soja","milho","trigo","cafe","algodao","boi","arroz"]
+                if all(isinstance(dados.get(c,0),(int,float)) and dados.get(c,0) > 0 for c in campos):
+                    return dados
     except Exception:
         pass
     return None
 
-def buscar_precos_commodities():
-    """Busca preços reais: dólar via AwesomeAPI + grãos via IA/CEPEA."""
+
+def converter_para_reais(precos_cbot, dolar):
+    """Converte cotações CBOT/ICE para R$."""
     resultado = {}
-
-    # 1. Dólar em tempo real (AwesomeAPI — gratuita)
-    resultado["dolar"] = buscar_dolar_awesomeapi()
-
-    # 2. Grãos via IA + web search (CEPEA/ESALQ)
-    dados_ia = buscar_precos_ia_cepea()
-    if dados_ia:
-        fonte_ia = dados_ia.get("fonte", "CEPEA via IA")
-        data_ia  = dados_ia.get("data", "")
-        label    = f"{fonte_ia} — {data_ia}" if data_ia else fonte_ia
-
-        for chave in ["soja_sc","milho_sc","trigo_sc","cafe_sc","algodao_at","boi_at","arroz_sc"]:
-            if chave in dados_ia and isinstance(dados_ia[chave], dict):
-                resultado[chave] = {
-                    "preco":  float(dados_ia[chave].get("preco", 0)),
-                    "unidade":dados_ia[chave].get("unidade",""),
-                    "praca":  dados_ia[chave].get("praça",""),
-                    "fonte":  label,
-                }
-    else:
-        # Fallback offline com valores de referência recentes (Mai/2026)
-        resultado.setdefault("soja_sc",    {"preco": 138.0, "unidade": "R$/sc 60kg", "praca": "PR",  "fonte": "Referência offline"})
-        resultado.setdefault("milho_sc",   {"preco":  72.0, "unidade": "R$/sc 60kg", "praca": "PR",  "fonte": "Referência offline"})
-        resultado.setdefault("trigo_sc",   {"preco":  98.0, "unidade": "R$/sc 60kg", "praca": "PR",  "fonte": "Referência offline"})
-        resultado.setdefault("cafe_sc",    {"preco": 2100.0,"unidade": "R$/sc 60kg", "praca": "SP",  "fonte": "Referência offline"})
-        resultado.setdefault("algodao_at", {"preco":  118.0,"unidade": "R$/@",       "praca": "MT",  "fonte": "Referência offline"})
-        resultado.setdefault("boi_at",     {"preco":  310.0,"unidade": "R$/@",       "praca": "SP",  "fonte": "Referência offline"})
-        resultado.setdefault("arroz_sc",   {"preco":   72.0,"unidade": "R$/sc 50kg", "praca": "RS",  "fonte": "Referência offline"})
-
+    dv = dolar if isinstance(dolar,(int,float)) and dolar > 0 else 5.80
+    if precos_cbot.get("soja_cbot",0)  > 0:
+        resultado["soja_sc"]    = {"preco": round((precos_cbot["soja_cbot"]/100)*2.2046*dv,2),   "unidade":"R$/sc 60kg","praca":"CBOT","fonte":f"CBOT+USD {dv:.2f}"}
+    if precos_cbot.get("milho_cbot",0) > 0:
+        resultado["milho_sc"]   = {"preco": round((precos_cbot["milho_cbot"]/100)*2.3621*dv,2),  "unidade":"R$/sc 60kg","praca":"CBOT","fonte":f"CBOT+USD {dv:.2f}"}
+    if precos_cbot.get("trigo_cbot",0) > 0:
+        resultado["trigo_sc"]   = {"preco": round((precos_cbot["trigo_cbot"]/100)*2.2046*dv,2),  "unidade":"R$/sc 60kg","praca":"CBOT","fonte":f"CBOT+USD {dv:.2f}"}
+    if precos_cbot.get("cafe_cbot",0)  > 0:
+        resultado["cafe_sc"]    = {"preco": round((precos_cbot["cafe_cbot"]/100)*132.277*dv,2),   "unidade":"R$/sc 60kg","praca":"ICE","fonte":f"ICE+USD {dv:.2f}"}
+    if precos_cbot.get("algodao_ice",0)> 0:
+        resultado["algodao_at"] = {"preco": round((precos_cbot["algodao_ice"]/100)*33.069*dv,2),  "unidade":"R$/@","praca":"ICE","fonte":f"ICE+USD {dv:.2f}"}
+    if precos_cbot.get("boi_cme",0)    > 0:
+        resultado["boi_at"]     = {"preco": round((precos_cbot["boi_cme"]/100)*33.069*dv,2),      "unidade":"R$/@","praca":"CME","fonte":f"CME+USD {dv:.2f}"}
     return resultado
 
-# ─────────────────────────────────────────────
-# OCR DE LAUDO DE SOLO — PDF e Imagem
+
+def buscar_precos_scraping():
+    """Fallback: Stooq CSV e Yahoo Finance."""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    resultado = {}
+    stooq_map = {"zs.f":"soja_cbot","zc.f":"milho_cbot","zw.f":"trigo_cbot",
+                 "kc.f":"cafe_cbot","ct.f":"algodao_ice","gf.f":"boi_cme"}
+    for tk, ch in stooq_map.items():
+        try:
+            r = requests.get(f"https://stooq.com/q/l/?s={tk}&f=sd2t2ohlcv&h&e=csv",
+                             headers=headers, timeout=8)
+            if r.status_code == 200:
+                lns = r.text.strip().split("\n")
+                if len(lns) >= 2:
+                    cs = lns[1].split(",")
+                    if len(cs) >= 7:
+                        ps = cs[6].strip()
+                        if ps and ps not in ("N/D","0",""):
+                            pv = float(ps)
+                            if pv > 0: resultado[ch] = pv
+        except Exception:
+            continue
+    if not resultado:
+        ym = {"ZS=F":"soja_cbot","ZC=F":"milho_cbot","ZW=F":"trigo_cbot",
+              "KC=F":"cafe_cbot","CT=F":"algodao_ice","GF=F":"boi_cme"}
+        yh = {**headers,"Accept":"application/json","Referer":"https://finance.yahoo.com/"}
+        for tk, ch in ym.items():
+            for ep in [f"https://query2.finance.yahoo.com/v8/finance/chart/{tk}?interval=1d&range=1d",
+                       f"https://query1.finance.yahoo.com/v8/finance/chart/{tk}?interval=1d&range=1d"]:
+                try:
+                    r = requests.get(ep, headers=yh, timeout=8)
+                    if r.status_code == 200:
+                        meta = r.json()["chart"]["result"][0]["meta"]
+                        pv   = meta.get("regularMarketPrice") or meta.get("previousClose",0)
+                        if pv and float(pv) > 0:
+                            resultado[ch] = float(pv)
+                            break
+                except Exception:
+                    continue
+    return resultado if resultado else None
+
+
+def buscar_precos_commodities():
+    """
+    Busca preços em tempo real:
+    1. Dólar via BCB PTAX / AwesomeAPI / ExchangeRate-API
+    2. Commodities via IA + web_search CEPEA (principal — funciona no Streamlit Cloud)
+    3. Fallback: CBOT/ICE via Stooq / Yahoo Finance
+    4. Fallback final: referências offline
+    """
+    resultado = {}
+    dolar_data = buscar_dolar_awesomeapi()
+    resultado["dolar"] = dolar_data
+    dolar_val  = dolar_data.get("preco", 5.80)
+
+    # Prioridade 1: IA com CEPEA
+    dados_cepea = buscar_precos_cepea_ia()
+    if dados_cepea:
+        fc = f"{dados_cepea.get('fonte','CEPEA')} — {dados_cepea.get('data','')}"
+        resultado["soja_sc"]    = {"preco":float(dados_cepea["soja"]),    "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
+        resultado["milho_sc"]   = {"preco":float(dados_cepea["milho"]),   "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
+        resultado["trigo_sc"]   = {"preco":float(dados_cepea["trigo"]),   "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
+        resultado["cafe_sc"]    = {"preco":float(dados_cepea["cafe"]),    "unidade":"R$/sc 60kg","praca":"SP","fonte":fc}
+        resultado["algodao_at"] = {"preco":float(dados_cepea["algodao"]), "unidade":"R$/@",      "praca":"MT","fonte":fc}
+        resultado["boi_at"]     = {"preco":float(dados_cepea["boi"]),     "unidade":"R$/@",      "praca":"SP","fonte":fc}
+        resultado["arroz_sc"]   = {"preco":float(dados_cepea["arroz"]),   "unidade":"R$/sc 50kg","praca":"RS","fonte":fc}
+    else:
+        # Prioridade 2: CBOT convertido
+        precos_cbot = buscar_precos_scraping() or {}
+        resultado.update(converter_para_reais(precos_cbot, dolar_val))
+
+    hoje = datetime.now().strftime("%d/%m/%Y")
+    for chave, fb in {
+        "soja_sc":    {"preco":142.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "milho_sc":   {"preco": 74.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "trigo_sc":   {"preco":100.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "cafe_sc":    {"preco":2250.0,"unidade":"R$/sc 60kg","praca":"SP","fonte":f"Referência {hoje}"},
+        "algodao_at": {"preco":120.0, "unidade":"R$/@",      "praca":"MT","fonte":f"Referência {hoje}"},
+        "boi_at":     {"preco":320.0, "unidade":"R$/@",      "praca":"SP","fonte":f"Referência {hoje}"},
+        "arroz_sc":   {"preco": 74.0, "unidade":"R$/sc 50kg","praca":"RS","fonte":f"Referência {hoje}"},
+    }.items():
+        resultado.setdefault(chave, fb)
+
+    resultado["_atualizado_em"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    return resultado
+
 # ─────────────────────────────────────────────
 def extrair_texto_pdf(arquivo_pdf):
     """Extrai texto de PDF de laudo de solo."""
@@ -917,7 +1026,6 @@ def salvar_dados_iaagro():
         "calendario_eventos": st.session_state.get("calendario_eventos", []),
         "harvest_historico":   st.session_state.get("harvest_historico", []),
         "receituarios":        st.session_state.get("receituarios", []),
-        "notas_fiscal":        st.session_state.get("notas_fiscal", []),
     }
     with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
         json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
@@ -1057,28 +1165,141 @@ def tela_login():
                 st.success("Conta criada com sucesso. Agora faça login.")
 
     with aba_recuperar:
-        st.write("Recupere sua senha usando usuário e email cadastrado.")
+        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
+        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 14px 0;font-size:13px;">
+        🔐 Informe seu usuário e e-mail cadastrado. Enviaremos um código de 6 dígitos para redefinir sua senha.
+        </div>''', unsafe_allow_html=True)
 
-        usuario_recuperar      = st.text_input("Usuário cadastrado", key="rec_usuario")
-        email_recuperar        = st.text_input("Email de recuperação", key="rec_email")
-        nova_senha_rec         = st.text_input("Nova senha", type="password", key="rec_nova_senha")
-        confirmar_nova_senha_rec = st.text_input("Confirmar nova senha", type="password", key="rec_confirmar_senha")
+        # Session state do fluxo de recuperação
+        if "rec_etapa"      not in st.session_state: st.session_state.rec_etapa      = 1
+        if "rec_token"      not in st.session_state: st.session_state.rec_token      = ""
+        if "rec_token_exp"  not in st.session_state: st.session_state.rec_token_exp  = None
+        if "rec_usuario_ok" not in st.session_state: st.session_state.rec_usuario_ok = ""
 
-        if st.button("Redefinir senha"):
-            if not usuario_recuperar.strip():
-                st.error("Digite o usuário cadastrado.")
-            elif usuario_recuperar not in st.session_state.usuarios:
-                st.error("Usuário não encontrado.")
-            elif st.session_state.usuarios[usuario_recuperar].get("email", "") != email_recuperar:
-                st.error("Email de recuperação não confere.")
-            elif len(nova_senha_rec) < 6:
-                st.error("A nova senha precisa ter pelo menos 6 caracteres.")
-            elif nova_senha_rec != confirmar_nova_senha_rec:
-                st.error("As senhas não conferem.")
-            else:
-                st.session_state.usuarios[usuario_recuperar]["senha"] = hash_senha(nova_senha_rec)
-                salvar_usuarios(st.session_state.usuarios)
-                st.success("Senha redefinida com sucesso. Agora faça login.")
+        # ── ETAPA 1: Solicitar código ──────────────────────────────────
+        if st.session_state.rec_etapa == 1:
+            st.markdown("#### 📧 Etapa 1 — Solicitar código por e-mail")
+            rec_user  = st.text_input("👤 Usuário cadastrado", key="rec_u1")
+            rec_email = st.text_input("📧 E-mail cadastrado",  key="rec_e1",
+                                       placeholder="email@exemplo.com")
+
+            cfg_email = st.session_state.get("email_config", {})
+            if not cfg_email.get("ativo") or not cfg_email.get("remetente"):
+                st.markdown('''<div style="background:#78350f;color:#fff;padding:10px 14px;
+                border-radius:8px;border-left:4px solid #f59e0b;font-size:12px;font-weight:600;">
+                ⚠️ Email SMTP não configurado. Configure em <b>⚙️ Configurações → Email SMTP</b>
+                para usar a recuperação por email.
+                </div>''', unsafe_allow_html=True)
+
+            if st.button("📨 Enviar código por e-mail", key="btn_enviar_token",
+                         use_container_width=True):
+                if not rec_user.strip():
+                    st.error("❌ Digite seu usuário.")
+                elif rec_user not in st.session_state.usuarios:
+                    st.error("❌ Usuário ou e-mail incorretos.")
+                elif not rec_email.strip() or "@" not in rec_email:
+                    st.error("❌ Digite um e-mail válido.")
+                elif st.session_state.usuarios[rec_user].get("email","").strip().lower() \
+                        != rec_email.strip().lower():
+                    st.error("❌ Usuário ou e-mail incorretos.")
+                else:
+                    # Gerar token de 6 dígitos
+                    token = str(random.randint(100000, 999999))
+                    exp   = datetime.now() + __import__('datetime').timedelta(minutes=15)
+                    ok, msg_err = enviar_email_recuperacao(rec_email.strip(), rec_user, token)
+                    if ok:
+                        st.session_state.rec_token      = token
+                        st.session_state.rec_token_exp  = exp
+                        st.session_state.rec_usuario_ok = rec_user
+                        st.session_state.rec_etapa      = 2
+                        st.rerun()
+                    else:
+                        if "não configurado" in msg_err.lower() or "não config" in msg_err.lower():
+                            st.error(f"❌ {msg_err}")
+                        else:
+                            st.error(f"❌ Falha ao enviar email: {msg_err}")
+
+        # ── ETAPA 2: Inserir código ────────────────────────────────────
+        elif st.session_state.rec_etapa == 2:
+            st.markdown("#### 🔢 Etapa 2 — Digite o código recebido")
+            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
+            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
+            ✅ Código enviado para o e-mail cadastrado do usuário <b>{st.session_state.rec_usuario_ok}</b>.<br>
+            ⏱️ Válido por 15 minutos.
+            </div>''', unsafe_allow_html=True)
+
+            token_digitado = st.text_input("🔢 Código de 6 dígitos",
+                                            placeholder="000000", key="rec_token_input",
+                                            max_chars=6)
+
+            col_et2a, col_et2b = st.columns(2)
+            with col_et2a:
+                if st.button("✅ Validar código", key="btn_validar_token",
+                             use_container_width=True):
+                    agora = datetime.now()
+                    if st.session_state.rec_token_exp and agora > st.session_state.rec_token_exp:
+                        st.error("❌ Código expirado. Solicite um novo.")
+                        st.session_state.rec_etapa = 1
+                        st.rerun()
+                    elif token_digitado.strip() == st.session_state.rec_token:
+                        st.session_state.rec_etapa = 3
+                        st.rerun()
+                    else:
+                        st.error("❌ Código incorreto. Verifique o email e tente novamente.")
+            with col_et2b:
+                if st.button("🔄 Reenviar código", key="btn_reenviar_token",
+                             use_container_width=True):
+                    st.session_state.rec_etapa = 1
+                    st.rerun()
+
+        # ── ETAPA 3: Nova senha ────────────────────────────────────────
+        elif st.session_state.rec_etapa == 3:
+            st.markdown("#### 🔑 Etapa 3 — Criar nova senha")
+            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
+            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
+            ✅ Código validado! Crie uma nova senha para <b>{st.session_state.rec_usuario_ok}</b>.
+            </div>''', unsafe_allow_html=True)
+
+            nova_senha1 = st.text_input("🔑 Nova senha (mín. 6 caracteres)",
+                                         type="password", key="rec_ns1")
+            nova_senha2 = st.text_input("🔑 Confirmar nova senha",
+                                         type="password", key="rec_ns2")
+
+            # Feedback em tempo real
+            if nova_senha1 and len(nova_senha1) < 6:
+                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Mínimo 6 caracteres.</div>', unsafe_allow_html=True)
+            if nova_senha1 and nova_senha2 and nova_senha1 != nova_senha2:
+                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Senhas não coincidem.</div>', unsafe_allow_html=True)
+            if nova_senha1 and nova_senha2 and nova_senha1 == nova_senha2 and len(nova_senha1) >= 6:
+                st.markdown('<div style="color:#86efac;font-size:12px;font-weight:600;">✅ Senhas coincidem.</div>', unsafe_allow_html=True)
+
+            if st.button("🔐 Salvar nova senha", key="btn_salvar_nova_senha",
+                         use_container_width=True):
+                if len(nova_senha1) < 6:
+                    st.error("❌ Senha precisa ter pelo menos 6 caracteres.")
+                elif nova_senha1 != nova_senha2:
+                    st.error("❌ As senhas não coincidem.")
+                else:
+                    usuario_rec = st.session_state.rec_usuario_ok
+                    st.session_state.usuarios[usuario_rec]["senha"] = hash_senha(nova_senha1)
+                    salvar_usuarios(st.session_state.usuarios)
+                    # Limpar fluxo
+                    st.session_state.rec_etapa      = 1
+                    st.session_state.rec_token      = ""
+                    st.session_state.rec_token_exp  = None
+                    st.session_state.rec_usuario_ok = ""
+                    st.session_state.senha_redefinida = True
+                    st.rerun()
+
+        # Mensagem de sucesso persistente
+        if st.session_state.get("senha_redefinida"):
+            st.markdown('''<div style="background:#14532d;color:#fff;padding:14px 18px;
+            border-radius:10px;border-left:5px solid #22c55e;font-weight:700;font-size:15px;margin:8px 0;">
+            ✅ Senha redefinida com sucesso! Vá para a aba <b>Entrar</b> e faça login com a nova senha.
+            </div>''', unsafe_allow_html=True)
+            if st.button("🔓 Ir para Login", key="btn_ir_login", use_container_width=True):
+                st.session_state.senha_redefinida = False
+                st.rerun()
 
 
 if not st.session_state.logado:
@@ -1151,8 +1372,6 @@ if "dre_registros" not in st.session_state:
     st.session_state.dre_registros = dados_carregados.get("dre_registros", [])
 if "calendario_eventos" not in st.session_state:
     st.session_state.calendario_eventos = dados_carregados.get("calendario_eventos", [])
-if "notas_fiscal" not in st.session_state:
-    st.session_state.notas_fiscal = dados_carregados.get("notas_fiscal", [])
 
 # ── Mapa de Colheita IA — inicialização global ──────────────────
 if "harvest_df"        not in st.session_state: st.session_state.harvest_df        = None
@@ -1162,6 +1381,7 @@ if "harvest_historico" not in st.session_state: st.session_state.harvest_histori
 if "clima_data"        not in st.session_state: st.session_state.clima_data        = None
 if "precos_data"       not in st.session_state: st.session_state.precos_data       = None
 if "receituarios"      not in st.session_state: st.session_state.receituarios      = dados_carregados.get("receituarios", [])
+if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinida  = False
 
 # ─────────────────────────────────────────────
 
@@ -2459,6 +2679,7 @@ menu = st.sidebar.radio(
         "Relatório Final",
         "🌤️ Clima & Alertas",
         "💰 Preços de Mercado",
+        "📄 OCR Laudo de Solo",
         "⏱️ Prazo de Carência",
         "📋 Ordem de Serviço",
         "💹 Dashboard Financeiro",
@@ -2688,14 +2909,38 @@ elif menu == "Cadastro da Área":
     produtividade = st.number_input("Meta de produtividade em sacas/ha", min_value=0.0,
                                     value=float(st.session_state.dados.get("produtividade", 60.0)))
 
-    # CORREÇÃO: latitude/longitude com geolocalização ou padrão (eram usadas sem definição neste menu)
-    geo = get_geolocation()
-    if geo:
-        latitude  = geo["coords"]["latitude"]
-        longitude = geo["coords"]["longitude"]
-    else:
-        latitude  = st.session_state.dados.get("latitude", -26.88)
-        longitude = st.session_state.dados.get("longitude", -52.40)
+    # ── Geolocalização com tratamento robusto ────────────────────────
+    # Inicializa com coordenadas salvas ou padrão Brasil-Sul
+    latitude  = st.session_state.dados.get("latitude",  -26.88)
+    longitude = st.session_state.dados.get("longitude", -52.40)
+
+    col_geo_a, col_geo_b = st.columns([2, 1])
+    with col_geo_a:
+        latitude  = st.number_input("📍 Latitude",  value=float(latitude),
+                                     format="%.6f", key="cad_lat")
+        longitude = st.number_input("📍 Longitude", value=float(longitude),
+                                     format="%.6f", key="cad_lon")
+    with col_geo_b:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("📡 Usar GPS do celular", key="btn_gps_cad", use_container_width=True):
+            try:
+                geo = get_geolocation()
+                if geo and geo.get("coords"):
+                    st.session_state["_gps_lat"] = geo["coords"]["latitude"]
+                    st.session_state["_gps_lon"] = geo["coords"]["longitude"]
+                    st.rerun()
+            except Exception:
+                warning_box("GPS indisponível. Insira as coordenadas manualmente.")
+        if st.session_state.get("_gps_lat"):
+            latitude  = st.session_state["_gps_lat"]
+            longitude = st.session_state["_gps_lon"]
+            st.markdown(f'<div style="background:#14532d;color:#fff;padding:6px 10px;'
+                        f'border-radius:8px;font-size:11px;font-weight:700;">'
+                        f'✅ GPS: {latitude:.5f}, {longitude:.5f}</div>',
+                        unsafe_allow_html=True)
+        st.markdown('<div style="color:#94a3b8;font-size:11px;margin-top:4px;">'
+                    'Dica: use Google Maps para obter as coordenadas da área.</div>',
+                    unsafe_allow_html=True)
 
     if st.button("Salvar Nova Área"):
         id_area  = f"AREA-{st.session_state.contador_area:03d}"
@@ -2938,17 +3183,50 @@ elif menu == "Mapa de Fertilidade":
         st.subheader("🌡️ Heatmap de Fertilidade")
         df_heatmap = df_mapa[["Talhão","Score"]].copy()
         st.write("Quanto mais alto o score, melhor a fertilidade do talhão.")
-        st.dataframe(df_heatmap.style.background_gradient(cmap="RdYlGn", subset=["Score"]), use_container_width=True)
+
+        # Colorir manualmente sem depender de matplotlib/cmap
+        def cor_score(val):
+            if val >= 70:   return "background-color: #14532d; color: white"
+            elif val >= 40: return "background-color: #78350f; color: white"
+            else:           return "background-color: #7f1d1d; color: white"
+
+        try:
+            st.dataframe(
+                df_heatmap.style.applymap(cor_score, subset=["Score"]),
+                use_container_width=True
+            )
+        except Exception:
+            st.dataframe(df_heatmap, use_container_width=True)
         st.subheader("📊 Ranking de Fertilidade")
         st.bar_chart(df_mapa.set_index("Talhão")["Score"])
         st.subheader("🛰️ Mapa GPS dos Talhões")
-        geo = get_geolocation()
-        if geo:
-            latitude  = geo["coords"]["latitude"]
-            longitude = geo["coords"]["longitude"]
-        else:
-            latitude  = -26.88
-            longitude = -52.40
+
+        # Coordenadas — prioridade: GPS salvo > área cadastrada > padrão
+        latitude  = st.session_state.dados.get("latitude",  -26.88)
+        longitude = st.session_state.dados.get("longitude", -52.40)
+
+        col_mf1, col_mf2, col_mf3 = st.columns([2, 2, 1])
+        with col_mf1:
+            latitude  = st.number_input("Latitude",  value=float(latitude),
+                                         format="%.6f", key="mapa_fert_lat")
+        with col_mf2:
+            longitude = st.number_input("Longitude", value=float(longitude),
+                                         format="%.6f", key="mapa_fert_lon")
+        with col_mf3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("📡 GPS", key="btn_gps_mapa_fert", use_container_width=True,
+                         help="Clique para usar localização do celular"):
+                try:
+                    geo = get_geolocation()
+                    if geo and geo.get("coords"):
+                        st.session_state["_gps_mf_lat"] = geo["coords"]["latitude"]
+                        st.session_state["_gps_mf_lon"] = geo["coords"]["longitude"]
+                        st.rerun()
+                except Exception:
+                    pass
+        if st.session_state.get("_gps_mf_lat"):
+            latitude  = st.session_state["_gps_mf_lat"]
+            longitude = st.session_state["_gps_mf_lon"]
         mapa_folium = folium.Map(location=[latitude, longitude], zoom_start=13, tiles=None)
         folium.TileLayer(
             tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -2990,11 +3268,12 @@ elif menu == "Mapa de Fertilidade":
 # MENU: ANÁLISE DE SOLO
 # ─────────────────────────────────────────────
 elif menu == "Análise de Solo":
-    st.header("🧪 Análise de Solo")
+    st.header("Análise de Solo")
 
-    # ── CSS upload ──────────────────────────────────────────────────────────
+    # Injeta estilo escuro no componente de upload via JS
     st.markdown("""
     <style>
+    /* Força fundo escuro no dropzone do upload */
     [data-testid="stFileUploader"] section,
     [data-testid="stFileUploader"] section > div,
     [data-testid="stFileUploaderDropzone"],
@@ -3003,6 +3282,7 @@ elif menu == "Análise de Solo":
         border: 2px solid #22c55e !important;
         border-radius: 12px !important;
     }
+    /* Botão Upload */
     [data-testid="stFileUploaderDropzone"] button {
         background-color: #16a34a !important;
         color: #ffffff !important;
@@ -3011,7 +3291,11 @@ elif menu == "Análise de Solo":
         font-weight: 700 !important;
         font-size: 14px !important;
     }
-    [data-testid="stFileUploaderDropzone"] button span,
+    [data-testid="stFileUploaderDropzone"] button span {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+    /* Texto de instrução */
     [data-testid="stFileUploaderDropzone"] span,
     [data-testid="stFileUploaderDropzone"] p,
     [data-testid="stFileUploaderDropzone"] small,
@@ -3019,171 +3303,89 @@ elif menu == "Análise de Solo":
         color: #ffffff !important;
         opacity: 1 !important;
     }
+    /* Ícone */
     [data-testid="stFileUploaderDropzone"] svg path {
         fill: #22c55e !important;
         stroke: #22c55e !important;
     }
     </style>
     """, unsafe_allow_html=True)
-
-    tab_manual, tab_ocr, tab_foto = st.tabs([
-        "📋 Inserir / Editar Dados",
-        "📄 OCR — Ler Laudo Automaticamente",
-        "📷 Foto do Talhão",
-    ])
-
-    # ════════════════════════════════════════════════════════════════
-    # TAB 1 — INSERÇÃO MANUAL (conteúdo original de Análise de Solo)
-    # ════════════════════════════════════════════════════════════════
-    with tab_manual:
-        uploaded_file = st.file_uploader("📄 Upload planilha de análise (xlsx/csv)", type=["xlsx","csv"], key="solo_upload_planilha")
-        if uploaded_file is not None:
-            if uploaded_file.name.endswith(".csv"):
-                df_upload = pd.read_csv(uploaded_file)
-            else:
-                df_upload = pd.read_excel(uploaded_file)
-            success_box("✅ Planilha carregada com sucesso!")
-            st.dataframe(df_upload)
-
-        if not st.session_state.area_selecionada:
-            warning_box("Cadastre ou carregue uma área primeiro.")
+    uploaded_file = st.file_uploader("📄 Upload análise de solo", type=["xlsx","csv"])
+    if uploaded_file is not None:
+        if uploaded_file.name.endswith(".csv"):
+            df_upload = pd.read_csv(uploaded_file)
         else:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                ph       = st.number_input("pH do solo", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)))
-                fosforo  = st.number_input("Fósforo P", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)))
-                potassio = st.number_input("Potássio K", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)))
-            with col2:
-                materia_organica = st.number_input("Matéria orgânica %", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)))
-                calcio   = st.number_input("Cálcio Ca", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)))
-                magnesio = st.number_input("Magnésio Mg", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)))
-            with col3:
-                aluminio = st.number_input("Alumínio Al", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)))
-                enxofre  = st.number_input("Enxofre S", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)))
-                ctc      = st.number_input("CTC", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)))
+            df_upload = pd.read_excel(uploaded_file)
+        success_box("✅ Análise carregada com sucesso!")
+        st.dataframe(df_upload)
 
-            st.subheader("Micronutrientes")
-            col4, col5, col6 = st.columns(3)
-            with col4:
-                boro  = st.number_input("Boro B", min_value=0.0, value=float(st.session_state.dados.get("boro", 0.3)))
-                zinco = st.number_input("Zinco Zn", min_value=0.0, value=float(st.session_state.dados.get("zinco", 1.0)))
-            with col5:
-                manganes = st.number_input("Manganês Mn", min_value=0.0, value=float(st.session_state.dados.get("manganes", 5.0)))
-                cobre    = st.number_input("Cobre Cu", min_value=0.0, value=float(st.session_state.dados.get("cobre", 0.5)))
-            with col6:
-                argila = st.number_input("Argila %", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)))
+    if not st.session_state.area_selecionada:
+        warning_box("Cadastre ou carregue uma área primeiro.")
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            ph       = st.number_input("pH do solo", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)))
+            fosforo  = st.number_input("Fósforo P", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)))
+            potassio = st.number_input("Potássio K", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)))
+        with col2:
+            materia_organica = st.number_input("Matéria orgânica %", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)))
+            calcio   = st.number_input("Cálcio Ca", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)))
+            magnesio = st.number_input("Magnésio Mg", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)))
+        with col3:
+            aluminio = st.number_input("Alumínio Al", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)))
+            enxofre  = st.number_input("Enxofre S", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)))
+            ctc      = st.number_input("CTC", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)))
 
-            erros_val = []
-            if not validar_ph(ph):
-                erros_val.append("pH deve estar entre 3.5 e 9.0")
-            if ph == 0:
-                erros_val.append("pH não pode ser zero")
+        st.subheader("Micronutrientes")
+        col4, col5, col6 = st.columns(3)
+        with col4:
+            boro  = st.number_input("Boro B", min_value=0.0, value=float(st.session_state.dados.get("boro", 0.3)))
+            zinco = st.number_input("Zinco Zn", min_value=0.0, value=float(st.session_state.dados.get("zinco", 1.0)))
+        with col5:
+            manganes = st.number_input("Manganês Mn", min_value=0.0, value=float(st.session_state.dados.get("manganes", 5.0)))
+            cobre    = st.number_input("Cobre Cu", min_value=0.0, value=float(st.session_state.dados.get("cobre", 0.5)))
+        with col6:
+            argila = st.number_input("Argila %", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)))
 
+        # Validação de campos
+        erros_val = []
+        if not validar_ph(ph):
+            erros_val.append("pH deve estar entre 3.5 e 9.0")
+        if ph == 0:
+            erros_val.append("pH não pode ser zero")
+
+        if erros_val:
+            for e in erros_val:
+                st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:10px 16px;
+                border-radius:10px;border-left:5px solid #ef4444;font-weight:600;margin:4px 0;">
+                ❌ {e}</div>''', unsafe_allow_html=True)
+
+        if st.button("Salvar Análise"):
             if erros_val:
-                for e in erros_val:
-                    st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:10px 16px;
-                    border-radius:10px;border-left:5px solid #ef4444;font-weight:600;margin:4px 0;">
-                    ❌ {e}</div>''', unsafe_allow_html=True)
-
-            if st.button("Salvar Análise", key="btn_salvar_analise_manual"):
-                if erros_val:
-                    st.markdown('''<div style="background:#7f1d1d;color:#fff;padding:10px 16px;
-                    border-radius:10px;border-left:5px solid #ef4444;font-weight:600;">
-                    ❌ Corrija os erros antes de salvar.</div>''', unsafe_allow_html=True)
-                else:
-                    st.session_state.dados.update({
-                        "ph": ph, "fosforo": fosforo, "potassio": potassio,
-                        "materia_organica": materia_organica, "calcio": calcio, "magnesio": magnesio,
-                        "aluminio": aluminio, "enxofre": enxofre, "ctc": ctc,
-                        "boro": boro, "zinco": zinco, "manganes": manganes, "cobre": cobre, "argila": argila
-                    })
-                    atualizar_area_atual()
-                    salvar_dados_iaagro()
-                    nota_s  = calcular_nota(st.session_state.dados)
-                    score_s, classe_s, _ = score_solo(st.session_state.dados)
-                    id_area_atual = st.session_state.dados.get("id_area","")
-                    if id_area_atual:
-                        salvar_analise_solo_db(id_area_atual, st.session_state.dados, nota_s, score_s, classe_s)
-                    checar_alertas_estoque()
-                    success_box("Análise salva na área ativa e registrada no histórico!")
-
-    # ════════════════════════════════════════════════════════════════
-    # TAB 2 — OCR: leitura automática do laudo
-    # ════════════════════════════════════════════════════════════════
-    with tab_ocr:
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-        ℹ️ Faça upload do seu laudo de solo (PDF ou imagem JPG/PNG) e o sistema tentará
-        extrair os valores automaticamente usando OCR e preenchê-los na análise de solo.
-        </div>''', unsafe_allow_html=True)
-
-        tipo_arquivo = st.radio("Tipo de arquivo", ["📄 PDF", "🖼️ Imagem (JPG/PNG)"],
-                                horizontal=True, key="ocr_tipo")
-
-        texto_ocr  = ""
-        campos_ocr = {}
-
-        if tipo_arquivo == "📄 PDF":
-            arquivo_laudo = st.file_uploader("Upload do laudo PDF", type=["pdf"], key="ocr_pdf")
-            if arquivo_laudo:
-                with st.spinner("🔍 Lendo PDF..."):
-                    texto_ocr = extrair_texto_pdf(arquivo_laudo)
-        else:
-            arquivo_laudo = st.file_uploader("Upload da imagem do laudo", type=["jpg","jpeg","png"], key="ocr_img")
-            if arquivo_laudo:
-                img_pil = PILImage.open(arquivo_laudo)
-                st.image(img_pil, caption="Laudo enviado", use_container_width=True)
-                with st.spinner("🔍 Aplicando OCR..."):
-                    texto_ocr = extrair_texto_imagem(arquivo_laudo)
-
-        if texto_ocr:
-            with st.expander("📝 Texto extraído (clique para ver)"):
-                st.text(texto_ocr[:3000])
-
-            campos_ocr = parsear_laudo_ocr(texto_ocr)
-
-            if campos_ocr:
-                st.subheader("✅ Valores detectados automaticamente")
-                df_ocr = pd.DataFrame([{
-                    "Campo": k.replace("_"," ").title(),
-                    "Valor detectado": v
-                } for k, v in campos_ocr.items()])
-                st.dataframe(df_ocr, use_container_width=True)
-
-                st.subheader("✏️ Confirme ou ajuste os valores")
-                cols_ocr = st.columns(3)
-                campos_editados = {}
-                campos_lista = list(campos_ocr.items())
-                for i, (campo, val) in enumerate(campos_lista):
-                    with cols_ocr[i % 3]:
-                        campos_editados[campo] = st.number_input(
-                            campo.replace("_"," ").title(),
-                            value=float(val),
-                            key=f"ocr_{campo}"
-                        )
-
-                if st.button("📥 Importar valores para Análise de Solo", key="btn_importar_ocr"):
-                    if not st.session_state.area_selecionada:
-                        error_box('Carregue uma área primeiro em "Áreas Cadastradas".')
-                    else:
-                        st.session_state.dados.update(campos_editados)
-                        atualizar_area_atual()
-                        salvar_dados_iaagro()
-                        success_box(f"{len(campos_editados)} campos importados! Confira na aba 'Inserir / Editar Dados'.")
+                st.markdown('''<div style="background:#7f1d1d;color:#fff;padding:10px 16px;
+                border-radius:10px;border-left:5px solid #ef4444;font-weight:600;">
+                ❌ Corrija os erros antes de salvar.</div>''', unsafe_allow_html=True)
             else:
-                warning_box("Não foi possível detectar valores automaticamente. Verifique se o laudo está legível.")
-                with st.expander("💡 Dicas para melhor resultado"):
-                    st.markdown("""
-                    - Use laudos com texto digital (não escaneados em baixa resolução)
-                    - Laudos da EMBRAPA, IAC e laboratórios com formato padrão funcionam melhor
-                    - Para imagens, tire a foto com boa iluminação e sem sombras
-                    - O OCR reconhece: pH, Fósforo, Potássio, Cálcio, Magnésio, Alumínio, Argila, CTC, MO
-                    """)
+                st.session_state.dados.update({
+                    "ph": ph, "fosforo": fosforo, "potassio": potassio,
+                    "materia_organica": materia_organica, "calcio": calcio, "magnesio": magnesio,
+                    "aluminio": aluminio, "enxofre": enxofre, "ctc": ctc,
+                    "boro": boro, "zinco": zinco, "manganes": manganes, "cobre": cobre, "argila": argila
+                })
+                atualizar_area_atual()
+                salvar_dados_iaagro()
+                # Salvar no banco histórico
+                nota_s  = calcular_nota(st.session_state.dados)
+                score_s, classe_s, _ = score_solo(st.session_state.dados)
+                id_area_atual = st.session_state.dados.get("id_area","")
+                if id_area_atual:
+                    salvar_analise_solo_db(id_area_atual, st.session_state.dados, nota_s, score_s, classe_s)
+                # Checar alertas de estoque por email
+                checar_alertas_estoque()
+                success_box("Análise salva na área ativa e registrada no histórico!")
 
-    # ════════════════════════════════════════════════════════════════
-    # TAB 3 — FOTO DO TALHÃO
-    # ════════════════════════════════════════════════════════════════
-    with tab_foto:
+        # ── Foto do talhão ──
+        st.divider()
         st.subheader("📷 Foto do Talhão")
         foto = st.file_uploader("Adicionar foto do talhão (JPG, PNG)", type=["jpg","jpeg","png"],
                                 key="foto_talhao")
@@ -3206,8 +3408,6 @@ elif menu == "Análise de Solo":
                      style="max-width:100%;border-radius:14px;
                             border:2px solid #22c55e;box-shadow:0 4px 20px rgba(0,200,83,0.3);" />
             </div>''', unsafe_allow_html=True)
-        else:
-            info_box("Nenhuma foto adicionada ainda para a área ativa.")
 
 
 # ─────────────────────────────────────────────
@@ -3542,763 +3742,470 @@ elif menu == "Custos":
 # ─────────────────────────────────────────────
 elif menu == "Estoque de Insumos":
     st.header("📦 Estoque de Insumos")
+    st.subheader("➕ Cadastrar Produto")
 
-    if "bc_codigo"     not in st.session_state: st.session_state.bc_codigo     = ""
-    if "bc_produto"    not in st.session_state: st.session_state.bc_produto    = None
-    if "notas_fiscal"  not in st.session_state: st.session_state.notas_fiscal  = []
-    if "nf_itens_temp" not in st.session_state: st.session_state.nf_itens_temp = []
+    # ── CSS do autocomplete + tema escuro global ─────────────────────────
+    st.markdown("""
+    <style>
+    /* ── Selectbox — fundo escuro igual ao upload ── */
+    div[data-baseweb="select"] > div {
+        background-color: #0d1b2a !important;
+        border: 2px solid #22c55e !important;
+        border-radius: 10px !important;
+        color: #f1f5f9 !important;
+    }
+    div[data-baseweb="select"] > div:focus-within {
+        border-color: #4ade80 !important;
+        box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
+    }
+    /* Texto dentro do selectbox */
+    div[data-baseweb="select"] span,
+    div[data-baseweb="select"] div {
+        color: #f1f5f9 !important;
+        background-color: transparent !important;
+    }
+    /* Dropdown do selectbox (lista de opções) */
+    ul[data-baseweb="menu"],
+    div[data-baseweb="popover"] > div,
+    div[data-baseweb="menu"] {
+        background-color: #0d1b2a !important;
+        border: 2px solid #22c55e !important;
+        border-radius: 10px !important;
+    }
+    /* Itens do selectbox */
+    li[role="option"] {
+        background-color: #0d1b2a !important;
+        color: #f1f5f9 !important;
+    }
+    li[role="option"]:hover,
+    li[role="option"][aria-selected="true"] {
+        background-color: #0f3460 !important;
+        border-left: 3px solid #22c55e !important;
+        color: #6ee7b7 !important;
+    }
+    /* ── Text input — fundo escuro ── */
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stTextArea"] textarea {
+        background-color: #0d1b2a !important;
+        border: 2px solid #22c55e !important;
+        border-radius: 10px !important;
+        color: #f1f5f9 !important;
+        caret-color: #22c55e !important;
+    }
+    div[data-testid="stTextInput"] input:focus,
+    div[data-testid="stTextArea"] textarea:focus {
+        border-color: #4ade80 !important;
+        box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
+    }
+    div[data-testid="stTextInput"] input::placeholder,
+    div[data-testid="stTextArea"] textarea::placeholder {
+        color: #4a7b6f !important;
+    }
+    /* ── Number input ── */
+    div[data-testid="stNumberInput"] input {
+        background-color: #0d1b2a !important;
+        border: 2px solid #22c55e !important;
+        border-radius: 10px !important;
+        color: #f1f5f9 !important;
+    }
+    div[data-testid="stNumberInput"] button {
+        background-color: #0f3460 !important;
+        border-color: #22c55e !important;
+        color: #22c55e !important;
+    }
+    /* ── Labels dos inputs ── */
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stNumberInput"] label,
+    div[data-testid="stTextArea"] label {
+        color: #22c55e !important;
+        font-weight: 700 !important;
+        font-size: 13px !important;
+    }
+    /* ── Botões gerais ── */
+    div[data-testid="stButton"] > button {
+        background-color: #0f3460 !important;
+        border: 2px solid #22c55e !important;
+        border-radius: 10px !important;
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        font-size: 13px !important;
+        transition: all 0.15s !important;
+        text-shadow: none !important;
+    }
+    div[data-testid="stButton"] > button * {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+    }
+    div[data-testid="stButton"] > button p {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        font-size: 13px !important;
+    }
+    div[data-testid="stButton"] > button:hover {
+        background-color: #22c55e !important;
+        color: #0d1b2a !important;
+        border-color: #4ade80 !important;
+    }
+    div[data-testid="stButton"] > button:hover *,
+    div[data-testid="stButton"] > button:hover p {
+        color: #0d1b2a !important;
+    }
+    /* ── Botão primário "Usar este produto" / "Analisar" ── */
+    div[data-testid="stButton"] > button[kind="primary"],
+    div[data-testid="stButton"] > button.primary {
+        background-color: #16a34a !important;
+        border-color: #22c55e !important;
+        color: #fff !important;
+    }
+    /* ── Upload widget ── */
+    div[data-testid="stFileUploader"] > div {
+        background-color: #0d1b2a !important;
+        border: 2px dashed #22c55e !important;
+        border-radius: 12px !important;
+        color: #f1f5f9 !important;
+    }
+    div[data-testid="stFileUploader"] label {
+        color: #22c55e !important;
+        font-weight: 700 !important;
+    }
+    div[data-testid="stFileUploaderDropzone"] {
+        background-color: #0d1b2a !important;
+    }
+    div[data-testid="stFileUploaderDropzone"] span,
+    div[data-testid="stFileUploaderDropzone"] p {
+        color: #94a3b8 !important;
+    }
+    /* ── Checkbox ── */
+    div[data-testid="stCheckbox"] label {
+        color: #f1f5f9 !important;
+    }
+    /* ── Autocomplete dropdown HTML customizado ── */
+    .autocomplete-container { position: relative; margin-bottom: 6px; }
+    .autocomplete-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: #0d1b2a; border: 2px solid #22c55e;
+        border-radius: 10px; max-height: 260px; overflow-y: auto;
+        z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    }
+    .autocomplete-item {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 9px 14px; cursor: pointer;
+        border-left: 3px solid transparent;
+        transition: all 0.12s;
+        background: #0d1b2a;
+    }
+    .autocomplete-item:hover {
+        background: #0f3460 !important;
+        border-left: 3px solid #22c55e !important;
+    }
+    .autocomplete-item .prod-nome { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+    .autocomplete-item .prod-ia   { font-size: 10px; color: #93c5fd; margin-top: 2px; }
+    .autocomplete-item .prod-badge {
+        font-size: 10px; font-weight: 700; padding: 2px 8px;
+        border-radius: 20px; white-space: nowrap; margin-left: 8px;
+    }
+    .badge-BASF       { background: #1e3a8a; color: #93c5fd; }
+    .badge-Syngenta   { background: #14532d; color: #86efac; }
+    .badge-Bayer      { background: #7f1d1d; color: #fca5a5; }
+    .badge-UPL        { background: #78350f; color: #fcd34d; }
+    .badge-Timac-Agro { background: #6b21a8; color: #f0abfc; }
+    .badge-Mosaic     { background: #065f46; color: #6ee7b7; }
+    .badge-Outros     { background: #1e293b; color: #94a3b8; }
+    .autocomplete-header {
+        padding: 6px 14px 4px; font-size: 10px; font-weight: 800;
+        color: #22c55e; letter-spacing: 1px;
+        border-bottom: 1px solid #0f3460;
+    }
+    /* ── Scrollbar do dropdown ── */
+    .autocomplete-dropdown::-webkit-scrollbar { width: 5px; }
+    .autocomplete-dropdown::-webkit-scrollbar-track { background: #0d1b2a; }
+    .autocomplete-dropdown::-webkit-scrollbar-thumb { background: #22c55e; border-radius: 4px; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    tab_cadastro, tab_leitor, tab_notas, tab_ir = st.tabs([
-        "➕ Cadastrar / Visualizar",
-        "📷 Leitor de Código de Barras",
-        "🧾 Notas Fiscais",
-        "📊 Relatório IR Rural",
-    ])
+    # ── Autocomplete via session_state ───────────────────────────────────
+    if "ac_query"       not in st.session_state: st.session_state.ac_query       = ""
+    if "ac_selecionado" not in st.session_state: st.session_state.ac_selecionado = None
+    if "ac_fab"         not in st.session_state: st.session_state.ac_fab         = "Todos"
 
-    # ════════════════════════════════════════════════════════════════
-    # TAB 1 — CADASTRAR / VISUALIZAR (conteúdo original do Estoque)
-    # ════════════════════════════════════════════════════════════════
-    with tab_cadastro:
-        st.subheader("➕ Cadastrar Produto")
+    # Filtro por fabricante (botões em linha)
+    fabricantes = ["Todos", "BASF", "Syngenta", "Bayer", "UPL", "Timac Agro", "Mosaic",
+                   "Corteva", "FMC", "ADAMA", "Ouro Fino", "Ihara", "Nortox", "Outros"]
+    fab_cores = {
+        "Todos":      ("#22c55e","#0f3460"),
+        "BASF":       ("#93c5fd","#1e3a8a"),
+        "Syngenta":   ("#86efac","#14532d"),
+        "Bayer":      ("#fca5a5","#7f1d1d"),
+        "UPL":        ("#fcd34d","#78350f"),
+        "Timac Agro": ("#f0abfc","#6b21a8"),
+        "Mosaic":     ("#6ee7b7","#065f46"),
+        "Corteva":    ("#67e8f9","#164e63"),
+        "FMC":        ("#a5b4fc","#1e1b4b"),
+        "ADAMA":      ("#bef264","#365314"),
+        "Ouro Fino":  ("#fde68a","#713f12"),
+        "Ihara":      ("#f9a8d4","#4a044e"),
+        "Nortox":     ("#5eead4","#134e4a"),
+        "Outros":     ("#94a3b8","#1e293b"),
+    }
 
-        st.markdown("""
-        <style>
-        div[data-baseweb="select"] > div {
-            background-color: #0d1b2a !important;
-            border: 2px solid #22c55e !important;
-            border-radius: 10px !important;
-            color: #f1f5f9 !important;
-        }
-        div[data-baseweb="select"] > div:focus-within {
-            border-color: #4ade80 !important;
-            box-shadow: 0 0 0 3px rgba(34,197,94,0.18) !important;
-        }
-        div[data-baseweb="select"] span,
-        div[data-baseweb="select"] div,
-        div[data-baseweb="select"] input {
-            color: #f1f5f9 !important;
-            background-color: transparent !important;
-        }
-        div[data-testid="stTextInput"] input,
-        div[data-testid="stNumberInput"] input {
-            background-color: #0d1b2a !important;
-            color: #f1f5f9 !important;
-            border: 2px solid #22c55e !important;
-            border-radius: 10px !important;
-            font-size: 14px !important;
-            font-weight: 600 !important;
-        }
-        div[data-testid="stTextInput"] input:focus,
-        div[data-testid="stNumberInput"] input:focus {
-            border-color: #4ade80 !important;
-            box-shadow: 0 0 0 3px rgba(34,197,94,0.18) !important;
-        }
-        div[data-testid="stNumberInput"] button {
-            background-color: #0f3460 !important;
-            border-color: #22c55e !important;
-            color: #22c55e !important;
-        }
-        div[data-testid="stTextInput"] label,
-        div[data-testid="stSelectbox"] label,
-        div[data-testid="stNumberInput"] label,
-        div[data-testid="stTextArea"] label {
-            color: #22c55e !important;
-            font-weight: 700 !important;
-            font-size: 13px !important;
-        }
-        div[data-testid="stButton"] > button {
-            background-color: #0f3460 !important;
-            border: 2px solid #22c55e !important;
-            border-radius: 10px !important;
-            color: #ffffff !important;
-            font-weight: 800 !important;
-            font-size: 13px !important;
-        }
-        div[data-testid="stButton"] > button:hover {
-            background-color: #22c55e !important;
-            color: #0d1b2a !important;
-        }
-        div[data-testid="stFileUploader"] > div {
-            background-color: #0d1b2a !important;
-            border: 2px dashed #22c55e !important;
-            border-radius: 12px !important;
-        }
-        .autocomplete-container { position: relative; margin-bottom: 6px; }
-        .autocomplete-dropdown {
-            position: absolute; top: 100%; left: 0; right: 0;
-            background: #0d1b2a; border: 2px solid #22c55e;
-            border-radius: 10px; max-height: 260px; overflow-y: auto;
-            z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-        }
-        .autocomplete-item {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 9px 14px; cursor: pointer;
-            border-left: 3px solid transparent; transition: all 0.12s;
-            background: #0d1b2a;
-        }
-        .autocomplete-item:hover { background: #0f3460 !important; border-left: 3px solid #22c55e !important; }
-        .autocomplete-item .prod-nome { font-size: 13px; font-weight: 600; color: #f1f5f9; }
-        .autocomplete-item .prod-ia   { font-size: 10px; color: #93c5fd; margin-top: 2px; }
-        .autocomplete-item .prod-badge {
-            font-size: 10px; font-weight: 700; padding: 2px 8px;
-            border-radius: 20px; white-space: nowrap; margin-left: 8px;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+    FAB_ESTILOS = {
+        "Todos":      {"bg":"#166534", "border":"#22c55e", "emoji":"🔎"},
+        "BASF":       {"bg":"#1e3a8a", "border":"#93c5fd", "emoji":"🔵"},
+        "Syngenta":   {"bg":"#14532d", "border":"#86efac", "emoji":"🟢"},
+        "Bayer":      {"bg":"#7f1d1d", "border":"#fca5a5", "emoji":"🔴"},
+        "UPL":        {"bg":"#92400e", "border":"#fcd34d", "emoji":"🟠"},
+        "Timac Agro": {"bg":"#6b21a8", "border":"#f0abfc", "emoji":"🟣"},
+        "Mosaic":     {"bg":"#065f46", "border":"#6ee7b7", "emoji":"🌊"},
+        "Corteva":    {"bg":"#164e63", "border":"#67e8f9", "emoji":"🔷"},
+        "FMC":        {"bg":"#1e1b4b", "border":"#a5b4fc", "emoji":"🟦"},
+        "ADAMA":      {"bg":"#365314", "border":"#bef264", "emoji":"🌿"},
+        "Ouro Fino":  {"bg":"#713f12", "border":"#fde68a", "emoji":"🟡"},
+        "Ihara":      {"bg":"#4a044e", "border":"#f9a8d4", "emoji":"🌸"},
+        "Nortox":     {"bg":"#134e4a", "border":"#5eead4", "emoji":"🌀"},
+        "Outros":     {"bg":"#374151", "border":"#9ca3af", "emoji":"⚪"},
+    }
 
-        if "ac_query"       not in st.session_state: st.session_state.ac_query       = ""
-        if "ac_selecionado" not in st.session_state: st.session_state.ac_selecionado = None
-        if "ac_fab"         not in st.session_state: st.session_state.ac_fab         = "Todos"
+    st.markdown("**🏭 Filtrar por Fabricante:**")
 
-        fabricantes = ["Todos", "BASF", "Syngenta", "Bayer", "UPL", "Timac Agro", "Mosaic",
-                       "Corteva", "FMC", "ADAMA", "Ouro Fino", "Ihara", "Nortox", "Outros"]
-        FAB_ESTILOS = {
-            "Todos":      {"bg":"#166534", "border":"#22c55e", "emoji":"🔎"},
-            "BASF":       {"bg":"#1e3a8a", "border":"#93c5fd", "emoji":"🔵"},
-            "Syngenta":   {"bg":"#14532d", "border":"#86efac", "emoji":"🟢"},
-            "Bayer":      {"bg":"#7f1d1d", "border":"#fca5a5", "emoji":"🔴"},
-            "UPL":        {"bg":"#92400e", "border":"#fcd34d", "emoji":"🟠"},
-            "Timac Agro": {"bg":"#6b21a8", "border":"#f0abfc", "emoji":"🟣"},
-            "Mosaic":     {"bg":"#065f46", "border":"#6ee7b7", "emoji":"🌊"},
-            "Corteva":    {"bg":"#164e63", "border":"#67e8f9", "emoji":"🔷"},
-            "FMC":        {"bg":"#1e1b4b", "border":"#a5b4fc", "emoji":"🟦"},
-            "ADAMA":      {"bg":"#365314", "border":"#bef264", "emoji":"🌿"},
-            "Ouro Fino":  {"bg":"#713f12", "border":"#fde68a", "emoji":"🟡"},
-            "Ihara":      {"bg":"#4a044e", "border":"#f9a8d4", "emoji":"🌸"},
-            "Nortox":     {"bg":"#134e4a", "border":"#5eead4", "emoji":"🌀"},
-            "Outros":     {"bg":"#374151", "border":"#9ca3af", "emoji":"⚪"},
-        }
-
-        st.markdown("**🏭 Filtrar por Fabricante:**")
-        cols_fab = st.columns(len(fabricantes))
-        for i, fab in enumerate(fabricantes):
-            est   = FAB_ESTILOS[fab]
-            ativo = st.session_state.ac_fab == fab
-            borda = f'4px solid {est["border"]}' if ativo else f'2px solid {est["border"]}55'
-            opac  = "1.0" if ativo else "0.65"
-            sombra= f'0 0 10px {est["border"]}88' if ativo else "none"
-            with cols_fab[i]:
-                with st.form(key=f"form_fab_{fab}", border=False):
-                    st.markdown(
-                        f'<div style="background:{est["bg"]};border:{borda};border-radius:10px;'
-                        f'padding:8px 4px;text-align:center;font-size:12px;font-weight:900;'
-                        f'color:#ffffff;opacity:{opac};box-shadow:{sombra};letter-spacing:0.3px;'
-                        f'margin-bottom:2px;">{est["emoji"]} {fab}</div>',
-                        unsafe_allow_html=True
-                    )
-                    if st.form_submit_button("✔", use_container_width=True):
-                        st.session_state.ac_fab = fab
-                        st.session_state.ac_query = ""
-                        st.session_state.ac_selecionado = None
-                        st.rerun()
-
-        fab_ativo = st.session_state.ac_fab
-        qtd_fab = len([p for p in CATALOGO_PRODUTOS if fab_ativo == "Todos" or p["fab"] == fab_ativo])
-        st.markdown(f'<div style="background:#0f3460;color:#93c5fd;padding:7px 14px;border-radius:8px;'
-                    f'font-size:12px;font-weight:700;margin:4px 0 10px 0;">'
-                    f'🔎 Fabricante ativo: <b>{fab_ativo}</b> — {qtd_fab} produtos disponíveis</div>',
-                    unsafe_allow_html=True)
-
-        query_input = st.text_input(
-            "🔍 Nome comercial, ingrediente ativo ou categoria",
-            value=st.session_state.ac_query,
-            placeholder="Ex: Fox Xpro, glifosato, fungicida...",
-            key="input_busca_produto"
-        )
-        if query_input != st.session_state.ac_query:
-            st.session_state.ac_query = query_input
-            if st.session_state.ac_selecionado and query_input != st.session_state.ac_selecionado["nome"]:
-                st.session_state.ac_selecionado = None
-
-        catalogo_filtrado = CATALOGO_PRODUTOS if fab_ativo == "Todos" else [
-            p for p in CATALOGO_PRODUTOS if p["fab"] == fab_ativo
-        ]
-
-        if st.session_state.ac_query and not st.session_state.ac_selecionado:
-            q = st.session_state.ac_query.lower()
-            starts   = [p for p in catalogo_filtrado if p["nome"].lower().startswith(q)]
-            contains = [p for p in catalogo_filtrado
-                        if not p["nome"].lower().startswith(q)
-                        and (q in p["nome"].lower() or q in p["ia"].lower() or q in p["cat"].lower())]
-            resultados = (starts + contains)[:20]
-            if resultados:
-                FAB_EM = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠",
-                          "Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}
-                CAT_EM = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛",
-                          "Acaricida":"🕷️","Nematicida":"🪱","Fungicida Biológico":"🌱",
-                          "Inseticida Biológico":"🦠","Foliar / Nutrição":"💧",
-                          "Tratamento de Sementes":"🌾","Regulador de Crescimento":"📈",
-                          "Adjuvante":"⚗️","Fertilizante":"🧪","Bioestimulante":"✨"}
-                st.markdown(f'<div style="background:#0f3460;color:#22c55e;padding:6px 14px;'
-                            f'border-radius:8px 8px 0 0;font-size:11px;font-weight:800;letter-spacing:1px;">'
-                            f'🌿 {len(resultados)} RESULTADO(S) — clique para selecionar</div>',
-                            unsafe_allow_html=True)
-                opcoes_labels = []
-                for p in resultados:
-                    em_fab = FAB_EM.get(p["fab"], "⚪")
-                    em_cat = CAT_EM.get(p["cat"], "🌱")
-                    opcoes_labels.append(f"{em_cat} {p['nome']}  |  {em_fab} {p['fab']}  ·  {p['cat']}  —  {p['ia'][:50]}")
-                escolha_idx = st.radio(
-                    "Resultados:", range(len(opcoes_labels)),
-                    format_func=lambda i: opcoes_labels[i],
-                    key="radio_produto_catalogo", label_visibility="collapsed"
+    # Renderiza todos os botões como forms HTML — fundo e texto totalmente controlados
+    cols_fab = st.columns(len(fabricantes)) if fabricantes else st.columns(1)
+    for i, fab in enumerate(fabricantes):
+        est   = FAB_ESTILOS[fab]
+        ativo = st.session_state.ac_fab == fab
+        bg    = est["bg"]
+        borda = f'4px solid {est["border"]}' if ativo else f'2px solid {est["border"]}55'
+        opac  = "1.0" if ativo else "0.65"
+        sombra= f'0 0 10px {est["border"]}88' if ativo else "none"
+        with cols_fab[i]:
+            with st.form(key=f"form_fab_{fab}", border=False):
+                st.markdown(
+                    f'<div style="'
+                    f'background:{bg};'
+                    f'border:{borda};'
+                    f'border-radius:10px;'
+                    f'padding:8px 4px;'
+                    f'text-align:center;'
+                    f'font-size:12px;'
+                    f'font-weight:900;'
+                    f'color:#ffffff;'
+                    f'opacity:{opac};'
+                    f'box-shadow:{sombra};'
+                    f'letter-spacing:0.3px;'
+                    f'margin-bottom:2px;'
+                    f'">{est["emoji"]} {fab}</div>',
+                    unsafe_allow_html=True
                 )
-                if st.button("✅ Usar este produto", key="btn_usar_produto", use_container_width=True):
-                    prod_sel = resultados[escolha_idx]
-                    st.session_state.ac_selecionado = prod_sel
-                    st.session_state.ac_query = prod_sel["nome"]
+                if st.form_submit_button("✔", use_container_width=True):
+                    st.session_state.ac_fab = fab
+                    st.session_state.ac_query = ""
+                    st.session_state.ac_selecionado = None
                     st.rerun()
-            else:
-                st.markdown(f'<div style="background:#1e293b;color:#f87171;padding:10px 14px;'
-                            f'border-radius:8px;font-size:13px;font-weight:600;margin:4px 0;">'
-                            f'❌ Nenhum produto encontrado para "<b>{st.session_state.ac_query}</b>"</div>',
-                            unsafe_allow_html=True)
 
-        if st.session_state.ac_selecionado:
-            p = st.session_state.ac_selecionado
-            fab_bg = {"BASF":"#1e3a8a","Syngenta":"#14532d","Bayer":"#7f1d1d","UPL":"#78350f","Timac Agro":"#6b21a8","Mosaic":"#065f46","Outros":"#1e293b"}.get(p["fab"],"#1e293b")
-            fab_tx = {"BASF":"#93c5fd","Syngenta":"#86efac","Bayer":"#fca5a5","UPL":"#fcd34d","Timac Agro":"#f0abfc","Mosaic":"#6ee7b7","Outros":"#94a3b8"}.get(p["fab"],"#94a3b8")
-            fab_em = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠","Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}.get(p["fab"],"⚪")
-            cat_em = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛","Acaricida":"🕷️",
-                      "Tratamento de Sementes":"🌾","Foliar / Nutrição":"💧",
-                      "Regulador de Crescimento":"📈","Adjuvante":"⚗️","Nematicida":"🪱",
-                      "Inseticida Biológico":"🦠","Bioestimulante":"✨"}.get(p["cat"],"🌱")
-            st.markdown(f"""
-            <div style="background:{fab_bg};border:2px solid {fab_tx}33;border-radius:12px;
-            padding:12px 16px;margin:6px 0 12px 0;display:flex;align-items:center;gap:12px;">
-                <div style="font-size:26px;">{cat_em}</div>
-                <div style="flex:1;">
-                    <div style="color:#ffffff;font-weight:800;font-size:15px;">{p['nome']}</div>
-                    <div style="color:{fab_tx};font-size:12px;margin-top:3px;">{fab_em} {p['fab']} · {p['cat']}</div>
-                    <div style="color:#94a3b8;font-size:11px;margin-top:2px;">I.A.: {p['ia']}</div>
-                </div>
-            </div>""", unsafe_allow_html=True)
-            if st.button("🔄 Trocar produto", key="btn_trocar_produto"):
-                st.session_state.ac_selecionado = None
-                st.session_state.ac_query = ""
+    # Indicador visual do filtro ativo
+    fab_ativo = st.session_state.ac_fab
+    qtd_fab = len([p for p in CATALOGO_PRODUTOS if fab_ativo == "Todos" or p["fab"] == fab_ativo])
+    st.markdown(f"""
+    <div style="background:#0f3460;color:#93c5fd;padding:7px 14px;border-radius:8px;
+    font-size:12px;font-weight:700;margin:4px 0 10px 0;">
+    🔎 Fabricante ativo: <b>{fab_ativo}</b> — {qtd_fab} produtos disponíveis
+    </div>""", unsafe_allow_html=True)
+
+    # ── Campo de busca ────────────────────────────────────────────────────
+    query_input = st.text_input(
+        "🔍 Nome comercial, ingrediente ativo ou categoria",
+        value=st.session_state.ac_query,
+        placeholder="Ex: Fox Xpro, glifosato, fungicida...",
+        key="input_busca_produto"
+    )
+
+    if query_input != st.session_state.ac_query:
+        st.session_state.ac_query = query_input
+        if st.session_state.ac_selecionado and query_input != st.session_state.ac_selecionado["nome"]:
+            st.session_state.ac_selecionado = None
+
+    # ── Filtra catálogo ───────────────────────────────────────────────────
+    catalogo_filtrado = CATALOGO_PRODUTOS if fab_ativo == "Todos" else [
+        p for p in CATALOGO_PRODUTOS if p["fab"] == fab_ativo
+    ]
+
+    # ── Mostra resultados ao digitar ──────────────────────────────────────
+    if st.session_state.ac_query and not st.session_state.ac_selecionado:
+        q = st.session_state.ac_query.lower()
+        starts   = [p for p in catalogo_filtrado if p["nome"].lower().startswith(q)]
+        contains = [p for p in catalogo_filtrado
+                    if not p["nome"].lower().startswith(q)
+                    and (q in p["nome"].lower() or q in p["ia"].lower() or q in p["cat"].lower())]
+        resultados = (starts + contains)[:20]
+
+        if resultados:
+            FAB_EM = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠",
+                      "Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}
+            CAT_EM = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛",
+                      "Acaricida":"🕷️","Nematicida":"🪱","Fungicida Biológico":"🌱",
+                      "Inseticida Biológico":"🦠","Foliar / Nutrição":"💧",
+                      "Tratamento de Sementes":"🌾","Regulador de Crescimento":"📈",
+                      "Adjuvante":"⚗️","Fertilizante":"🧪","Bioestimulante":"✨"}
+
+            st.markdown(f'<div style="background:#0f3460;color:#22c55e;padding:6px 14px;'
+                        f'border-radius:8px 8px 0 0;font-size:11px;font-weight:800;letter-spacing:1px;">'
+                        f'🌿 {len(resultados)} RESULTADO{"S" if len(resultados)!=1 else ""} — clique para selecionar</div>',
+                        unsafe_allow_html=True)
+
+            # Opções formatadas para o radio
+            opcoes_labels = []
+            for p in resultados:
+                em_fab = FAB_EM.get(p["fab"], "⚪")
+                em_cat = CAT_EM.get(p["cat"], "🌱")
+                opcoes_labels.append(f"{em_cat} {p['nome']}  |  {em_fab} {p['fab']}  ·  {p['cat']}  —  {p['ia'][:50]}")
+
+            escolha_idx = st.radio(
+                "Resultados:",
+                range(len(opcoes_labels)),
+                format_func=lambda i: opcoes_labels[i],
+                key="radio_produto_catalogo",
+                label_visibility="collapsed"
+            )
+
+            if st.button("✅ Usar este produto", key="btn_usar_produto", use_container_width=True):
+                prod_sel = resultados[escolha_idx]
+                st.session_state.ac_selecionado = prod_sel
+                st.session_state.ac_query = prod_sel["nome"]
                 st.rerun()
-            nome_insumo = p["nome"]
-            cat_map = {
-                "Fungicida":"Fungicida","Herbicida":"Herbicida","Inseticida":"Inseticida",
-                "Acaricida":"Outro","Nematicida":"Outro","Fungicida Biológico":"Biológico",
-                "Inseticida Biológico":"Biológico","Bioestimulante":"Foliar",
-                "Foliar / Nutrição":"Foliar","Regulador de Crescimento":"Outro",
-                "Adjuvante":"Adjuvante","Tratamento de Sementes":"Outro",
-                "Fertilizante":"Fertilizante",
+
+        else:
+            st.markdown(f'<div style="background:#1e293b;color:#f87171;padding:10px 14px;'
+                        f'border-radius:8px;font-size:13px;font-weight:600;margin:4px 0;">'
+                        f'❌ Nenhum produto encontrado para "<b>{st.session_state.ac_query}</b>"</div>',
+                        unsafe_allow_html=True)
+
+    # Card do produto selecionado
+    if st.session_state.ac_selecionado:
+        p = st.session_state.ac_selecionado
+        fab_bg = {"BASF":"#1e3a8a","Syngenta":"#14532d","Bayer":"#7f1d1d","UPL":"#78350f","Timac Agro":"#6b21a8","Mosaic":"#065f46","Outros":"#1e293b"}.get(p["fab"],"#1e293b")
+        fab_tx = {"BASF":"#93c5fd","Syngenta":"#86efac","Bayer":"#fca5a5","UPL":"#fcd34d","Timac Agro":"#f0abfc","Mosaic":"#6ee7b7","Outros":"#94a3b8"}.get(p["fab"],"#94a3b8")
+        fab_em = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠","Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}.get(p["fab"],"⚪")
+        cat_em = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛","Acaricida":"🕷️",
+                  "Tratamento de Sementes":"🌾","Foliar / Nutrição":"💧",
+                  "Regulador de Crescimento":"📈","Adjuvante":"⚗️","Nematicida":"🪱",
+                  "Inseticida Biológico":"🦠","Bioestimulante":"✨"}.get(p["cat"],"🌱")
+        st.markdown(f"""
+        <div style="background:{fab_bg};border:2px solid {fab_tx}33;border-radius:12px;
+        padding:12px 16px;margin:6px 0 12px 0;display:flex;align-items:center;gap:12px;">
+            <div style="font-size:26px;">{cat_em}</div>
+            <div style="flex:1;">
+                <div style="color:#ffffff;font-weight:800;font-size:15px;">{p['nome']}</div>
+                <div style="color:{fab_tx};font-size:12px;margin-top:3px;">{fab_em} {p['fab']} · {p['cat']}</div>
+                <div style="color:#94a3b8;font-size:11px;margin-top:2px;">I.A.: {p['ia']}</div>
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+        if st.button("🔄 Trocar produto", key="btn_trocar_produto"):
+            st.session_state.ac_selecionado = None
+            st.session_state.ac_query = ""
+            st.rerun()
+
+        nome_insumo = p["nome"]
+        # Mapeia categoria do catálogo para categoria do estoque
+        cat_map = {
+            "Fungicida":"Fungicida","Herbicida":"Herbicida","Inseticida":"Inseticida",
+            "Acaricida":"Outro","Nematicida":"Outro","Fungicida Biológico":"Biológico",
+            "Inseticida Biológico":"Biológico","Bioestimulante":"Foliar",
+            "Foliar / Nutrição":"Foliar","Regulador de Crescimento":"Outro",
+            "Adjuvante":"Adjuvante","Tratamento de Sementes":"Outro",
+            "Fertilizante":"Fertilizante",
+        }
+        cat_sugerida = cat_map.get(p["cat"], "Outro")
+    else:
+        nome_insumo  = st.session_state.ac_query if st.session_state.ac_query else ""
+        cat_sugerida = "Fungicida"
+
+    # ── Campos complementares ─────────────────────────────────────────────
+    st.divider()
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        # Nome editável (pré-preenchido pelo autocomplete)
+        nome_final = st.text_input("Nome do produto / insumo", value=nome_insumo, key="nome_insumo_final")
+        categoria  = st.selectbox("Categoria", [
+            "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
+            "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+        ], index=["Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
+                  "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+                 ].index(cat_sugerida) if cat_sugerida in [
+                  "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
+                  "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
+                 ] else 0)
+        cultura    = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="cultura_estoque")
+        litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
+        capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
+    with col2:
+        quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0)
+        unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"])
+    with col3:
+        valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0)
+        estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0)
+
+    observacao = st.text_area("Observação")
+
+    if st.button("Adicionar Produto ao Estoque"):
+        nome_usar = nome_final.strip() if nome_final.strip() else nome_insumo.strip()
+        if not nome_usar:
+            error_box("Digite ou selecione o nome do produto.")
+        else:
+            novo_item = {
+                "Insumo": nome_usar, "Categoria": categoria,
+                "Quantidade": quantidade, "Unidade": unidade,
+                "Valor Unitário R$": valor_unitario,
+                "Valor Total R$": quantidade * valor_unitario,
+                "Estoque Mínimo": estoque_minimo,
+                "Observação": observacao, "Cultura": cultura,
+                "Dose ha": dose_ha, "Litros ha": litros_ha,
+                "Tanque litros": capacidade_tanque,
+                "Fabricante": st.session_state.ac_selecionado["fab"] if st.session_state.ac_selecionado else "",
+                "Ingrediente Ativo": st.session_state.ac_selecionado["ia"] if st.session_state.ac_selecionado else "",
             }
-            cat_sugerida = cat_map.get(p["cat"], "Outro")
-        else:
-            nome_insumo  = st.session_state.ac_query if st.session_state.ac_query else ""
-            cat_sugerida = "Fungicida"
+            st.session_state.estoque.append(novo_item)
+            # Reseta autocomplete após adicionar
+            st.session_state.ac_selecionado = None
+            st.session_state.ac_query = ""
+            salvar_dados_iaagro()
+            success_box(f"✅ {nome_usar} adicionado ao estoque.")
 
-        st.divider()
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            nome_final = st.text_input("Nome do produto / insumo", value=nome_insumo, key="nome_insumo_final")
-            categoria  = st.selectbox("Categoria", [
-                "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-            ], index=["Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                      "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                     ].index(cat_sugerida) if cat_sugerida in [
-                      "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                      "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                     ] else 0)
-            cultura    = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="cultura_estoque")
-            litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
-            capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
-        with col2:
-            quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0)
-            unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"])
-        with col3:
-            valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0)
-            estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0)
+    st.subheader("Estoque Atual")
+    if len(st.session_state.estoque) == 0:
+        info_box("Nenhum produto cadastrado ainda.")
+    else:
+        tabela_estoque = pd.DataFrame(st.session_state.estoque)
 
-        # Campo código de barras no cadastro manual
-        cod_barras_manual = st.text_input("Código de Barras (opcional)", placeholder="Deixe em branco ou escaneie", key="cod_barras_manual")
-        observacao = st.text_area("Observação")
-
-        if st.button("Adicionar Produto ao Estoque"):
-            nome_usar = nome_final.strip() if nome_final.strip() else nome_insumo.strip()
-            if not nome_usar:
-                error_box("Digite ou selecione o nome do produto.")
-            else:
-                novo_item = {
-                    "Insumo": nome_usar, "Categoria": categoria,
-                    "Quantidade": quantidade, "Unidade": unidade,
-                    "Valor Unitário R$": valor_unitario,
-                    "Valor Total R$": quantidade * valor_unitario,
-                    "Estoque Mínimo": estoque_minimo,
-                    "Observação": observacao, "Cultura": cultura,
-                    "Dose ha": dose_ha, "Litros ha": litros_ha,
-                    "Tanque litros": capacidade_tanque,
-                    "Fabricante": st.session_state.ac_selecionado["fab"] if st.session_state.ac_selecionado else "",
-                    "Ingrediente Ativo": st.session_state.ac_selecionado["ia"] if st.session_state.ac_selecionado else "",
-                    "Codigo_Barras": cod_barras_manual.strip(),
-                }
-                st.session_state.estoque.append(novo_item)
-                st.session_state.ac_selecionado = None
-                st.session_state.ac_query = ""
-                salvar_dados_iaagro()
-                success_box(f"✅ {nome_usar} adicionado ao estoque.")
-
-        st.subheader("Estoque Atual")
-        if len(st.session_state.estoque) == 0:
-            info_box("Nenhum produto cadastrado ainda.")
-        else:
-            tabela_estoque = pd.DataFrame(st.session_state.estoque)
-            st.markdown("### 🗑️ Excluir Produto")
-            produto_excluir = st.selectbox(
-                "Selecione o produto",
-                [item["Insumo"] for item in st.session_state.estoque],
-                key="produto_excluir_estoque"
-            )
-            if st.button("❌ Excluir Produto", key="btn_excluir_produto"):
-                st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != produto_excluir]
-                salvar_dados_iaagro()
-                success_box(f"{produto_excluir} removido do estoque.")
-                st.rerun()
-
-            tabela_estoque["Status"] = tabela_estoque.apply(
-                lambda linha: "Estoque baixo" if linha["Quantidade"] <= linha["Estoque Mínimo"] else "OK", axis=1
-            )
-            st.dataframe(tabela_estoque, use_container_width=True)
-
-            st.subheader("🚨 Alertas Inteligentes")
-            for item in st.session_state.estoque:
-                qtd  = item.get("Quantidade", 0)
-                nome = item.get("Insumo", "Produto")
-                if   qtd <= 0:   error_box(f"❌ {nome}: estoque zerado!")
-                elif qtd <= 500: warning_box(f"⚠️ {nome}: estoque baixo ({qtd:.1f} kg/L)")
-                else:            success_box(f"✅ {nome}: estoque OK ({qtd:.1f} kg/L)")
-
-            col4, col5, col6 = st.columns(3)
-            col4.metric("Itens cadastrados",       len(tabela_estoque))
-            col5.metric("Valor total em estoque",  f"R$ {tabela_estoque['Valor Total R$'].sum():,.2f}")
-            col6.metric("Itens com estoque baixo", len(tabela_estoque[tabela_estoque["Status"] == "Estoque baixo"]))
-
-    # ════════════════════════════════════════════════════════════════
-    # TAB 2 — LEITOR DE CÓDIGO DE BARRAS
-    # ════════════════════════════════════════════════════════════════
-    with tab_leitor:
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-        ℹ️ Use a câmera do celular para escanear o código de barras, ou conecte um leitor USB.
-        </div>''', unsafe_allow_html=True)
-
-        col_modo1, col_modo2 = st.columns(2)
-        with col_modo1:
-            bc_modo = st.selectbox("Modo de operação", ["Entrada de estoque", "Consultar produto"], key="bc_modo_sel")
-        with col_modo2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown('''<div style="background:#0f3460;color:#93c5fd;padding:9px 14px;
-            border-radius:8px;font-size:12px;font-weight:700;">
-            📱 Câmera ou 💻 Leitor USB — ambos funcionam!
-            </div>''', unsafe_allow_html=True)
-
-        st.divider()
-
-        # ── Câmera do celular ─────────────────────────────────────────
-        st.subheader("📷 Escanear pela Câmera")
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:10px 16px;
-        border-radius:8px;font-size:13px;font-weight:600;margin-bottom:12px;">
-        📱 No celular: toque em "Browse files" → escolha <b>Câmera</b> → aponte para o código de barras → o sistema lê automaticamente!
-        </div>''', unsafe_allow_html=True)
-
-        foto_barcode = st.file_uploader(
-            "📸 Tire uma foto do código de barras",
-            type=["jpg","jpeg","png"],
-            key="foto_barcode"
+        st.markdown("### 🗑️ Excluir Produto")
+        produto_excluir = st.selectbox(
+            "Selecione o produto",
+            [item["Insumo"] for item in st.session_state.estoque],
+            key="produto_excluir_estoque"
         )
+        if st.button("❌ Excluir Produto", key="btn_excluir_produto"):
+            st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != produto_excluir]
+            salvar_dados_iaagro()
+            success_box(f"{produto_excluir} removido do estoque.")
+            st.rerun()
 
-        if foto_barcode:
-            try:
-                from pyzbar.pyzbar import decode as pyzbar_decode
-                img_pil = PILImage.open(foto_barcode)
-                st.image(img_pil, caption="Foto enviada", use_container_width=True)
-                codigos = pyzbar_decode(img_pil)
-                if codigos:
-                    codigo_lido = codigos[0].data.decode("utf-8")
-                    success_box(f"✅ Código lido: {codigo_lido}")
-                    st.session_state.bc_codigo = codigo_lido
-                    produto_encontrado = None
-                    for item in st.session_state.estoque:
-                        if item.get("Codigo_Barras","") == codigo_lido:
-                            produto_encontrado = item
-                            break
-                    st.session_state.bc_produto = produto_encontrado
-                    st.rerun()
-                else:
-                    warning_box("Não foi possível ler o código. Tente uma foto mais nítida e bem iluminada.")
-            except Exception as e:
-                warning_box(f"Erro ao processar imagem. Use o campo manual abaixo.")
-
-        # ── Leitor USB ou digitação manual ────────────────────────────
-        st.subheader("⌨️ Leitor USB ou Digitação Manual")
-        codigo_barras = st.text_input(
-            "🔍 Aponte o leitor ou digite o código aqui:",
-            placeholder="Aguardando leitura...",
-            key="bc_input_codigo"
+        tabela_estoque["Status"] = tabela_estoque.apply(
+            lambda linha: "Estoque baixo" if linha["Quantidade"] <= linha["Estoque Mínimo"] else "OK", axis=1
         )
-        col_bc1, col_bc2 = st.columns([1, 3])
-        with col_bc1:
-            buscar_codigo = st.button("🔎 Buscar Produto", key="btn_bc_buscar", use_container_width=True)
+        st.dataframe(tabela_estoque, use_container_width=True)
 
-        if buscar_codigo and codigo_barras.strip():
-            produto_encontrado = None
-            for item in st.session_state.estoque:
-                if item.get("Codigo_Barras", "") == codigo_barras.strip():
-                    produto_encontrado = item
-                    break
-            st.session_state.bc_codigo  = codigo_barras.strip()
-            st.session_state.bc_produto = produto_encontrado
+        st.subheader("🚨 Alertas Inteligentes")
+        for item in st.session_state.estoque:
+            qtd  = item.get("Quantidade", 0)
+            nome = item.get("Insumo", "Produto")
+            if   qtd <= 0:   error_box(f"❌ {nome}: estoque zerado!")
+            elif qtd <= 500: warning_box(f"⚠️ {nome}: estoque baixo ({qtd:.1f} kg/L)")
+            else:            success_box(f"✅ {nome}: estoque OK ({qtd:.1f} kg/L)")
 
-        if st.session_state.bc_codigo:
-            st.divider()
-            if st.session_state.bc_produto:
-                p = st.session_state.bc_produto
-                st.markdown(f'''<div style="background:#14532d;color:#fff;padding:15px 18px;
-                border-radius:10px;border-left:5px solid #22c55e;font-weight:600;margin:8px 0;">
-                ✅ Produto encontrado: <b>{p.get("Insumo","")}</b> |
-                Estoque atual: <b>{p.get("Quantidade",0):.1f} {p.get("Unidade","")}</b> |
-                Cat: {p.get("Categoria","")} | Fab: {p.get("Fabricante","—")}
-                </div>''', unsafe_allow_html=True)
-
-                if bc_modo == "Entrada de estoque":
-                    st.subheader("➕ Registrar Entrada")
-                    col_e1, col_e2, col_e3 = st.columns(3)
-                    with col_e1:
-                        qtd_entrada = st.number_input("Quantidade recebida", min_value=0.0, value=0.0, key="bc_qtd_entrada")
-                    with col_e2:
-                        vl_entrada  = st.number_input("Valor unitário R$", min_value=0.0, value=float(p.get("Valor Unitário R$", 0)), key="bc_vl_entrada")
-                    with col_e3:
-                        fornec_entr = st.text_input("Fornecedor", key="bc_forn_entrada")
-                    nota_ref = st.text_input("Nº Nota Fiscal / Referência", key="bc_nota_ref")
-
-                    if st.button("✅ Confirmar Entrada no Estoque", key="btn_bc_confirmar", use_container_width=True):
-                        if qtd_entrada <= 0:
-                            error_box("Informe a quantidade recebida.")
-                        else:
-                            for item in st.session_state.estoque:
-                                if item.get("Codigo_Barras","") == st.session_state.bc_codigo:
-                                    item["Quantidade"]        += qtd_entrada
-                                    item["Valor Unitário R$"]  = vl_entrada
-                                    item["Valor Total R$"]     = item["Quantidade"] * vl_entrada
-                                    break
-                            st.session_state.notas_fiscal.append({
-                                "Tipo": "Entrada", "Insumo": p.get("Insumo",""),
-                                "Codigo_Barras": st.session_state.bc_codigo,
-                                "Quantidade": qtd_entrada, "Unidade": p.get("Unidade",""),
-                                "Valor Unitário": vl_entrada,
-                                "Valor Total": round(qtd_entrada * vl_entrada, 2),
-                                "Fornecedor": fornec_entr, "Numero_NF": nota_ref,
-                                "Data": str(date.today()), "Categoria": p.get("Categoria",""),
-                                "Categoria_IR": "Custeio — Insumos", "Safra": "",
-                            })
-                            salvar_dados_iaagro()
-                            success_box(f"✅ +{qtd_entrada:.1f} {p.get('Unidade','')} de {p.get('Insumo','')} registrado!")
-                            st.session_state.bc_codigo  = ""
-                            st.session_state.bc_produto = None
-                            st.rerun()
-            else:
-                st.markdown(f'''<div style="background:#78350f;color:#fff;padding:13px 18px;
-                border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;margin:8px 0;">
-                ⚠️ Código <b>{st.session_state.bc_codigo}</b> não encontrado. Preencha os dados abaixo para cadastrar.
-                </div>''', unsafe_allow_html=True)
-
-                col_n1, col_n2, col_n3 = st.columns(3)
-                with col_n1:
-                    bc_nome    = st.text_input("Nome do produto*", key="bc_nome_novo")
-                    bc_cat     = st.selectbox("Categoria", [
-                        "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                        "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                    ], key="bc_cat_novo")
-                    bc_cultura = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="bc_cult_novo")
-                with col_n2:
-                    bc_qtd     = st.number_input("Quantidade inicial", min_value=0.0, value=0.0, key="bc_qtd_novo")
-                    bc_unidade = st.selectbox("Unidade", ["kg","ton","litros","sacos","galões","unidades"], key="bc_uni_novo")
-                    bc_minimo  = st.number_input("Estoque mínimo", min_value=0.0, value=0.0, key="bc_min_novo")
-                with col_n3:
-                    bc_vl  = st.number_input("Valor unitário R$", min_value=0.0, value=0.0, key="bc_vl_novo")
-                    bc_fab = st.text_input("Fabricante", key="bc_fab_novo")
-                    bc_forn= st.text_input("Fornecedor", key="bc_forn_novo")
-                bc_nota_novo = st.text_input("Nº Nota Fiscal", key="bc_nota_novo_nf")
-
-                if st.button("💾 Cadastrar e Registrar Entrada", key="btn_bc_cadastrar", use_container_width=True):
-                    if not bc_nome.strip():
-                        error_box("Informe o nome do produto.")
-                    else:
-                        st.session_state.estoque.append({
-                            "Insumo": bc_nome.strip(), "Categoria": bc_cat,
-                            "Quantidade": bc_qtd, "Unidade": bc_unidade,
-                            "Valor Unitário R$": bc_vl, "Valor Total R$": round(bc_qtd * bc_vl, 2),
-                            "Estoque Mínimo": bc_minimo, "Observação": "",
-                            "Cultura": bc_cultura, "Fabricante": bc_fab,
-                            "Ingrediente Ativo": "", "Dose ha": 0.0,
-                            "Litros ha": 75.0, "Tanque litros": 2000,
-                            "Codigo_Barras": st.session_state.bc_codigo,
-                        })
-                        st.session_state.notas_fiscal.append({
-                            "Tipo": "Entrada", "Insumo": bc_nome.strip(),
-                            "Codigo_Barras": st.session_state.bc_codigo,
-                            "Quantidade": bc_qtd, "Unidade": bc_unidade,
-                            "Valor Unitário": bc_vl, "Valor Total": round(bc_qtd * bc_vl, 2),
-                            "Fornecedor": bc_forn, "Numero_NF": bc_nota_novo,
-                            "Data": str(date.today()), "Categoria": bc_cat,
-                            "Categoria_IR": "Custeio — Insumos", "Safra": "",
-                        })
-                        salvar_dados_iaagro()
-                        success_box(f"✅ {bc_nome} cadastrado com código {st.session_state.bc_codigo}!")
-                        st.session_state.bc_codigo  = ""
-                        st.session_state.bc_produto = None
-                        st.rerun()
-
-        # Histórico de entradas por scanner
-        st.divider()
-        st.subheader("📋 Histórico de Entradas por Leitor")
-        entradas_bc = [n for n in st.session_state.notas_fiscal if n.get("Codigo_Barras")]
-        if not entradas_bc:
-            info_box("Nenhuma entrada registrada por leitor ainda.")
-        else:
-            df_bc = pd.DataFrame(entradas_bc)
-            st.dataframe(df_bc, use_container_width=True)
-            total_bc = df_bc["Valor Total"].sum() if "Valor Total" in df_bc.columns else 0
-            st.metric("Valor total de entradas", f"R$ {total_bc:,.2f}")
-
-    # ════════════════════════════════════════════════════════════════
-    # TAB 3 — NOTAS FISCAIS
-    # ════════════════════════════════════════════════════════════════
-    with tab_notas:
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-        ℹ️ Registre compras e vendas de insumos. Os lançamentos gerados pelo leitor de código
-        de barras aparecem aqui automaticamente.
-        </div>''', unsafe_allow_html=True)
-
-        sub_nova, sub_lista = st.tabs(["➕ Nova Nota", "📂 Notas Salvas"])
-
-        with sub_nova:
-            st.subheader("➕ Registrar Nova Nota Fiscal / Lançamento")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                nf_tipo   = st.selectbox("Tipo de Operação", [
-                    "Compra de Insumo", "Venda de Produção", "Prestação de Serviço",
-                    "Arrendamento Pago", "Arrendamento Recebido", "Devolução", "Outros"
-                ], key="nf_tipo")
-                nf_fornec = st.text_input("Fornecedor / Destinatário", key="nf_fornec")
-                nf_cnpj   = st.text_input("CNPJ / CPF (opcional)", key="nf_cnpj")
-            with col2:
-                nf_numero = st.text_input("Nº da Nota Fiscal", key="nf_numero")
-                nf_data   = st.date_input("Data", key="nf_data")
-                nf_safra  = st.text_input("Safra de referência", placeholder="2024/2025", key="nf_safra")
-            with col3:
-                nf_valor  = st.number_input("Valor Total R$", min_value=0.0, key="nf_valor")
-                nf_categ  = st.selectbox("Categoria IR Rural", [
-                    "Custeio — Insumos", "Custeio — Defensivos", "Custeio — Sementes",
-                    "Custeio — Combustível", "Custeio — Mão de obra",
-                    "Investimento — Máquinas", "Investimento — Benfeitorias",
-                    "Receita — Venda de produção", "Receita — Arrendamento",
-                    "Despesa — Arrendamento", "Outros"
-                ], key="nf_categ")
-                nf_area_ha = st.number_input("Área referente (ha)", min_value=0.0, key="nf_area_ha")
-
-            nf_obs = st.text_area("Observações / Descrição", key="nf_obs",
-                                  placeholder="Ex: Compra de 500kg de ureia para safra de soja 2025...")
-
-            st.markdown("**Itens da nota (opcional):**")
-            col_i1, col_i2, col_i3, col_i4 = st.columns([3,1,1,1])
-            with col_i1: nf_item_desc = st.text_input("Produto/Serviço", key="nf_item_desc")
-            with col_i2: nf_item_qtd  = st.number_input("Qtd", min_value=0.0, value=1.0, key="nf_item_qtd")
-            with col_i3: nf_item_uni  = st.selectbox("Un", ["kg","L","sc","un","t","h"], key="nf_item_uni")
-            with col_i4: nf_item_vl   = st.number_input("Vl Unit R$", min_value=0.0, key="nf_item_vl")
-
-            col_ia, col_ib = st.columns(2)
-            with col_ia:
-                if st.button("➕ Adicionar Item", key="btn_nf_add_item"):
-                    if nf_item_desc.strip():
-                        st.session_state.nf_itens_temp.append({
-                            "Produto": nf_item_desc.strip(), "Qtd": nf_item_qtd,
-                            "Unidade": nf_item_uni, "Vl Unit R$": nf_item_vl,
-                            "Total R$": round(nf_item_qtd * nf_item_vl, 2),
-                        })
-                        success_box(f"Item '{nf_item_desc}' adicionado.")
-            with col_ib:
-                if st.button("🗑️ Limpar Itens", key="btn_nf_clear_items"):
-                    st.session_state.nf_itens_temp = []
-
-            if st.session_state.nf_itens_temp:
-                df_itens_temp = pd.DataFrame(st.session_state.nf_itens_temp)
-                st.dataframe(df_itens_temp, use_container_width=True, hide_index=True)
-                st.metric("Total dos itens", f"R$ {df_itens_temp['Total R$'].sum():,.2f}")
-
-            st.divider()
-            if st.button("💾 Salvar Nota Fiscal", key="btn_salvar_nf", use_container_width=True):
-                if not nf_fornec.strip():
-                    error_box("Informe o fornecedor / destinatário.")
-                elif nf_valor <= 0 and not st.session_state.nf_itens_temp:
-                    error_box("Informe o valor total ou adicione itens à nota.")
-                else:
-                    valor_final = nf_valor if nf_valor > 0 else sum(
-                        i["Total R$"] for i in st.session_state.nf_itens_temp
-                    )
-                    st.session_state.notas_fiscal.append({
-                        "Tipo": nf_tipo, "Fornecedor": nf_fornec, "CNPJ_CPF": nf_cnpj,
-                        "Numero_NF": nf_numero, "Data": str(nf_data), "Safra": nf_safra,
-                        "Valor Total": round(valor_final, 2), "Categoria_IR": nf_categ,
-                        "Area_ha": nf_area_ha, "Observacao": nf_obs,
-                        "Itens": st.session_state.nf_itens_temp.copy(),
-                        "Codigo_Barras": "", "Insumo": "",
-                    })
-                    st.session_state.nf_itens_temp = []
-                    salvar_dados_iaagro()
-                    success_box(f"✅ Nota {nf_numero or '(sem número)'} salva! R$ {valor_final:,.2f} — {nf_tipo}")
-
-        with sub_lista:
-            st.subheader("📂 Notas Fiscais Salvas")
-            if not st.session_state.notas_fiscal:
-                info_box("Nenhuma nota registrada ainda.")
-            else:
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    tipos_disp   = ["Todos"] + list({n["Tipo"] for n in st.session_state.notas_fiscal})
-                    filtro_tipo  = st.selectbox("Filtrar por tipo",  tipos_disp, key="nf_filtro_tipo")
-                with col_f2:
-                    safras_disp  = ["Todas"] + sorted(
-                        list({n.get("Safra","") for n in st.session_state.notas_fiscal if n.get("Safra")}),
-                        reverse=True
-                    )
-                    filtro_safra = st.selectbox("Filtrar por safra", safras_disp, key="nf_filtro_safra")
-
-                notas_filtradas = [
-                    n for n in st.session_state.notas_fiscal
-                    if (filtro_tipo  == "Todos" or n["Tipo"] == filtro_tipo)
-                    and (filtro_safra == "Todas" or n.get("Safra","") == filtro_safra)
-                ]
-                if not notas_filtradas:
-                    warning_box("Nenhuma nota encontrada com os filtros selecionados.")
-                else:
-                    total_filtro = sum(n.get("Valor Total", 0) for n in notas_filtradas)
-                    col_m1, col_m2 = st.columns(2)
-                    col_m1.metric("Notas encontradas", len(notas_filtradas))
-                    col_m2.metric("Valor total filtrado", f"R$ {total_filtro:,.2f}")
-
-                    for nota in notas_filtradas:
-                        with st.expander(f"📄 {nota.get('Tipo','')} | {nota.get('Fornecedor','')} | {nota.get('Data','')} | R$ {nota.get('Valor Total',0):,.2f}"):
-                            c1, c2, c3 = st.columns(3)
-                            c1.write(f"**Nº NF:** {nota.get('Numero_NF','—')}")
-                            c1.write(f"**CNPJ/CPF:** {nota.get('CNPJ_CPF','—')}")
-                            c2.write(f"**Safra:** {nota.get('Safra','—')}")
-                            c2.write(f"**Categoria IR:** {nota.get('Categoria_IR','—')}")
-                            c3.write(f"**Área ref:** {nota.get('Area_ha',0):.1f} ha")
-                            c3.write(f"**Cód. Barras:** {nota.get('Codigo_Barras','—')}")
-                            if nota.get("Observacao"):
-                                st.write(f"**Obs:** {nota.get('Observacao','')}")
-                            if nota.get("Itens"):
-                                st.dataframe(pd.DataFrame(nota["Itens"]), use_container_width=True, hide_index=True)
-
-                    st.divider()
-                    notas_export = [{k: v for k, v in n.items() if k != "Itens"} for n in notas_filtradas]
-                    xlsx_nf = exportar_excel({"Notas Fiscais": notas_export})
-                    if xlsx_nf:
-                        st.download_button(
-                            "📥 Exportar Notas para Excel",
-                            data=xlsx_nf,
-                            file_name=f"notas_fiscais_{date.today()}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
-
-    # ════════════════════════════════════════════════════════════════
-    # TAB 4 — RELATÓRIO IR RURAL
-    # ════════════════════════════════════════════════════════════════
-    with tab_ir:
-        st.subheader("📊 Relatório para Imposto de Renda Rural")
-        st.markdown('''<div style="background:#14532d;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #22c55e;font-weight:600;margin:8px 0;">
-        ✅ Consolida todas as despesas e receitas por categoria — pronto para o Livro-Caixa
-        do IR Rural e compatível com importação no IAAGro.
-        </div>''', unsafe_allow_html=True)
-
-        if not st.session_state.notas_fiscal:
-            info_box("Nenhum lançamento ainda. Registre notas ou use o leitor de código de barras.")
-        else:
-            from collections import defaultdict as _dd
-            grupos_ir = _dd(list)
-            for n in st.session_state.notas_fiscal:
-                cat = n.get("Categoria_IR") or n.get("Categoria") or "Outros"
-                grupos_ir[cat].append(n)
-
-            resumo_ir = []
-            for cat, notas_cat in grupos_ir.items():
-                resumo_ir.append({
-                    "Categoria":      cat,
-                    "Qtd Notas":      len(notas_cat),
-                    "Valor Total R$": round(sum(n.get("Valor Total", 0) for n in notas_cat), 2),
-                })
-
-            df_resumo_ir = pd.DataFrame(resumo_ir).sort_values("Valor Total R$", ascending=False)
-            st.subheader("📋 Resumo por Categoria")
-            st.dataframe(df_resumo_ir, use_container_width=True, hide_index=True)
-
-            total_desp = sum(r["Valor Total R$"] for r in resumo_ir
-                             if any(x in r["Categoria"] for x in ["Custeio","Investimento","Despesa"]))
-            total_rec  = sum(r["Valor Total R$"] for r in resumo_ir if "Receita" in r["Categoria"])
-            resultado  = total_rec - total_desp
-            c1, c2, c3 = st.columns(3)
-            c1.metric("💸 Total Despesas / Custos", f"R$ {total_desp:,.2f}")
-            c2.metric("💰 Total Receitas",           f"R$ {total_rec:,.2f}")
-            c3.metric("📊 Resultado Apurado",        f"R$ {resultado:,.2f}",
-                      "✅ Lucro" if resultado >= 0 else "⚠️ Prejuízo")
-
-            if not df_resumo_ir.empty:
-                st.divider()
-                st.subheader("📈 Distribuição por Categoria")
-                st.bar_chart(df_resumo_ir.set_index("Categoria")["Valor Total R$"])
-
-            st.divider()
-            st.subheader("📤 Exportar para IAAGro / IR Rural")
-            todas_notas_exp = [{
-                "Tipo":           n.get("Tipo",""),
-                "Categoria_IR":   n.get("Categoria_IR") or n.get("Categoria",""),
-                "Fornecedor":     n.get("Fornecedor",""),
-                "CNPJ_CPF":       n.get("CNPJ_CPF",""),
-                "Numero_NF":      n.get("Numero_NF",""),
-                "Data":           n.get("Data",""),
-                "Safra":          n.get("Safra",""),
-                "Valor_Total_R$": n.get("Valor Total", 0),
-                "Area_ha":        n.get("Area_ha", 0),
-                "Observacao":     n.get("Observacao",""),
-                "Codigo_Barras":  n.get("Codigo_Barras",""),
-                "Insumo":         n.get("Insumo",""),
-            } for n in st.session_state.notas_fiscal]
-
-            xlsx_ir = exportar_excel({
-                "Notas Fiscais":  todas_notas_exp,
-                "Resumo IR Rural": resumo_ir,
-            })
-            if xlsx_ir:
-                st.download_button(
-                    "📥 Baixar Relatório IR Rural (.xlsx) — IAAGro",
-                    data=xlsx_ir,
-                    file_name=f"iaagro_IR_rural_{date.today()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-
-            import io as _io, csv as _csv
-            csv_buf = _io.StringIO()
-            if todas_notas_exp:
-                writer = _csv.DictWriter(csv_buf, fieldnames=todas_notas_exp[0].keys(), delimiter=";")
-                writer.writeheader()
-                writer.writerows(todas_notas_exp)
-            csv_bytes = ("\ufeff" + csv_buf.getvalue()).encode("utf-8")
-            st.download_button(
-                "📥 Baixar CSV para Importação (IR / IAAGro)",
-                data=csv_bytes,
-                file_name=f"iaagro_IR_{date.today()}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        col4, col5, col6 = st.columns(3)
+        col4.metric("Itens cadastrados",      len(tabela_estoque))
+        col5.metric("Valor total em estoque", f"R$ {tabela_estoque['Valor Total R$'].sum():,.2f}")
+        col6.metric("Itens com estoque baixo", len(tabela_estoque[tabela_estoque["Status"] == "Estoque baixo"]))
 
 # ─────────────────────────────────────────────
 # MENU: APLICAÇÕES
@@ -4782,23 +4689,48 @@ elif menu == "🌤️ Clima & Alertas":
     </div>''', unsafe_allow_html=True)
 
     # ── Geolocalização ──────────────────────────────────────────────────
-    geo = get_geolocation()
-    if geo:
-        lat = geo["coords"]["latitude"]
-        lon = geo["coords"]["longitude"]
-        fonte_loc = "📍 GPS do navegador"
-    else:
-        lat = st.session_state.dados.get("latitude", -26.88)
-        lon = st.session_state.dados.get("longitude", -52.40)
-        fonte_loc = "📌 Coordenadas da área cadastrada"
+    # Usa coordenadas salvas por padrão — GPS só quando o usuário pede
+    lat = st.session_state.dados.get("latitude",  -26.88)
+    lon = st.session_state.dados.get("longitude", -52.40)
+    fonte_loc = "📌 Coordenadas da área cadastrada"
 
-    # Permitir ajuste manual
-    with st.expander("📍 Ajustar localização manualmente", expanded=False):
-        col_geo1, col_geo2 = st.columns(2)
-        with col_geo1:
-            lat = st.number_input("Latitude", value=float(lat), format="%.4f", key="lat_clima")
-        with col_geo2:
-            lon = st.number_input("Longitude", value=float(lon), format="%.4f", key="lon_clima")
+    # Verificar se já buscou GPS nesta sessão
+    if st.session_state.get("_gps_clima_lat"):
+        lat = st.session_state["_gps_clima_lat"]
+        lon = st.session_state["_gps_clima_lon"]
+        fonte_loc = "📍 GPS do navegador"
+
+    # Painel de localização
+    col_loc1, col_loc2, col_loc3 = st.columns([2, 2, 1])
+    with col_loc1:
+        lat = st.number_input("Latitude",  value=float(lat),
+                               format="%.4f", key="lat_clima")
+    with col_loc2:
+        lon = st.number_input("Longitude", value=float(lon),
+                               format="%.4f", key="lon_clima")
+    with col_loc3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("📡 GPS", key="btn_gps_clima", use_container_width=True,
+                     help="Usar localização atual do celular"):
+            try:
+                geo = get_geolocation()
+                if geo and geo.get("coords"):
+                    st.session_state["_gps_clima_lat"] = geo["coords"]["latitude"]
+                    st.session_state["_gps_clima_lon"] = geo["coords"]["longitude"]
+                    st.session_state.clima_data = None  # Força rebuscar com nova localização
+                    st.rerun()
+            except Exception:
+                warning_box("GPS indisponível. Use as coordenadas manuais.")
+
+    st.markdown(
+        f'<div style="background:#0f3460;color:#6ee7b7;padding:7px 14px;border-radius:8px;'
+        f'font-size:12px;font-weight:700;margin:4px 0 8px 0;">'
+        f'{fonte_loc} &nbsp;|&nbsp; {lat:.4f}, {lon:.4f}</div>',
+        unsafe_allow_html=True
+    )
+
+    # Permitir ajuste manual via expander (compatibilidade com versão anterior)
+    # Removido — agora os campos ficam visíveis direto acima
 
     # ── Botão atualizar + info ──────────────────────────────────────────
     col_cb1, col_cb2 = st.columns([1, 3])
@@ -5025,10 +4957,52 @@ elif menu == "🌤️ Clima & Alertas":
             st.dataframe(df_prev, use_container_width=True, hide_index=True)
 
             # Gráfico temperatura + chuva
-            st.subheader("🌡️ Temperatura (°C)")
-            st.line_chart(df_prev.set_index("Data")[["Máx °C","Mín °C"]])
-            st.subheader("🌧️ Chuva (mm) e Probabilidade (%)")
-            st.bar_chart(df_prev.set_index("Data")[["Chuva mm","Prob. Chuva %"]])
+            try:
+                import plotly.graph_objects as go
+                from plotly.subplots import make_subplots
+                fig_clima = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_clima.add_trace(go.Scatter(
+                    x=df_prev["Data"], y=df_prev["Máx °C"],
+                    name="Temp. Máx", line=dict(color="#f59e0b", width=2),
+                    mode="lines+markers"
+                ), secondary_y=False)
+                fig_clima.add_trace(go.Scatter(
+                    x=df_prev["Data"], y=df_prev["Mín °C"],
+                    name="Temp. Mín", line=dict(color="#93c5fd", width=2, dash="dot"),
+                    mode="lines+markers"
+                ), secondary_y=False)
+                fig_clima.add_trace(go.Bar(
+                    x=df_prev["Data"], y=df_prev["Chuva mm"],
+                    name="Chuva mm", marker_color="#3b82f6", opacity=0.6
+                ), secondary_y=True)
+                fig_clima.add_trace(go.Scatter(
+                    x=df_prev["Data"], y=df_prev["Prob. Chuva %"],
+                    name="Prob. Chuva %", line=dict(color="#67e8f9", width=1.5, dash="dash"),
+                    mode="lines"
+                ), secondary_y=True)
+                fig_clima.update_layout(
+                    title="Temperatura (°C) x Chuva (mm) x Probabilidade (%)",
+                    paper_bgcolor="#0f3460",
+                    plot_bgcolor="#0d2137",
+                    font_color="#f1f5f9",
+                    height=350,
+                    legend=dict(bgcolor="#0f3460", bordercolor="#22c55e33"),
+                )
+                # update_xaxes e update_yaxes são o jeito correto para subplots
+                fig_clima.update_xaxes(gridcolor="#1e3a5f")
+                fig_clima.update_yaxes(
+                    title_text="Temperatura °C",
+                    secondary_y=False,
+                    gridcolor="#1e3a5f"
+                )
+                fig_clima.update_yaxes(
+                    title_text="Chuva mm / Prob %",
+                    secondary_y=True
+                )
+                st.plotly_chart(fig_clima, use_container_width=True)
+            except Exception:
+                # Fallback sem plotly
+                st.line_chart(df_prev.set_index("Data")[["Máx °C", "Mín °C", "Chuva mm"]])
 
             # Melhores dias para aplicação
             dias_bons = [datas[i] for i in range(n_dias)
@@ -5114,7 +5088,7 @@ elif menu == "💰 Preços de Mercado":
                         unsafe_allow_html=True)
 
     if atualizar:
-        with st.spinner("🌐 Buscando cotações em tempo real (CEPEA + AwesomeAPI)..."):
+        with st.spinner("🌐 Buscando cotações em tempo real (BrapiDev/Yahoo + AwesomeAPI)..."):
             st.session_state.precos_data = buscar_precos_commodities()
         success_box("✅ Preços atualizados!")
 
@@ -5122,19 +5096,44 @@ elif menu == "💰 Preços de Mercado":
     if not st.session_state.get("precos_data"):
         st.session_state.precos_data = precos
 
+    # Detectar se veio de API real ou fallback
+    fonte_soja  = precos.get("soja_sc", {}).get("fonte", "")
+    ult_at_preco = precos.get("_atualizado_em", "")
+    is_realtime = "CBOT" in fonte_soja or "ICE" in fonte_soja or "BrapiDev" in fonte_soja
+
+    col_st1, col_st2 = st.columns(2)
+    with col_st1:
+        cor_st = "#14532d" if is_realtime else "#78350f"
+        icone_st = "🟢" if is_realtime else "🟡"
+        st.markdown(
+            f'<div style="background:{cor_st};color:#fff;padding:8px 14px;border-radius:8px;'
+            f'font-size:12px;font-weight:700;">'
+            f'{icone_st} {"Cotações em tempo real — CBOT/ICE convertido para R$" if is_realtime else "⚠️ Usando referências offline — clique em Atualizar"}'
+            f'</div>', unsafe_allow_html=True
+        )
+    with col_st2:
+        dolar_fonte = precos.get("dolar", {}).get("fonte", "")
+        dolar_hor   = precos.get("dolar", {}).get("horario", "")
+        cor_d = "#14532d" if "tempo real" in dolar_fonte.lower() or "VatComply" in dolar_fonte else "#78350f"
+        st.markdown(
+            f'<div style="background:{cor_d};color:#fff;padding:8px 14px;border-radius:8px;'
+            f'font-size:12px;font-weight:700;">'
+            f'💵 Dólar: {dolar_fonte}{" — " + dolar_hor[:16] if dolar_hor else ""}'
+            f'{"  |  🕐 " + ult_at_preco if ult_at_preco else ""}'
+            f'</div>', unsafe_allow_html=True
+        )
+
     # ── Extrai todos os valores ──────────────────────────────────────
-    pm = st.session_state.get("precos_manuais", {})
-    soja_p     = pm.get("soja",    precos.get("soja_sc",    {}).get("preco", 138.0))
-    milho_p    = pm.get("milho",   precos.get("milho_sc",   {}).get("preco",  72.0))
-    trigo_p    = pm.get("trigo",   precos.get("trigo_sc",   {}).get("preco",  98.0))
-    cafe_p     = pm.get("cafe",    precos.get("cafe_sc",    {}).get("preco", 2100.0))
-    algodao_p  = pm.get("algodao", precos.get("algodao_at", {}).get("preco", 118.0))
-    boi_p      = pm.get("boi",     precos.get("boi_at",     {}).get("preco", 310.0))
-    arroz_p    = pm.get("arroz",   precos.get("arroz_sc",   {}).get("preco",  72.0))
-    dolar_p    = pm.get("dolar",   precos.get("dolar",      {}).get("preco",   5.80))
+    soja_p     = precos.get("soja_sc",    {}).get("preco", 142.0)
+    milho_p    = precos.get("milho_sc",   {}).get("preco",  74.0)
+    trigo_p    = precos.get("trigo_sc",   {}).get("preco",  98.0)
+    cafe_p     = precos.get("cafe_sc",    {}).get("preco", 2100.0)
+    algodao_p  = precos.get("algodao_at", {}).get("preco", 118.0)
+    boi_p      = precos.get("boi_at",     {}).get("preco", 310.0)
+    arroz_p    = precos.get("arroz_sc",   {}).get("preco",  72.0)
+    dolar_p    = precos.get("dolar",      {}).get("preco",   5.80)
     fonte_dolar= precos.get("dolar",      {}).get("fonte", "")
     fonte_graos= precos.get("soja_sc",    {}).get("fonte", "")
-    _tem_manual = bool(pm)
 
     # ── Painel de cotações ───────────────────────────────────────────
     st.subheader("📊 Cotações Atuais")
@@ -5165,91 +5164,17 @@ elif menu == "💰 Preços de Mercado":
     # Indicadores de fonte
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        if _tem_manual:
-            st.markdown('<div style="background:#78350f;color:#fff;padding:7px 13px;border-radius:8px;'
-                        'font-size:12px;font-weight:700;">✏️ Grãos: Inseridos manualmente</div>',
-                        unsafe_allow_html=True)
-        else:
-            cor_f  = "#14532d" if ("IA" in fonte_graos or "CEPEA" in fonte_graos) and "offline" not in fonte_graos.lower() else "#78350f"
-            icone_f = "🟢" if cor_f == "#14532d" else "🟡"
-            st.markdown(f'<div style="background:{cor_f};color:#fff;padding:7px 13px;border-radius:8px;'
-                        f'font-size:12px;font-weight:700;">{icone_f} Grãos: {fonte_graos or "Aguardando atualização"}</div>',
-                        unsafe_allow_html=True)
+        cor_f = "#14532d" if "IA" in fonte_graos or "CEPEA" in fonte_graos and "offline" not in fonte_graos.lower() else "#78350f"
+        icone_f = "🟢" if cor_f == "#14532d" else "🟡"
+        st.markdown(f'<div style="background:{cor_f};color:#fff;padding:7px 13px;border-radius:8px;'
+                    f'font-size:12px;font-weight:700;">{icone_f} Grãos: {fonte_graos or "Aguardando atualização"}</div>',
+                    unsafe_allow_html=True)
     with col_f2:
-        if _tem_manual and pm.get("dolar"):
-            st.markdown('<div style="background:#78350f;color:#fff;padding:7px 13px;border-radius:8px;'
-                        'font-size:12px;font-weight:700;">✏️ Dólar: Inserido manualmente</div>',
-                        unsafe_allow_html=True)
-        else:
-            cor_d  = "#14532d" if "AwesomeAPI" in fonte_dolar else "#78350f"
-            icone_d = "🟢" if cor_d == "#14532d" else "🟡"
-            st.markdown(f'<div style="background:{cor_d};color:#fff;padding:7px 13px;border-radius:8px;'
-                        f'font-size:12px;font-weight:700;">{icone_d} Dólar: {fonte_dolar or "Aguardando"}</div>',
-                        unsafe_allow_html=True)
-
-    st.divider()
-
-    # ── Atualização Manual de Preços ─────────────────────────────────
-    with st.expander("✏️ Atualizar Preços Manualmente", expanded=False):
-        st.markdown('''<div style="background:#78350f;color:#fff;padding:10px 16px;
-        border-radius:8px;border-left:4px solid #f59e0b;font-size:13px;font-weight:600;margin-bottom:12px;">
-        ⚠️ Use quando os preços automáticos estiverem offline ou desatualizados.
-        Os valores inseridos aqui substituem os da API e ficam salvos na sessão.
-        </div>''', unsafe_allow_html=True)
-
-        if "precos_manuais" not in st.session_state:
-            st.session_state.precos_manuais = {}
-
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-        with col_m1:
-            st.markdown("**🌾 Grãos**")
-            pm_soja   = st.number_input("Soja R$/sc 60kg",    min_value=0.0, value=float(st.session_state.precos_manuais.get("soja",   soja_p)),   step=0.50, key="pm_soja")
-            pm_milho  = st.number_input("Milho R$/sc 60kg",   min_value=0.0, value=float(st.session_state.precos_manuais.get("milho",  milho_p)),  step=0.50, key="pm_milho")
-        with col_m2:
-            st.markdown("**🌾 Grãos**")
-            pm_trigo  = st.number_input("Trigo R$/sc 60kg",   min_value=0.0, value=float(st.session_state.precos_manuais.get("trigo",  trigo_p)),  step=0.50, key="pm_trigo")
-            pm_arroz  = st.number_input("Arroz R$/sc 50kg",   min_value=0.0, value=float(st.session_state.precos_manuais.get("arroz",  arroz_p)),  step=0.50, key="pm_arroz")
-        with col_m3:
-            st.markdown("**🐄 Pecuária & Outros**")
-            pm_cafe   = st.number_input("Café R$/sc 60kg",    min_value=0.0, value=float(st.session_state.precos_manuais.get("cafe",   cafe_p)),   step=10.0, key="pm_cafe")
-            pm_algodao= st.number_input("Algodão R$/@",       min_value=0.0, value=float(st.session_state.precos_manuais.get("algodao",algodao_p)),step=1.0,  key="pm_algodao")
-        with col_m4:
-            st.markdown("**🐄 Pecuária & Outros**")
-            pm_boi    = st.number_input("Boi Gordo R$/@",     min_value=0.0, value=float(st.session_state.precos_manuais.get("boi",    boi_p)),    step=1.0,  key="pm_boi")
-            pm_dolar  = st.number_input("Dólar R$",           min_value=0.0, value=float(st.session_state.precos_manuais.get("dolar",  dolar_p)),  step=0.01, key="pm_dolar")
-
-        col_btn_m1, col_btn_m2 = st.columns(2)
-        with col_btn_m1:
-            if st.button("💾 Aplicar Preços Manuais", key="btn_aplicar_manuais", use_container_width=True):
-                st.session_state.precos_manuais = {
-                    "soja": pm_soja, "milho": pm_milho, "trigo": pm_trigo,
-                    "arroz": pm_arroz, "cafe": pm_cafe, "algodao": pm_algodao,
-                    "boi": pm_boi, "dolar": pm_dolar,
-                }
-                # Sobrescreve precos_data com valores manuais
-                if not st.session_state.get("precos_data"):
-                    st.session_state.precos_data = {}
-                for chave, val, praca in [
-                    ("soja_sc",    pm_soja,    "PR"),
-                    ("milho_sc",   pm_milho,   "PR"),
-                    ("trigo_sc",   pm_trigo,   "PR"),
-                    ("arroz_sc",   pm_arroz,   "RS"),
-                    ("cafe_sc",    pm_cafe,    "SP"),
-                    ("algodao_at", pm_algodao, "MT"),
-                    ("boi_at",     pm_boi,     "SP"),
-                ]:
-                    st.session_state.precos_data[chave] = {
-                        "preco": val, "fonte": "Manual", "praca": praca
-                    }
-                st.session_state.precos_data["dolar"] = {
-                    "preco": pm_dolar, "fonte": "Manual", "horario": str(datetime.now().strftime("%d/%m/%Y %H:%M"))
-                }
-                success_box("✅ Preços manuais aplicados! Recarregue a página para ver as cotações atualizadas.")
-        with col_btn_m2:
-            if st.button("🗑️ Limpar Preços Manuais", key="btn_limpar_manuais", use_container_width=True):
-                st.session_state.precos_manuais = {}
-                st.session_state.precos_data    = None
-                success_box("Preços manuais removidos. Clique em 'Atualizar Preços' para buscar automaticamente.")
+        cor_d = "#14532d" if "AwesomeAPI" in fonte_dolar else "#78350f"
+        icone_d = "🟢" if cor_d == "#14532d" else "🟡"
+        st.markdown(f'<div style="background:{cor_d};color:#fff;padding:7px 13px;border-radius:8px;'
+                    f'font-size:12px;font-weight:700;">{icone_d} Dólar: {fonte_dolar or "Aguardando"}</div>',
+                    unsafe_allow_html=True)
 
     st.divider()
 
@@ -5355,6 +5280,112 @@ elif menu == "💰 Preços de Mercado":
 # ─────────────────────────────────────────────
 # MENU: OCR LAUDO DE SOLO
 # ─────────────────────────────────────────────
+elif menu == "📄 OCR Laudo de Solo":
+    st.header("📄 Leitura Automática de Laudo de Solo")
+    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
+    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
+    ℹ️ Faça upload do seu laudo de solo (PDF ou imagem JPG/PNG) e o sistema tentará
+    extrair os valores automaticamente usando OCR e preenchê-los na análise de solo.
+    </div>''', unsafe_allow_html=True)
+
+    tipo_arquivo = st.radio("Tipo de arquivo", ["📄 PDF", "🖼️ Imagem (JPG/PNG)"],
+                            horizontal=True, key="ocr_tipo")
+
+    st.markdown("""
+    <style>
+    [data-testid="stFileUploaderDropzone"],
+    [data-testid="stFileUploaderDropzone"] > div {
+        background-color: #0f3460 !important;
+        border: 2px solid #22c55e !important;
+        border-radius: 12px !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button {
+        background-color: #16a34a !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+    }
+    [data-testid="stFileUploaderDropzone"] span,
+    [data-testid="stFileUploaderDropzone"] p,
+    [data-testid="stFileUploaderDropzone"] div,
+    [data-testid="stFileUploaderDropzone"] button span {
+        color: #ffffff !important; opacity: 1 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    texto_ocr    = ""
+    campos_ocr   = {}
+
+    if tipo_arquivo == "📄 PDF":
+        arquivo_laudo = st.file_uploader("Upload do laudo PDF", type=["pdf"], key="ocr_pdf")
+        if arquivo_laudo:
+            with st.spinner("🔍 Lendo PDF..."):
+                texto_ocr = extrair_texto_pdf(arquivo_laudo)
+    else:
+        arquivo_laudo = st.file_uploader("Upload da imagem do laudo", type=["jpg","jpeg","png"], key="ocr_img")
+        if arquivo_laudo:
+            img_pil = PILImage.open(arquivo_laudo)
+            st.image(img_pil, caption="Laudo enviado", use_container_width=True)
+            with st.spinner("🔍 Aplicando OCR..."):
+                texto_ocr = extrair_texto_imagem(arquivo_laudo)
+
+    if texto_ocr:
+        with st.expander("📝 Texto extraído (clique para ver)"):
+            st.text(texto_ocr[:3000])
+
+        campos_ocr = parsear_laudo_ocr(texto_ocr)
+
+        if campos_ocr:
+            st.subheader("✅ Valores detectados automaticamente")
+            df_ocr = pd.DataFrame([{
+                "Campo": k.replace("_"," ").title(),
+                "Valor detectado": v
+            } for k, v in campos_ocr.items()])
+            st.dataframe(df_ocr, use_container_width=True)
+
+            st.subheader("✏️ Confirme ou ajuste os valores")
+            cols_ocr = st.columns(3)
+            campos_editados = {}
+            campos_lista = list(campos_ocr.items())
+            for i, (campo, val) in enumerate(campos_lista):
+                with cols_ocr[i % 3]:
+                    campos_editados[campo] = st.number_input(
+                        campo.replace("_"," ").title(),
+                        value=float(val),
+                        key=f"ocr_{campo}"
+                    )
+
+            if st.button("📥 Importar valores para Análise de Solo", key="btn_importar_ocr"):
+                if not st.session_state.area_selecionada:
+                    st.markdown('''<div style="background:#7f1d1d;color:#fff;padding:12px 18px;
+                    border-radius:10px;border-left:5px solid #ef4444;font-weight:700;">
+                    ❌ Carregue uma área primeiro em "Áreas Cadastradas".</div>''',
+                    unsafe_allow_html=True)
+                else:
+                    st.session_state.dados.update(campos_editados)
+                    atualizar_area_atual()
+                    salvar_dados_iaagro()
+                    st.markdown(f'''<div style="background:#14532d;color:#fff;padding:13px 18px;
+                    border-radius:10px;border-left:5px solid #22c55e;font-weight:700;">
+                    ✅ {len(campos_editados)} campos importados para a área ativa!
+                    Acesse "Análise de Solo" para conferir.</div>''', unsafe_allow_html=True)
+        else:
+            st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
+            border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;margin:8px 0;">
+            ⚠️ Não foi possível detectar valores automaticamente. Verifique se o laudo
+            está legível e tente novamente. Você também pode inserir os dados manualmente
+            na aba "Análise de Solo".</div>''', unsafe_allow_html=True)
+
+            with st.expander("💡 Dicas para melhor resultado"):
+                st.markdown("""
+                - Use laudos com texto digital (não escaneados em baixa resolução)
+                - Laudos da EMBRAPA, IAC e laboratórios com formato padrão funcionam melhor
+                - Para imagens, tire a foto com boa iluminação e sem sombras
+                - O OCR reconhece nomes como: pH, Fósforo, Potássio, Cálcio, Magnésio, Alumínio, Argila, CTC, MO
+                """)
+
 # ─────────────────────────────────────────────
 # MENU: PRAZO DE CARÊNCIA
 # ─────────────────────────────────────────────
@@ -6378,7 +6409,7 @@ elif menu == "📊 Comparativo de Safras":
             import plotly.graph_objects as go
             from plotly.subplots import make_subplots
             PLOTLY_OK = True
-        except ImportError:
+        except Exception:
             PLOTLY_OK = False
 
         tab_prod, tab_fin, tab_completo, tab_ia = st.tabs([
@@ -6711,7 +6742,7 @@ Seja objetivo, técnico e prático para o produtor rural brasileiro. Máximo 400
                     try:
                         resp_ia = requests.post(
                             "https://api.anthropic.com/v1/messages",
-                            headers=get_anthropic_headers(),
+                            headers={"Content-Type":"application/json"},
                             json={"model":"claude-sonnet-4-20250514","max_tokens":900,
                                   "messages":[{"role":"user","content":prompt_comp}]},
                             timeout=35
@@ -6933,7 +6964,7 @@ Gere um laudo agronômico profissional com:
 Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 palavras."""
             resp = requests.post(
                 "https://api.anthropic.com/v1/messages",
-                headers=get_anthropic_headers(),
+                headers={"Content-Type":"application/json"},
                 json={"model":"claude-sonnet-4-20250514","max_tokens":900,
                       "messages":[{"role":"user","content":prompt}]},
                 timeout=35
@@ -7329,10 +7360,6 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
                 yaxis_title="Média sc/ha", height=300
             )
             st.plotly_chart(fig_ev, use_container_width=True)
-
-
-# ─────────────────────────────────────────────
-# MENU: LEITOR DE CODIGO DE BARRAS
 # ─────────────────────────────────────────────
 elif menu == "⚙️ Configurações":
     st.header("⚙️ Configurações do Sistema")
@@ -7346,10 +7373,22 @@ elif menu == "⚙️ Configurações":
 
     # ── TAB 1: BACKUP & RESTORE ──
     with tab1:
-        st.subheader("💾 Backup de Dados")
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-        ℹ️ O backup salva todos os dados: áreas, estoque, aplicações, histórico e pluviômetro.
+        st.subheader("💾 Backup & Restauração de Dados")
+
+        st.markdown('''<div style="background:#7f1d1d;color:#fff;padding:14px 18px;
+        border-radius:10px;border-left:5px solid #ef4444;font-weight:700;margin:8px 0 16px 0;font-size:14px;">
+        ⚠️ <b>IMPORTANTE — Antes de atualizar o app:</b><br>
+        O Streamlit Cloud não persiste arquivos entre deploys. Sempre faça backup
+        antes de enviar uma atualização via Git. Após atualizar, restaure o backup para
+        recuperar seus dados (usuários, estoque, áreas, histórico).
+        </div>''', unsafe_allow_html=True)
+
+        # Auto-backup ao abrir a aba
+        st.markdown("#### 📥 Fazer Backup Agora")
+        st.markdown('''<div style="background:#0f3460;color:#93c5fd;padding:10px 14px;
+        border-radius:8px;font-size:12px;font-weight:600;margin:4px 0 12px 0;">
+        💡 Salve este arquivo no seu computador. Ele contém todos os seus dados:
+        usuários, estoque, áreas cadastradas, histórico, aplicações e configurações.
         </div>''', unsafe_allow_html=True)
 
         backup_data = gerar_backup()
@@ -7362,10 +7401,10 @@ elif menu == "⚙️ Configurações":
         )
 
         st.divider()
-        st.subheader("📂 Restaurar Backup")
-        st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;margin:8px 0;">
-        ⚠️ A restauração substituirá TODOS os dados atuais pelo backup selecionado.
+        st.markdown("#### 📂 Restaurar Backup")
+        st.markdown('''<div style="background:#78350f;color:#fff;padding:11px 14px;
+        border-radius:8px;border-left:4px solid #f59e0b;font-weight:600;margin:4px 0 12px 0;font-size:13px;">
+        ⚠️ A restauração substitui TODOS os dados atuais. Use após atualizar o app.
         </div>''', unsafe_allow_html=True)
 
         st.markdown("""
@@ -7410,6 +7449,23 @@ elif menu == "⚙️ Configurações":
                     st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:13px 18px;
                     border-radius:10px;border-left:5px solid #ef4444;font-weight:600;">
                     ❌ {msg}</div>''', unsafe_allow_html=True)
+
+        # Passo a passo
+        st.divider()
+        st.markdown("#### 📋 Passo a passo para atualizar sem perder dados")
+        passos_bk = [
+            ("1️⃣", "Acesse ⚙️ Configurações → Backup & Restauração"),
+            ("2️⃣", "Clique em **📥 Baixar Backup Completo** e salve no computador"),
+            ("3️⃣", "Atualize o app normalmente via Git (git add → commit → push)"),
+            ("4️⃣", "Aguarde o Streamlit Cloud reiniciar (1-2 minutos)"),
+            ("5️⃣", "Acesse o app → ⚙️ Configurações → Backup & Restauração"),
+            ("6️⃣", "Faça upload do arquivo backup e clique em **🔄 Restaurar**"),
+            ("7️⃣", "Todos os dados estarão de volta ✅"),
+        ]
+        for num, desc in passos_bk:
+            st.markdown(f'<div style="background:#0f3460;color:#f1f5f9;padding:8px 14px;'
+                        f'border-radius:8px;margin:4px 0;font-size:13px;">'
+                        f'<b>{num}</b> {desc}</div>', unsafe_allow_html=True)
 
     # ── TAB 2: EMAIL & ALERTAS ──
     with tab2:
