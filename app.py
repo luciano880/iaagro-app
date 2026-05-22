@@ -3764,88 +3764,82 @@ elif menu == "Estoque de Insumos":
         if not PYZBAR_OK:
             st.error("❌ Biblioteca pyzbar não disponível. Verifique o requirements.txt e o redeploy.")
         else:
-            st.info("📸 Tire foto do código de barras do produto. Ao detectar, ele será adicionado automaticamente ao estoque.")
-
-            # Configurações rápidas antes do upload
-            col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
-            with col_cfg1:
-                bc_qtd_cfg = st.number_input("Quantidade", min_value=0.0, value=1.0, key="bc_qtd_cfg")
-                bc_uni_cfg = st.selectbox("Unidade", ["kg","ton","litros","sacos","galões","unidades"], key="bc_uni_cfg")
-            with col_cfg2:
-                bc_cat_cfg = st.selectbox("Categoria", [
-                    "Fungicida","Inseticida","Herbicida","Fertilizante",
-                    "Cloreto de Potássio","Ureia","Biológico","Foliar",
-                    "Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                ], key="bc_cat_cfg")
-                bc_cult_cfg = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="bc_cult_cfg")
-            with col_cfg3:
-                bc_vul_cfg = st.number_input("Valor unitário R$", min_value=0.0, value=0.0, key="bc_vul_cfg")
-                bc_min_cfg = st.number_input("Estoque mínimo", min_value=0.0, value=0.0, key="bc_min_cfg")
-
-            st.divider()
+            st.info("📸 Envie a foto do código de barras — o produto entra no estoque automaticamente, sem digitar nada.")
             img_barcode = st.file_uploader(
-                "📸 Envie a foto do código de barras",
+                "📸 Foto do código de barras",
                 type=["jpg","jpeg","png","bmp","webp"],
                 key="uploader_barcode"
             )
             if img_barcode:
-                # Tenta em resolução original e depois ampliada para melhorar detecção
                 img_pil = PILImage.open(img_barcode).convert("RGB")
                 st.image(img_pil, caption="Imagem enviada", use_container_width=True)
 
-                codigos = pyzbar_decode(img_pil)
-                if not codigos:
-                    # Tenta ampliar a imagem para melhorar detecção
-                    w, h = img_pil.size
-                    img_grande = img_pil.resize((w * 2, h * 2), PILImage.LANCZOS)
-                    codigos = pyzbar_decode(img_grande)
+                with st.spinner("🔍 Lendo código de barras..."):
+                    codigos = pyzbar_decode(img_pil)
+                    if not codigos:
+                        w, h = img_pil.size
+                        img_grande = img_pil.resize((w * 2, h * 2), PILImage.LANCZOS)
+                        codigos = pyzbar_decode(img_grande)
 
                 if not codigos:
-                    st.warning("⚠️ Nenhum código detectado. Dicas: use boa iluminação, foco nítido e enquadre só o código.")
+                    st.warning("⚠️ Código não detectado. Tente com mais luz e o código bem centralizado na foto.")
                 else:
                     for cod in codigos:
                         valor_cod = cod.data.decode("utf-8")
-                        tipo_cod  = cod.type
+                        tipo_cod  = str(cod.type)
 
-                        # Busca nome do produto na Open Food Facts (base pública de EAN)
-                        nome_produto = valor_cod  # fallback: usa o próprio código como nome
-                        try:
-                            resp_off = requests.get(
-                                f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
-                                timeout=4
-                            )
-                            if resp_off.status_code == 200:
-                                data_off = resp_off.json()
-                                if data_off.get("status") == 1:
-                                    prod_off = data_off.get("product", {})
-                                    nome_produto = (
-                                        prod_off.get("product_name_pt")
-                                        or prod_off.get("product_name")
-                                        or valor_cod
-                                    )
-                        except Exception:
-                            pass
+                        # Evita duplicar se o mesmo código já foi adicionado nesta sessão
+                        ja_adicionado = any(
+                            str(valor_cod) in str(i.get("Observação",""))
+                            for i in st.session_state.estoque
+                        )
+                        if ja_adicionado:
+                            st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
+                            continue
 
-                        # Adiciona automaticamente ao estoque
+                        # Busca nome e dados na Open Food Facts
+                        nome_produto  = f"Produto {valor_cod}"
+                        fabricante    = ""
+                        categoria_api = "Outro"
+                        with st.spinner(f"🌐 Buscando informações do produto {valor_cod}..."):
+                            try:
+                                resp = requests.get(
+                                    f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
+                                    timeout=5
+                                )
+                                if resp.status_code == 200:
+                                    data = resp.json()
+                                    if data.get("status") == 1:
+                                        p = data.get("product", {})
+                                        nome_produto = (
+                                            p.get("product_name_pt")
+                                            or p.get("product_name")
+                                            or nome_produto
+                                        )
+                                        fabricante = p.get("brands", "")
+                            except Exception:
+                                pass
+
+                        # Adiciona direto no estoque sem nenhuma interação do usuário
                         novo = {
-                            "Insumo": nome_produto,
-                            "Categoria": bc_cat_cfg,
-                            "Quantidade": bc_qtd_cfg,
-                            "Unidade": bc_uni_cfg,
-                            "Valor Unitário R$": bc_vul_cfg,
-                            "Valor Total R$": round(bc_qtd_cfg * bc_vul_cfg, 2),
-                            "Estoque Mínimo": bc_min_cfg,
-                            "Observação": f"Código de barras: {valor_cod} ({tipo_cod})",
-                            "Cultura": bc_cult_cfg,
-                            "Dose ha": 0.0,
-                            "Litros ha": 75.0,
-                            "Tanque litros": 2000,
-                            "Fabricante": "",
+                            "Insumo":            nome_produto,
+                            "Categoria":         categoria_api,
+                            "Quantidade":        1.0,
+                            "Unidade":           "unidades",
+                            "Valor Unitário R$": 0.0,
+                            "Valor Total R$":    0.0,
+                            "Estoque Mínimo":    0.0,
+                            "Observação":        f"Código: {valor_cod} ({tipo_cod})",
+                            "Cultura":           "Ambos",
+                            "Dose ha":           0.0,
+                            "Litros ha":         75.0,
+                            "Tanque litros":     2000,
+                            "Fabricante":        fabricante,
                             "Ingrediente Ativo": "",
                         }
                         st.session_state.estoque.append(novo)
                         salvar_dados_iaagro()
-                        st.success(f"✅ **{nome_produto}** adicionado ao estoque automaticamente! (Cód: {valor_cod})")
+                        st.success(f"✅ **{nome_produto}** adicionado ao estoque! (Código: {valor_cod})")
                         st.balloons()
                         st.rerun()
 
@@ -3854,7 +3848,7 @@ elif menu == "Estoque de Insumos":
     # ════════════════════════════════════════════════════════════════════
     with tab_nfe:
         st.subheader("📄 Importar Nota Fiscal Eletrônica (XML)")
-        st.info("Faça upload do arquivo XML da NF-e. Os produtos serão extraídos automaticamente e adicionados ao estoque.")
+        st.info("📎 Faça upload do XML da NF-e — todos os produtos entram no estoque automaticamente.")
 
         xml_file = st.file_uploader("📎 Upload do XML da NF-e", type=["xml"], key="uploader_nfe")
 
@@ -3863,7 +3857,6 @@ elif menu == "Estoque de Insumos":
                 conteudo_xml = xml_file.read()
                 root = ET.fromstring(conteudo_xml)
 
-                # Remove namespaces para facilitar busca
                 def _strip_ns(tag):
                     return tag.split("}")[-1] if "}" in tag else tag
 
@@ -3874,10 +3867,9 @@ elif menu == "Estoque de Insumos":
                     els = _find_all(node, tag)
                     return els[0].text.strip() if els and els[0].text else default
 
-                # Dados da nota
-                n_nf    = _find_text(root, "nNF",    "N/D")
-                emit    = _find_text(root, "xNome",  "Fornecedor não identificado")
-                dt_emis = _find_text(root, "dhEmi",  _find_text(root, "dEmi", ""))
+                n_nf    = _find_text(root, "nNF",   "N/D")
+                emit    = _find_text(root, "xNome", "Fornecedor não identificado")
+                dt_emis = _find_text(root, "dhEmi", _find_text(root, "dEmi", ""))
                 dt_fmt  = dt_emis[:10] if dt_emis else "N/D"
 
                 st.markdown(f"""
@@ -3887,7 +3879,13 @@ elif menu == "Estoque de Insumos":
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Extrai itens (det > prod)
+                uni_map = {
+                    "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
+                    "L":"litros","LT":"litros","LTS":"litros",
+                    "SC":"sacos","SAC":"sacos","UN":"unidades",
+                    "UNI":"unidades","UND":"unidades","GAL":"galões",
+                }
+
                 itens_nfe = []
                 for det in _find_all(root, "det"):
                     prod = None
@@ -3898,86 +3896,52 @@ elif menu == "Estoque de Insumos":
                     if prod is None:
                         continue
                     nome_prod = _find_text(prod, "xProd", "Produto sem nome")
-                    qtd_prod  = float(_find_text(prod, "qCom",  "0").replace(",",".") or 0)
+                    qtd_prod  = float(_find_text(prod, "qCom",   "0").replace(",",".") or 0)
                     uni_prod  = _find_text(prod, "uCom",  "un")
-                    vul_prod  = float(_find_text(prod, "vUnCom","0").replace(",",".") or 0)
+                    vul_prod  = float(_find_text(prod, "vUnCom", "0").replace(",",".") or 0)
                     itens_nfe.append({
-                        "Nome": nome_prod,
-                        "Quantidade": qtd_prod,
-                        "Unidade": uni_prod,
-                        "Valor Unitário R$": vul_prod,
-                        "Valor Total R$": round(qtd_prod * vul_prod, 2),
+                        "Nome":             nome_prod,
+                        "Quantidade":       qtd_prod,
+                        "Unidade":          uni_map.get(uni_prod.upper(), "unidades"),
+                        "Valor Unitário R$":vul_prod,
+                        "Valor Total R$":   round(qtd_prod * vul_prod, 2),
                     })
 
                 if not itens_nfe:
-                    st.warning("⚠️ Nenhum produto encontrado no XML. Verifique se é um arquivo NF-e válido.")
+                    st.warning("⚠️ Nenhum produto encontrado no XML.")
                 else:
-                    st.markdown(f"### 🛒 {len(itens_nfe)} produto(s) encontrado(s) na nota")
-                    df_nfe = pd.DataFrame(itens_nfe)
-                    st.dataframe(df_nfe, use_container_width=True)
+                    # Importa TODOS os itens automaticamente, sem botão, sem checkbox
+                    adicionados = 0
+                    for item in itens_nfe:
+                        novo = {
+                            "Insumo":            item["Nome"],
+                            "Categoria":         "Outro",
+                            "Quantidade":        item["Quantidade"],
+                            "Unidade":           item["Unidade"],
+                            "Valor Unitário R$": item["Valor Unitário R$"],
+                            "Valor Total R$":    item["Valor Total R$"],
+                            "Estoque Mínimo":    0.0,
+                            "Observação":        f"NF-e nº {n_nf} — {emit} — {dt_fmt}",
+                            "Cultura":           "Ambos",
+                            "Dose ha":           0.0,
+                            "Litros ha":         75.0,
+                            "Tanque litros":     2000,
+                            "Fabricante":        emit,
+                            "Ingrediente Ativo": "",
+                        }
+                        st.session_state.estoque.append(novo)
+                        adicionados += 1
 
-                    st.markdown("#### ⚙️ Configurações de importação")
-                    col_n1, col_n2 = st.columns(2)
-                    with col_n1:
-                        cat_nfe  = st.selectbox("Categoria padrão", [
-                            "Fertilizante","Fungicida","Inseticida","Herbicida",
-                            "Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                        ], key="nfe_categoria")
-                        cult_nfe = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="nfe_cultura")
-                    with col_n2:
-                        min_nfe  = st.number_input("Estoque mínimo padrão", min_value=0.0, value=0.0, key="nfe_minimo")
+                    salvar_dados_iaagro()
 
-                    # Seleção de quais itens importar
-                    st.markdown("#### ✅ Selecione os produtos para importar")
-                    selecionados = []
-                    for i, item in enumerate(itens_nfe):
-                        chk = st.checkbox(
-                            f"{item['Nome']}  —  {item['Quantidade']} {item['Unidade']}  —  R$ {item['Valor Unitário R$']:.2f}/un",
-                            value=True,
-                            key=f"nfe_chk_{i}"
-                        )
-                        if chk:
-                            selecionados.append(item)
-
-                    if st.button("📥 Importar Selecionados para o Estoque", key="btn_importar_nfe"):
-                        if not selecionados:
-                            st.warning("Selecione ao menos um produto.")
-                        else:
-                            # Mapeia unidades comuns de NF-e para o padrão do app
-                            uni_map = {
-                                "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
-                                "L":"litros","LT":"litros","LTS":"litros",
-                                "SC":"sacos","SAC":"sacos","UN":"unidades",
-                                "UNI":"unidades","UND":"unidades","GAL":"galões",
-                            }
-                            adicionados = 0
-                            for item in selecionados:
-                                uni_norm = uni_map.get(item["Unidade"].upper(), "unidades")
-                                novo = {
-                                    "Insumo": item["Nome"],
-                                    "Categoria": cat_nfe,
-                                    "Quantidade": item["Quantidade"],
-                                    "Unidade": uni_norm,
-                                    "Valor Unitário R$": item["Valor Unitário R$"],
-                                    "Valor Total R$": item["Valor Total R$"],
-                                    "Estoque Mínimo": min_nfe,
-                                    "Observação": f"Importado da NF-e nº {n_nf} — {emit}",
-                                    "Cultura": cult_nfe,
-                                    "Dose ha": 0.0,
-                                    "Litros ha": 75.0,
-                                    "Tanque litros": 2000,
-                                    "Fabricante": emit,
-                                    "Ingrediente Ativo": "",
-                                }
-                                st.session_state.estoque.append(novo)
-                                adicionados += 1
-                            salvar_dados_iaagro()
-                            st.success(f"✅ {adicionados} produto(s) importado(s) para o estoque com sucesso!")
-                            st.balloons()
-                            st.rerun()
+                    st.success(f"✅ {adicionados} produto(s) da NF-e nº {n_nf} importados para o estoque!")
+                    st.markdown("### 📦 Produtos importados")
+                    st.dataframe(pd.DataFrame(itens_nfe), use_container_width=True)
+                    st.balloons()
+                    st.rerun()
 
             except ET.ParseError as e:
-                st.error(f"❌ Erro ao ler o XML: {e}. Verifique se o arquivo é uma NF-e válida.")
+                st.error(f"❌ Erro ao ler o XML: {e}")
             except Exception as e:
                 st.error(f"❌ Erro inesperado: {e}")
 
