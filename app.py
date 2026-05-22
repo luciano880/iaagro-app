@@ -3802,10 +3802,23 @@ elif menu == "Estoque de Insumos":
                     st.warning("⚠️ Código não detectado. Tente com mais luz e o código bem centralizado na foto.")
                 else:
                     for cod in codigos:
-                        valor_cod = cod.data.decode("utf-8")
+                        valor_cod = cod.data.decode("utf-8").strip()
                         tipo_cod  = str(cod.type)
 
-                        # Evita duplicar se o mesmo código já foi adicionado nesta sessão
+                        # Detecta chave de acesso NF-e (44 dígitos numéricos)
+                        if valor_cod.isdigit() and len(valor_cod) == 44:
+                            st.error("⚠️ Este é o **código de barras da DANFE** (chave de acesso da NF-e), não o código de um produto individual.")
+                            st.info("👉 Para importar os produtos desta nota, use a aba **📄 Importar Nota Fiscal (XML)** e faça upload do arquivo XML.")
+                            st.markdown(f"""
+                            <div style='background:#0f3460;border-radius:10px;padding:12px 16px;border:1px solid #22c55e;margin-top:8px;'>
+                            <b style='color:#22c55e'>📋 Chave NF-e detectada:</b><br>
+                            <span style='color:#94a3b8;font-size:12px;word-break:break-all;'>{valor_cod}</span><br><br>
+                            <span style='color:#f1f5f9;font-size:13px;'>Para obter o XML: acesse <b>nfe.fazenda.gov.br</b> ou solicite ao fornecedor.</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            continue
+
+                        # Evita duplicar
                         ja_adicionado = any(
                             str(valor_cod) in str(i.get("Observação",""))
                             for i in st.session_state.estoque
@@ -3814,10 +3827,9 @@ elif menu == "Estoque de Insumos":
                             st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
                             continue
 
-                        # Busca nome e dados na Open Food Facts
+                        # Busca nome na Open Food Facts
                         nome_produto  = f"Produto {valor_cod}"
                         fabricante    = ""
-                        categoria_api = "Outro"
                         with st.spinner(f"🌐 Buscando informações do produto {valor_cod}..."):
                             try:
                                 resp = requests.get(
@@ -3837,10 +3849,10 @@ elif menu == "Estoque de Insumos":
                             except Exception:
                                 pass
 
-                        # Adiciona direto no estoque sem nenhuma interação do usuário
+                        # Adiciona no estoque
                         novo = {
                             "Insumo":            nome_produto,
-                            "Categoria":         categoria_api,
+                            "Categoria":         "Outro",
                             "Quantidade":        1.0,
                             "Unidade":           "unidades",
                             "Valor Unitário R$": 0.0,
@@ -3856,7 +3868,7 @@ elif menu == "Estoque de Insumos":
                         }
                         st.session_state.estoque.append(novo)
                         salvar_dados_iaagro()
-                        st.success(f"✅ **{nome_produto}** adicionado ao estoque! (Código: {valor_cod})")
+                        st.success(f"✅ **{nome_produto}** adicionado ao estoque!")
                         st.balloons()
                         st.rerun()
 
