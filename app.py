@@ -3931,16 +3931,17 @@ if menu == "📦 Operacional":
         # MODO 1 — LEITOR USB (digita o código direto)
         # ════════════════════════════════════════════
         if modo_bc == "⌨️ Leitor USB / Teclado":
-            st.info("🔌 Clique no campo abaixo e passe o leitor USB no código de barras. O produto será adicionado automaticamente.")
+            st.info("🔌 Clique no campo abaixo e passe o leitor USB no código de barras. Pressione Enter para adicionar.")
 
-            codigo_usb = st.text_input(
-                "📦 Código de barras (leitor USB)",
-                placeholder="Aponte o leitor aqui...",
-                key="barcode_usb_input",
-                label_visibility="collapsed"
-            )
+            with st.form("form_barcode_usb", clear_on_submit=True):
+                codigo_usb = st.text_input(
+                    "Código de barras",
+                    placeholder="Passe o leitor aqui e pressione Enter...",
+                    key="barcode_usb_input",
+                )
+                submitted = st.form_submit_button("📥 Adicionar ao Estoque", use_container_width=True)
 
-            if codigo_usb and codigo_usb.strip():
+            if submitted and codigo_usb and codigo_usb.strip():
                 valor_cod = codigo_usb.strip()
 
                 # Evita duplicar
