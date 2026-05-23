@@ -3020,9 +3020,9 @@ if menu == "🌾 Lavoura":
 
     col_geo_a, col_geo_b = st.columns([2, 1])
     with col_geo_a:
-        latitude  = st.number_input("📍 Latitude",  value=float(latitude, key="auto___latitude_3022"),
+        latitude  = st.number_input("📍 Latitude",  value=float(latitude),
                                      format="%.6f", key="cad_lat")
-        longitude = st.number_input("📍 Longitude", value=float(longitude, key="auto___longitude_3024"),
+        longitude = st.number_input("📍 Longitude", value=float(longitude),
                                      format="%.6f", key="cad_lon")
     with col_geo_b:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -3314,10 +3314,10 @@ if menu == "🌾 Lavoura":
 
         col_mf1, col_mf2, col_mf3 = st.columns([2, 2, 1])
         with col_mf1:
-            latitude  = st.number_input("Latitude",  value=float(latitude, key="auto_latitude_3316"),
+            latitude  = st.number_input("Latitude",  value=float(latitude),
                                          format="%.6f", key="mapa_fert_lat")
         with col_mf2:
-            longitude = st.number_input("Longitude", value=float(longitude, key="auto_longitude_3319"),
+            longitude = st.number_input("Longitude", value=float(longitude),
                                          format="%.6f", key="mapa_fert_lon")
         with col_mf3:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -5177,10 +5177,10 @@ if menu == "🌍 Inteligência":
     # Painel de localização
     col_loc1, col_loc2, col_loc3 = st.columns([2, 2, 1])
     with col_loc1:
-        lat = st.number_input("Latitude",  value=float(lat, key="auto_latitude_5179"),
+        lat = st.number_input("Latitude",  value=float(lat),
                                format="%.4f", key="lat_clima")
     with col_loc2:
-        lon = st.number_input("Longitude", value=float(lon, key="auto_longitude_5182"),
+        lon = st.number_input("Longitude", value=float(lon), key="auto_longitude_5182",
                                format="%.4f", key="lon_clima")
     with col_loc3:
         st.markdown("<br>", unsafe_allow_html=True)
