@@ -1045,6 +1045,7 @@ def salvar_dados_iaagro():
         "calendario_eventos": st.session_state.get("calendario_eventos", []),
         "harvest_historico":   st.session_state.get("harvest_historico", []),
         "receituarios":        st.session_state.get("receituarios", []),
+        "segmento":            st.session_state.get("segmento", None),
     }
     with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
         json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
@@ -1381,6 +1382,8 @@ if "contador_area" not in st.session_state:
     ) + 1
 if "area_selecionada" not in st.session_state:
     st.session_state.area_selecionada = None
+if "segmento" not in st.session_state:
+    st.session_state.segmento = dados_carregados.get("segmento", None)
 if "estoque" not in st.session_state:
     st.session_state.estoque = dados_carregados.get("estoque", [])
 if "aplicacoes" not in st.session_state:
@@ -2733,69 +2736,120 @@ if st.session_state.area_selecionada:
 # MENU: INÍCIO
 # ─────────────────────────────────────────────
 if menu == "Início":
-    st.markdown("## 🚜 IAAgro Pro V9")
-    st.markdown("**Gestão agrícola inteligente**")
 
-    total_areas      = len(st.session_state.areas)
-    total_estoque    = len(st.session_state.estoque)
-    total_aplicacoes = len(st.session_state.aplicacoes)
-    area_total       = sum(area.get("Hectares", 0) for area in st.session_state.areas)
+    # ── Segmentos disponíveis ──────────────────────────────────────────
+    SEGMENTOS = {
+        "🌾 Grãos":        {"desc": "Soja, Milho, Trigo e outros cereais",     "cor": "#14532d", "borda": "#22c55e"},
+        "🌿 Horticultura": {"desc": "Hortaliças, verduras e legumes",           "cor": "#14532d", "borda": "#84cc16"},
+        "☕ Café":          {"desc": "Cafeicultura e beneficiamento",            "cor": "#431407", "borda": "#f59e0b"},
+        "🍎 Fruticultura": {"desc": "Frutas tropicais, uva, maçã e outras",    "cor": "#7f1d1d", "borda": "#f87171"},
+        "🌲 Silvicultura": {"desc": "Eucalipto, Pinus e reflorestamento",       "cor": "#1e3a5f", "borda": "#38bdf8"},
+    }
 
-    produtividade_media = 0
-    if total_areas > 0:
-        produtividade_media = sum(
-            area.get("Meta Produtividade", 0) for area in st.session_state.areas
-        ) / total_areas
+    # ── Tela de seleção (só aparece se segmento não foi escolhido ainda) ──
+    if not st.session_state.segmento:
+        st.markdown("""
+        <div style='text-align:center;padding:30px 0 10px 0;'>
+        <span style='font-size:48px;'>🌱</span><br>
+        <span style='font-size:28px;font-weight:800;color:#22c55e;'>Bem-vindo ao IAAGRO</span><br>
+        <span style='font-size:16px;color:#94a3b8;'>Selecione seu segmento para personalizar o sistema</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("🌾 Áreas",       total_areas)
-    col2.metric("📦 Estoque",     total_estoque)
-    col3.metric("🚜 Aplicações",  total_aplicacoes)
-    col4.metric("📍 Área Total",  f"{area_total:.1f} ha")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-    st.divider()
+        for seg, info in SEGMENTOS.items():
+            col_btn, col_desc = st.columns([2, 5])
+            with col_btn:
+                if st.button(seg, key=f"seg_btn_{seg}", use_container_width=True):
+                    st.session_state.segmento = seg
+                    salvar_dados_iaagro()
+                    st.success(f"✅ Segmento **{seg}** selecionado! Bem-vindo.")
+                    st.rerun()
+            with col_desc:
+                st.markdown(
+                    f"<div style='padding:10px 0;color:#94a3b8;font-size:14px;'>{info['desc']}</div>",
+                    unsafe_allow_html=True
+                )
 
-    col5, col6 = st.columns(2)
-    with col5:
-        st.subheader("📈 Produtividade Média")
-        st.metric("Média", f"{produtividade_media:.1f} sc/ha")
-    with col6:
-        st.subheader("⚠️ Alertas de Estoque")
-        estoque_baixo = [item for item in st.session_state.estoque if item.get("Quantidade", 0) < 10]
-        if len(estoque_baixo) == 0:
-            st.markdown('<div style="background:#166534;color:#ffffff;padding:12px 18px;border-radius:10px;font-weight:700;font-size:15px;">✅ Nenhum alerta de estoque.</div>', unsafe_allow_html=True)
-        else:
-            for item in estoque_baixo:
-                nome = item.get("Insumo", item.get("Produto", "Produto"))
-                st.markdown(f'<div style="background:#92400e;color:#ffffff;padding:12px 18px;border-radius:10px;font-weight:700;font-size:15px;">⚠️ {nome} com estoque baixo.</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("⚙️ Você pode trocar o segmento a qualquer momento em Configurações.")
 
-    st.divider()
-    st.subheader("📋 Resumo das Áreas")
-
-    if total_areas == 0:
-        st.markdown('<div style="background:#1e3a5f;color:#ffffff;padding:14px 18px;border-radius:10px;font-weight:600;font-size:15px;">ℹ️ Nenhuma área cadastrada.</div>', unsafe_allow_html=True)
     else:
-        tabela_dashboard = []
-        for area in st.session_state.areas:
-            tabela_dashboard.append({
-                "Fazenda":    area.get("Fazenda", ""),
-                "Talhão":    area.get("Talhão", ""),
-                "Cultura":   area.get("Cultura", ""),
-                "Área ha":   area.get("Hectares", 0),
-                "Meta sc/ha": area.get("Meta Produtividade", 0)
-            })
-        df_areas = pd.DataFrame(tabela_dashboard)
-        st.dataframe(df_areas, use_container_width=True)
-        st.divider()
-        st.subheader("📊 Gráfico de Produtividade por Talhão")
-        st.bar_chart(df_areas.set_index("Talhão")["Meta sc/ha"])
+        # ── Dashboard principal após segmento selecionado ─────────────
+        seg_info = SEGMENTOS.get(st.session_state.segmento, {"cor":"#0f3460","borda":"#22c55e","desc":""})
 
-    if total_estoque > 0:
-        df_estoque = pd.DataFrame(st.session_state.estoque)
-        if "Insumo" in df_estoque.columns and "Quantidade" in df_estoque.columns:
+        col_banner, col_trocar = st.columns([5, 1])
+        with col_banner:
+            st.markdown(f"""
+            <div style='background:{seg_info["cor"]};border-radius:12px;padding:14px 20px;
+            border-left:5px solid {seg_info["borda"]};margin-bottom:8px;'>
+            <span style='font-size:22px;font-weight:800;color:#f1f5f9;'>🚜 IAAGRO — {st.session_state.segmento}</span><br>
+            <span style='font-size:13px;color:#94a3b8;'>{seg_info["desc"]}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_trocar:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            if st.button("🔄 Trocar\nsegmento", key="btn_trocar_segmento", use_container_width=True):
+                st.session_state.segmento = None
+                salvar_dados_iaagro()
+                st.rerun()
+
+        total_areas      = len(st.session_state.areas)
+        total_estoque    = len(st.session_state.estoque)
+        total_aplicacoes = len(st.session_state.aplicacoes)
+        area_total       = sum(a.get("Hectares", 0) for a in st.session_state.areas)
+        produtividade_media = (
+            sum(a.get("Meta Produtividade", 0) for a in st.session_state.areas) / total_areas
+            if total_areas > 0 else 0
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("🌾 Áreas",      total_areas)
+        col2.metric("📦 Estoque",    total_estoque)
+        col3.metric("🚜 Aplicações", total_aplicacoes)
+        col4.metric("📍 Área Total", f"{area_total:.1f} ha")
+
+        st.divider()
+
+        col5, col6 = st.columns(2)
+        with col5:
+            st.subheader("📈 Produtividade Média")
+            st.metric("Média", f"{produtividade_media:.1f} sc/ha")
+        with col6:
+            st.subheader("⚠️ Alertas de Estoque")
+            estoque_baixo = [i for i in st.session_state.estoque if i.get("Quantidade", 0) < 10]
+            if not estoque_baixo:
+                st.markdown('<div style="background:#166534;color:#fff;padding:12px 18px;border-radius:10px;font-weight:700;">✅ Nenhum alerta de estoque.</div>', unsafe_allow_html=True)
+            else:
+                for item in estoque_baixo:
+                    nome = item.get("Insumo", item.get("Produto", "Produto"))
+                    st.markdown(f'<div style="background:#92400e;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;margin-bottom:4px;">⚠️ {nome} com estoque baixo.</div>', unsafe_allow_html=True)
+
+        st.divider()
+        st.subheader("📋 Resumo das Áreas")
+        if total_areas == 0:
+            st.markdown('<div style="background:#1e3a5f;color:#fff;padding:14px 18px;border-radius:10px;font-weight:600;">ℹ️ Nenhuma área cadastrada. Vá em <b>Cadastro da Área</b> para começar.</div>', unsafe_allow_html=True)
+        else:
+            tabela_dashboard = [{
+                "Fazenda":    a.get("Fazenda",""),
+                "Talhão":     a.get("Talhão",""),
+                "Cultura":    a.get("Cultura",""),
+                "Área ha":    a.get("Hectares",0),
+                "Meta sc/ha": a.get("Meta Produtividade",0),
+            } for a in st.session_state.areas]
+            df_areas = pd.DataFrame(tabela_dashboard)
+            st.dataframe(df_areas, use_container_width=True)
             st.divider()
-            st.subheader("📦 Gráfico de Estoque")
-            st.bar_chart(df_estoque.set_index("Insumo")["Quantidade"])
+            st.subheader("📊 Produtividade por Talhão")
+            st.bar_chart(df_areas.set_index("Talhão")["Meta sc/ha"])
+
+        if total_estoque > 0:
+            df_estoque = pd.DataFrame(st.session_state.estoque)
+            if "Insumo" in df_estoque.columns and "Quantidade" in df_estoque.columns:
+                st.divider()
+                st.subheader("📦 Estoque por Produto")
+                st.bar_chart(df_estoque.set_index("Insumo")["Quantidade"])
 
 
 # ─────────────────────────────────────────────
@@ -8164,12 +8218,35 @@ elif menu == "🧾 Imposto de Renda Rural":
 elif menu == "⚙️ Configurações":
     st.header("⚙️ Configurações do Sistema")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab0, tab1, tab2, tab3, tab4 = st.tabs([
+        "🌾 Meu Segmento",
         "💾 Backup & Restore",
         "📧 Email & Alertas",
         "📊 Histórico do Solo",
         "📤 Exportar Excel"
     ])
+
+    with tab0:
+        st.subheader("🌾 Alterar Segmento de Atuação")
+        st.info(f"Segmento atual: **{st.session_state.segmento or 'Não definido'}**")
+        SEGMENTOS_CFG = {
+            "🌾 Grãos":        "Soja, Milho, Trigo e outros cereais",
+            "🌿 Horticultura": "Hortaliças, verduras e legumes",
+            "☕ Café":          "Cafeicultura e beneficiamento",
+            "🍎 Fruticultura": "Frutas tropicais, uva, maçã e outras",
+            "🌲 Silvicultura": "Eucalipto, Pinus e reflorestamento",
+        }
+        st.markdown("#### Selecione o novo segmento:")
+        for seg, desc in SEGMENTOS_CFG.items():
+            col_s1, col_s2 = st.columns([2, 5])
+            with col_s1:
+                if st.button(seg, key=f"cfg_seg_{seg}", use_container_width=True):
+                    st.session_state.segmento = seg
+                    salvar_dados_iaagro()
+                    st.success(f"✅ Segmento alterado para **{seg}**!")
+                    st.rerun()
+            with col_s2:
+                st.markdown(f"<div style='padding:10px 0;color:#94a3b8;font-size:13px;'>{desc}</div>", unsafe_allow_html=True)
 
     # ── TAB 1: BACKUP & RESTORE ──
     with tab1:
