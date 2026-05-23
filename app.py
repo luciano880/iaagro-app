@@ -4045,19 +4045,85 @@ if menu == "📦 Operacional":
                         st.balloons()
                         st.rerun()
                     else:
-                        # Fallback: orienta baixar XML
-                        st.warning("⚠️ Não foi possível buscar os produtos automaticamente via SEFAZ.")
+                        # Fallback: formulário rápido para digitar produtos da nota
+                        st.warning("⚠️ Consulta automática indisponível. Digite os produtos da nota abaixo — é rápido!")
+
+                        # Salva chave no session_state para o formulário
+                        if "nfe_chave_usb" not in st.session_state:
+                            st.session_state.nfe_chave_usb = valor_cod
+                        if "nfe_itens_usb" not in st.session_state:
+                            st.session_state.nfe_itens_usb = []
+
+                        st.session_state.nfe_chave_usb = valor_cod
+
                         st.markdown(f"""
-                        <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #f59e0b;'>
-                        <b style='color:#f59e0b;'>📥 Importe o XML manualmente:</b><br>
-                        <span style='color:#f1f5f9;font-size:13px;'>
-                        1. Acesse <b>nfe.fazenda.gov.br/portal</b><br>
-                        2. Cole a chave abaixo e baixe o XML<br>
-                        3. Use a aba <b>📄 Importar Nota Fiscal (XML)</b>
-                        </span><br><br>
-                        <span style='color:#94a3b8;font-size:11px;word-break:break-all;'>{valor_cod}</span>
+                        <div style='background:#0f3460;border-radius:10px;padding:10px 16px;border:1px solid #22c55e;margin-bottom:10px;'>
+                        <b style='color:#22c55e;'>📋 NF-e detectada:</b>
+                        <span style='color:#94a3b8;font-size:11px;word-break:break-all;'> {valor_cod}</span>
                         </div>
                         """, unsafe_allow_html=True)
+
+                        st.markdown("#### ➕ Adicionar produto da nota")
+                        col_n1, col_n2, col_n3 = st.columns([3,1,1])
+                        with col_n1:
+                            nome_item = st.text_input("Nome do produto", placeholder="Ex: HERB. CALARIS 20L", key=f"nfe_usb_nome")
+                        with col_n2:
+                            qtd_item  = st.number_input("Qtd", min_value=0.0, value=1.0, key="nfe_usb_qtd")
+                            uni_item  = st.selectbox("Unidade", ["unidades","kg","litros","sacos","galões"], key="nfe_usb_uni")
+                        with col_n3:
+                            vul_item  = st.number_input("Valor unit. R$", min_value=0.0, value=0.0, key="nfe_usb_vul", format="%.2f")
+                            fab_item  = st.text_input("Fabricante", placeholder="Ex: LAR", key="nfe_usb_fab")
+
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("➕ Adicionar item", key="btn_add_item_nfe_usb", use_container_width=True):
+                                if nome_item.strip():
+                                    st.session_state.nfe_itens_usb.append({
+                                        "nome": nome_item.strip(),
+                                        "qtd":  qtd_item,
+                                        "uni":  uni_item,
+                                        "vul":  vul_item,
+                                        "fab":  fab_item,
+                                    })
+                                    st.rerun()
+
+                        # Mostra itens adicionados
+                        if st.session_state.nfe_itens_usb:
+                            st.markdown("##### Itens da nota:")
+                            for idx, it in enumerate(st.session_state.nfe_itens_usb):
+                                col_i1, col_i2 = st.columns([5,1])
+                                with col_i1:
+                                    st.markdown(f"✅ **{it['nome']}** — {it['qtd']} {it['uni']} × R$ {it['vul']:.2f}")
+                                with col_i2:
+                                    if st.button("🗑️", key=f"del_item_nfe_{idx}"):
+                                        st.session_state.nfe_itens_usb.pop(idx)
+                                        st.rerun()
+
+                            with col_btn2:
+                                if st.button("📥 Importar todos para o Estoque", key="btn_importar_nfe_usb", use_container_width=True):
+                                    chave = st.session_state.nfe_chave_usb
+                                    for it in st.session_state.nfe_itens_usb:
+                                        st.session_state.estoque.append({
+                                            "Insumo":            it["nome"],
+                                            "Categoria":         "Outro",
+                                            "Quantidade":        it["qtd"],
+                                            "Unidade":           it["uni"],
+                                            "Valor Unitário R$": it["vul"],
+                                            "Valor Total R$":    round(it["qtd"] * it["vul"], 2),
+                                            "Estoque Mínimo":    0.0,
+                                            "Observação":        f"NF-e chave: {chave[:20]}...",
+                                            "Cultura":           "Ambos",
+                                            "Dose ha":           0.0,
+                                            "Litros ha":         75.0,
+                                            "Tanque litros":     2000,
+                                            "Fabricante":        it["fab"],
+                                            "Ingrediente Ativo": "",
+                                        })
+                                    salvar_dados_iaagro()
+                                    st.session_state.nfe_itens_usb = []
+                                    st.success(f"✅ {len(st.session_state.estoque)} produtos importados!")
+                                    st.balloons()
+                                    st.rerun()
                 else:
                     nome_produto = f"Produto {valor_cod}"
                     fabricante   = ""
