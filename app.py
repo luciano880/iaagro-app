@@ -1046,6 +1046,7 @@ def salvar_dados_iaagro():
         "harvest_historico":   st.session_state.get("harvest_historico", []),
         "receituarios":        st.session_state.get("receituarios", []),
         "segmento":            st.session_state.get("segmento", None),
+        "safrinha_registros":  st.session_state.get("safrinha_registros", []),
     }
     with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
         json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
@@ -1410,6 +1411,7 @@ if "clima_data"        not in st.session_state: st.session_state.clima_data     
 if "precos_data"       not in st.session_state: st.session_state.precos_data       = None
 if "receituarios"      not in st.session_state: st.session_state.receituarios      = dados_carregados.get("receituarios", [])
 if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinida  = False
+if "safrinha_registros" not in st.session_state: st.session_state.safrinha_registros = dados_carregados.get("safrinha_registros", [])
 
 # ── GPS session_states — inicialização segura ───────────────────
 if "_gps_lat"       not in st.session_state: st.session_state._gps_lat       = None
@@ -2724,6 +2726,7 @@ menu = st.sidebar.radio(
         "🗺️ Mapa de Colheita IA",
         "📜 Receituário Agronômico",
         "📊 Comparativo de Safras",
+        "🌱 Segunda Safra / Safrinha",
         "🧾 Imposto de Renda Rural",
         "⚙️ Configurações"
     ]
@@ -7851,6 +7854,278 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
 # ─────────────────────────────────────────────
 # MENU: IMPOSTO DE RENDA RURAL
 # ─────────────────────────────────────────────
+# MENU: SEGUNDA SAFRA / SAFRINHA
+# ─────────────────────────────────────────────
+elif menu == "🌱 Segunda Safra / Safrinha":
+    st.header("🌱 Segunda Safra / Safrinha")
+
+    st.markdown("""
+    <div style='background:#0f3460;border-radius:12px;padding:14px 18px;
+    border-left:5px solid #22c55e;margin-bottom:16px;'>
+    <b style='color:#22c55e;font-size:15px;'>🔄 Sistema de Rotação de Culturas</b><br>
+    <span style='color:#f1f5f9;font-size:13px;'>
+    Planeje a segunda safra após a colheita da primeira. Ex: Soja precoce → Feijão, 
+    Milho → Feijão, Trigo → Soja. Gerencie área, custo e rentabilidade de cada ciclo.
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Inicializa session_state
+    if "safrinha_registros" not in st.session_state:
+        st.session_state.safrinha_registros = []
+
+    tab_s1, tab_s2, tab_s3 = st.tabs([
+        "➕ Planejar Rotação",
+        "📋 Registros",
+        "📊 Análise de Rentabilidade"
+    ])
+
+    # ── Combinações típicas da região ──────────────────────────────
+    ROTACOES_TIPICAS = {
+        "Soja precoce → Feijão":  {"1a":"Soja","2a":"Feijão","janela":"Nov–Jan / Fev–Mai"},
+        "Soja precoce → Milho":   {"1a":"Soja","2a":"Milho", "janela":"Out–Jan / Fev–Jun"},
+        "Milho → Feijão":         {"1a":"Milho","2a":"Feijão","janela":"Set–Jan / Fev–Mai"},
+        "Trigo → Soja":           {"1a":"Trigo","2a":"Soja", "janela":"Abr–Set / Out–Mar"},
+        "Feijão → Milho":         {"1a":"Feijão","2a":"Milho","janela":"Jan–Abr / Abr–Ago"},
+        "Soja → Trigo":           {"1a":"Soja","2a":"Trigo", "janela":"Out–Mar / Abr–Set"},
+        "Personalizada":          {"1a":"","2a":"","janela":""},
+    }
+
+    CULTURAS_SAFRINHA = get_culturas()
+
+    # ════════════════════════════════════════════════════
+    # TAB 1 — PLANEJAR ROTAÇÃO
+    # ════════════════════════════════════════════════════
+    with tab_s1:
+        st.subheader("➕ Novo Planejamento de Rotação")
+
+        # ── Seleção de área cadastrada ──────────────────────────────
+        areas_cadastradas = st.session_state.get("areas", [])
+        area_selecionada_sf = None
+        if areas_cadastradas:
+            opcoes_areas = ["— Selecione uma área cadastrada —"] + [
+                f"{a.get('Fazenda','?')} — {a.get('Talhão','?')} ({a.get('Hectares',0):.1f} ha | {a.get('Cultura','?')})"
+                for a in areas_cadastradas
+            ]
+            area_choice = st.selectbox("🌾 Área cadastrada", opcoes_areas, key="sf_area_choice")
+            if area_choice != "— Selecione uma área cadastrada —":
+                idx_area = opcoes_areas.index(area_choice) - 1
+                area_selecionada_sf = areas_cadastradas[idx_area]
+                st.success(f"✅ Área carregada: **{area_selecionada_sf.get('Fazenda','')} — {area_selecionada_sf.get('Talhão','')}**")
+        else:
+            st.info("Nenhuma área cadastrada. Vá em **Cadastro da Área** para adicionar.")
+
+        # Preenche defaults da área selecionada
+        _area_ha   = float(area_selecionada_sf.get("Hectares", 10.0))    if area_selecionada_sf else 10.0
+        _cultura   = area_selecionada_sf.get("Cultura", "Soja")           if area_selecionada_sf else "Soja"
+        _prod      = float(area_selecionada_sf.get("Meta Produtividade", 60.0)) if area_selecionada_sf else 60.0
+        _talhao    = f"{area_selecionada_sf.get('Fazenda','')} — {area_selecionada_sf.get('Talhão','')}" if area_selecionada_sf else ""
+        _cidade    = area_selecionada_sf.get("Cidade", "")                if area_selecionada_sf else ""
+
+        st.divider()
+
+        # Seleção rápida de rotação típica
+        rotacao_sel = st.selectbox(
+            "🔄 Rotação típica da região",
+            list(ROTACOES_TIPICAS.keys()),
+            key="safrinha_rotacao_sel"
+        )
+        rot_info = ROTACOES_TIPICAS[rotacao_sel]
+        if rot_info["janela"]:
+            st.caption(f"📅 Janela de plantio: {rot_info['janela']}")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("#### 🌾 1ª Safra")
+            culturas_1a = CULTURAS_SAFRINHA
+            # Usa cultura da área cadastrada se disponível
+            idx_1a = culturas_1a.index(_cultura) if _cultura in culturas_1a else (
+                     culturas_1a.index(rot_info["1a"]) if rot_info["1a"] in culturas_1a else 0)
+            cultura_1a    = st.selectbox("Cultura 1ª safra", culturas_1a, index=idx_1a, key="sf_cult1")
+            area_1a       = st.number_input("Área (ha)", min_value=0.0, value=_area_ha, key="sf_area1")
+            prod_1a       = st.number_input("Produtividade esperada (sc/ha)", min_value=0.0, value=_prod, key="sf_prod1")
+            preco_1a      = st.number_input("Preço da saca R$", min_value=0.0, value=115.0, key="sf_preco1")
+            custo_1a      = st.number_input("Custo total R$/ha", min_value=0.0, value=3200.0, key="sf_custo1")
+            plantio_1a    = st.text_input("Data de plantio", placeholder="Ex: 15/10/2025", key="sf_plant1")
+            colheita_1a   = st.text_input("Previsão de colheita", placeholder="Ex: 20/02/2026", key="sf_colh1")
+
+        with col2:
+            st.markdown("#### 🌱 2ª Safra / Safrinha")
+            idx_2a = culturas_1a.index(rot_info["2a"]) if rot_info["2a"] in culturas_1a else 0
+            cultura_2a    = st.selectbox("Cultura 2ª safra", culturas_1a, index=idx_2a, key="sf_cult2")
+            area_2a       = st.number_input("Área (ha)", min_value=0.0, value=area_1a, key="sf_area2")
+            prod_2a       = st.number_input("Produtividade esperada (sc/ha)", min_value=0.0, value=45.0, key="sf_prod2")
+            preco_2a      = st.number_input("Preço da saca R$", min_value=0.0, value=58.0, key="sf_preco2")
+            custo_2a      = st.number_input("Custo total R$/ha", min_value=0.0, value=2200.0, key="sf_custo2")
+            plantio_2a    = st.text_input("Data de plantio", placeholder="Ex: 25/02/2026", key="sf_plant2")
+            colheita_2a   = st.text_input("Previsão de colheita", placeholder="Ex: 30/05/2026", key="sf_colh2")
+
+        st.divider()
+        col_obs1, col_obs2 = st.columns(2)
+        with col_obs1:
+            talhao_sf  = st.text_input("Talhão / Área", value=_talhao, placeholder="Ex: Talhão A", key="sf_talhao")
+            safra_sf   = st.text_input("Safra", placeholder="Ex: 2025/2026", key="sf_safra")
+        with col_obs2:
+            obs_sf     = st.text_area("Observações", placeholder="Ex: Solo compactado, uso de cobertura...", key="sf_obs", height=80)
+
+        # Preview da rentabilidade antes de salvar
+        rec_1a  = prod_1a * preco_1a * area_1a
+        cus_1a  = custo_1a * area_1a
+        luc_1a  = rec_1a - cus_1a
+        rec_2a  = prod_2a * preco_2a * area_2a
+        cus_2a  = custo_2a * area_2a
+        luc_2a  = rec_2a - cus_2a
+        luc_tot = luc_1a + luc_2a
+
+        st.markdown("#### 💰 Preview de Rentabilidade")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"Receita {cultura_1a}", f"R$ {rec_1a:,.0f}")
+        c2.metric(f"Receita {cultura_2a}", f"R$ {rec_2a:,.0f}")
+        c3.metric("Lucro Total", f"R$ {luc_tot:,.0f}",
+                  delta="✅ Positivo" if luc_tot > 0 else "❌ Negativo")
+        c4.metric("Lucro/ha médio", f"R$ {luc_tot/max(area_1a,1):,.0f}")
+
+        if st.button("💾 Salvar Planejamento", use_container_width=True, key="btn_salvar_safrinha"):
+            if not talhao_sf.strip():
+                st.error("Informe o talhão.")
+            else:
+                registro = {
+                    "id":          len(st.session_state.safrinha_registros) + 1,
+                    "safra":       safra_sf,
+                    "talhao":      talhao_sf,
+                    "rotacao":     f"{cultura_1a} → {cultura_2a}",
+                    "cultura_1a":  cultura_1a,
+                    "area_1a":     area_1a,
+                    "prod_1a":     prod_1a,
+                    "preco_1a":    preco_1a,
+                    "custo_1a":    custo_1a,
+                    "plantio_1a":  plantio_1a,
+                    "colheita_1a": colheita_1a,
+                    "receita_1a":  round(rec_1a, 2),
+                    "lucro_1a":    round(luc_1a, 2),
+                    "cultura_2a":  cultura_2a,
+                    "area_2a":     area_2a,
+                    "prod_2a":     prod_2a,
+                    "preco_2a":    preco_2a,
+                    "custo_2a":    custo_2a,
+                    "plantio_2a":  plantio_2a,
+                    "colheita_2a": colheita_2a,
+                    "receita_2a":  round(rec_2a, 2),
+                    "lucro_2a":    round(luc_2a, 2),
+                    "lucro_total": round(luc_tot, 2),
+                    "obs":         obs_sf,
+                    "data_registro": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                }
+                st.session_state.safrinha_registros.append(registro)
+                salvar_dados_iaagro()
+                st.success(f"✅ Rotação **{cultura_1a} → {cultura_2a}** salva para o talhão **{talhao_sf}**!")
+                st.balloons()
+                st.rerun()
+
+    # ════════════════════════════════════════════════════
+    # TAB 2 — REGISTROS
+    # ════════════════════════════════════════════════════
+    with tab_s2:
+        st.subheader("📋 Registros de Segunda Safra")
+        if not st.session_state.safrinha_registros:
+            st.info("Nenhum planejamento salvo ainda. Use a aba ➕ Planejar Rotação.")
+        else:
+            for i, reg in enumerate(st.session_state.safrinha_registros):
+                cor = "#14532d" if reg["lucro_total"] > 0 else "#7f1d1d"
+                borda = "#22c55e" if reg["lucro_total"] > 0 else "#ef4444"
+                st.markdown(f"""
+                <div style='background:{cor};border-radius:12px;padding:14px 18px;
+                border-left:5px solid {borda};margin-bottom:10px;'>
+                <b style='color:#f1f5f9;font-size:15px;'>🔄 {reg['rotacao']} — {reg['talhao']} ({reg.get('safra','')})</b><br>
+                <span style='color:#d1fae5;font-size:13px;'>
+                📅 {reg['cultura_1a']}: plantio {reg.get('plantio_1a','—')} → colheita {reg.get('colheita_1a','—')} &nbsp;|&nbsp;
+                {reg['cultura_2a']}: plantio {reg.get('plantio_2a','—')} → colheita {reg.get('colheita_2a','—')}
+                </span><br>
+                <span style='color:#86efac;font-size:13px;'>
+                💰 Lucro total: <b>R$ {reg['lucro_total']:,.2f}</b> &nbsp;|&nbsp;
+                1ª safra: R$ {reg['lucro_1a']:,.2f} &nbsp;|&nbsp;
+                2ª safra: R$ {reg['lucro_2a']:,.2f}
+                </span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                col_ed, col_del = st.columns([5,1])
+                with col_del:
+                    if st.button("🗑️", key=f"del_safrinha_{i}", help="Excluir registro"):
+                        st.session_state.safrinha_registros.pop(i)
+                        salvar_dados_iaagro()
+                        st.rerun()
+
+            # Tabela resumo
+            st.divider()
+            st.subheader("📊 Tabela Resumo")
+            df_sf = pd.DataFrame([{
+                "Talhão":      r["talhao"],
+                "Safra":       r.get("safra",""),
+                "Rotação":     r["rotacao"],
+                "Área 1ª ha":  r["area_1a"],
+                "Prod 1ª sc/ha": r["prod_1a"],
+                "Área 2ª ha":  r["area_2a"],
+                "Prod 2ª sc/ha": r["prod_2a"],
+                "Receita Total R$": r["receita_1a"] + r["receita_2a"],
+                "Lucro Total R$":   r["lucro_total"],
+            } for r in st.session_state.safrinha_registros])
+            st.dataframe(df_sf, use_container_width=True)
+
+    # ════════════════════════════════════════════════════
+    # TAB 3 — ANÁLISE DE RENTABILIDADE
+    # ════════════════════════════════════════════════════
+    with tab_s3:
+        st.subheader("📊 Análise de Rentabilidade por Rotação")
+        if not st.session_state.safrinha_registros:
+            st.info("Salve ao menos um planejamento para ver a análise.")
+        else:
+            import plotly.express as px
+
+            df_an = pd.DataFrame([{
+                "Rotação":        r["rotacao"],
+                "Talhão":         r["talhao"],
+                "Lucro Total R$": r["lucro_total"],
+                "Receita 1ª R$":  r["receita_1a"],
+                "Receita 2ª R$":  r["receita_2a"],
+                "Lucro 1ª R$":    r["lucro_1a"],
+                "Lucro 2ª R$":    r["lucro_2a"],
+            } for r in st.session_state.safrinha_registros])
+
+            # Gráfico comparativo
+            fig_rot = px.bar(
+                df_an, x="Talhão", y=["Lucro 1ª R$","Lucro 2ª R$"],
+                barmode="group", title="💰 Lucro por Safra e Talhão",
+                color_discrete_sequence=["#22c55e","#3b82f6"],
+                template="plotly_dark"
+            )
+            fig_rot.update_layout(
+                paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
+                font_color="#f1f5f9", height=350
+            )
+            st.plotly_chart(fig_rot, use_container_width=True)
+
+            # Melhor rotação
+            melhor = df_an.loc[df_an["Lucro Total R$"].idxmax()]
+            st.markdown(f"""
+            <div style='background:#14532d;border-radius:12px;padding:14px 18px;
+            border-left:5px solid #22c55e;margin-top:8px;'>
+            <b style='color:#22c55e;'>🏆 Rotação mais rentável:</b>
+            <span style='color:#f1f5f9;font-size:14px;'>
+            &nbsp;<b>{melhor['Rotação']}</b> — Talhão {melhor['Talhão']} — 
+            Lucro total: <b>R$ {melhor['Lucro Total R$']:,.2f}</b>
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Métricas gerais
+            st.divider()
+            c1, c2, c3 = st.columns(3)
+            c1.metric("💰 Lucro total acumulado", f"R$ {df_an['Lucro Total R$'].sum():,.2f}")
+            c2.metric("📈 Média por rotação",     f"R$ {df_an['Lucro Total R$'].mean():,.2f}")
+            c3.metric("🔄 Rotações planejadas",   len(df_an))
+
+# ─────────────────────────────────────────────
 elif menu == "🧾 Imposto de Renda Rural":
     import io
     st.header("🧾 Imposto de Renda — Produtor Rural")
@@ -7899,6 +8174,45 @@ elif menu == "🧾 Imposto de Renda Rural":
         st.divider()
         st.subheader("📈 Receitas da Atividade Rural")
         st.caption("Informe todas as receitas brutas recebidas no ano")
+
+        # ── Importação automática da Safrinha ──────────────────────
+        safrinha_regs = st.session_state.get("safrinha_registros", [])
+        if safrinha_regs:
+            receita_safrinha = sum(r.get("receita_1a", 0) + r.get("receita_2a", 0) for r in safrinha_regs)
+            custo_safrinha   = sum(
+                r.get("custo_1a", 0) * r.get("area_1a", 0) +
+                r.get("custo_2a", 0) * r.get("area_2a", 0)
+                for r in safrinha_regs
+            )
+            st.markdown(f"""
+            <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
+            border:1px solid #22c55e;margin-bottom:12px;'>
+            <b style='color:#22c55e;'>📥 Dados da Segunda Safra disponíveis para importar</b><br>
+            <span style='color:#f1f5f9;font-size:13px;'>
+            {len(safrinha_regs)} rotação(ões) planejada(s) &nbsp;|&nbsp;
+            Receita total: <b>R$ {receita_safrinha:,.2f}</b> &nbsp;|&nbsp;
+            Custos: <b>R$ {custo_safrinha:,.2f}</b>
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col_imp1, col_imp2 = st.columns(2)
+            with col_imp1:
+                if st.button("📥 Importar receitas da safrinha", key="btn_imp_rec_safrinha", use_container_width=True):
+                    atual = float(st.session_state.ir_receitas.get("venda_graos", 0.0))
+                    st.session_state.ir_receitas["venda_graos"] = round(atual + receita_safrinha, 2)
+                    st.success(f"✅ R$ {receita_safrinha:,.2f} adicionados às receitas de grãos!")
+                    st.rerun()
+            with col_imp2:
+                if st.button("📥 Importar custos da safrinha", key="btn_imp_desp_safrinha", use_container_width=True):
+                    # Distribui nos campos de despesa correspondentes
+                    atual_sem = float(st.session_state.ir_despesas.get("sementes", 0.0))
+                    atual_def = float(st.session_state.ir_despesas.get("fertilizantes", 0.0))
+                    # 30% sementes, 70% fertilizantes/defensivos como estimativa
+                    st.session_state.ir_despesas["sementes"]      = round(atual_sem + custo_safrinha * 0.30, 2)
+                    st.session_state.ir_despesas["fertilizantes"] = round(atual_def + custo_safrinha * 0.70, 2)
+                    st.success(f"✅ R$ {custo_safrinha:,.2f} distribuídos nas despesas!")
+                    st.rerun()
 
         rec_items = [
             ("venda_graos",      "🌾 Venda de grãos e cereais (R$)"),
@@ -7966,6 +8280,26 @@ elif menu == "🧾 Imposto de Renda Rural":
         receita_bruta  = sum(st.session_state.ir_receitas.values())
         despesa_total  = sum(st.session_state.ir_despesas.values())
         resultado_liq  = receita_bruta - despesa_total
+
+        # Resumo da safrinha na base do cálculo
+        safrinha_regs2 = st.session_state.get("safrinha_registros", [])
+        if safrinha_regs2:
+            rec_sf  = sum(r.get("receita_1a",0)+r.get("receita_2a",0) for r in safrinha_regs2)
+            luc_sf  = sum(r.get("lucro_total",0) for r in safrinha_regs2)
+            cus_sf  = sum(r.get("custo_1a",0)*r.get("area_1a",0)+r.get("custo_2a",0)*r.get("area_2a",0) for r in safrinha_regs2)
+            importado = float(st.session_state.ir_receitas.get("venda_graos",0)) >= rec_sf * 0.9
+            st.markdown(f"""
+            <div style='background:#1e3a5f;border-radius:10px;padding:12px 16px;
+            border:1px solid #3b82f6;margin-bottom:12px;'>
+            <b style='color:#3b82f6;'>📊 Segunda Safra / Safrinha</b>
+            {"&nbsp;<span style='color:#22c55e;font-size:12px;'>✅ Dados importados</span>" if importado else "&nbsp;<span style='color:#f59e0b;font-size:12px;'>⚠️ Use o botão Importar na aba anterior</span>"}<br>
+            <span style='color:#f1f5f9;font-size:13px;'>
+            Receita total safras: <b>R$ {rec_sf:,.2f}</b> &nbsp;|&nbsp;
+            Custos: <b>R$ {cus_sf:,.2f}</b> &nbsp;|&nbsp;
+            Lucro líquido safras: <b>R$ {luc_sf:,.2f}</b>
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
 
         # Resultado presumido (20% da receita bruta — opcional ao resultado real)
         resultado_pres = receita_bruta * 0.20
