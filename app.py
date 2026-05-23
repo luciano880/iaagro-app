@@ -2907,7 +2907,7 @@ if menu == "🌾 Lavoura":
         st.dataframe(tabela_areas, use_container_width=True)
 
         opcoes = [f"{area['ID']} - {area['Talhão']} - {area['Cultura']}" for area in st.session_state.areas]
-        escolha = st.selectbox("Selecionar área para trabalhar", opcoes, key="auto_selecionar__rea_para_2909")
+        escolha = st.selectbox("Selecionar área para trabalhar", opcoes)
 
         if st.button("Carregar Área Selecionada"):
             indice = opcoes.index(escolha)
@@ -2957,10 +2957,10 @@ if menu == "🌾 Lavoura":
   with _sub_lav[1]:
     st.header("Cadastro da Área")
 
-    fazenda   = st.text_input("Nome da fazenda",  st.session_state.dados.get("fazenda", ""), key="auto_nome_da_fazenda_2959")
-    talhao    = st.text_input("Nome do talhão",   st.session_state.dados.get("talhao", ""), key="auto_nome_do_talh_o_2960")
-    matricula = st.text_input("Matrícula da Área", st.session_state.dados.get("matricula", ""), key="auto_matr_cula_da__rea_2961")
-    cidade    = st.text_input("Cidade / Estado",   st.session_state.dados.get("cidade", ""), key="auto_cidade___estado_2962")
+    fazenda   = st.text_input("Nome da fazenda",  st.session_state.dados.get("fazenda", ""))
+    talhao    = st.text_input("Nome do talhão",   st.session_state.dados.get("talhao", ""))
+    matricula = st.text_input("Matrícula da Área", st.session_state.dados.get("matricula", ""))
+    cidade    = st.text_input("Cidade / Estado",   st.session_state.dados.get("cidade", ""))
     area      = st.number_input("Área do talhão em hectares", min_value=0.0,
                                 value=float(st.session_state.dados.get("area", 10.0)))
 
@@ -3103,11 +3103,11 @@ if menu == "🌾 Lavoura":
         warning_box("Cadastre uma área primeiro.")
     else:
         lista_areas = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-        area_escolhida     = st.selectbox("Selecione a Área", lista_areas, key="auto_selecione_a__rea_3105")
-        safra              = st.text_input("Safra", placeholder="2024/2025", key="auto_safra_3106")
-        produtividade_real = st.number_input("Produtividade Real (sc/ha)", min_value=0.0, value=60.0, key="auto_produtividade_real___3107")
-        custo_total        = st.number_input("Custo Total por hectare (R$)", min_value=0.0, value=0.0, key="auto_custo_total_por_hect_3108")
-        observacoes        = st.text_area("Observações da Safra", key="auto_observa__es_da_safra_3109")
+        area_escolhida     = st.selectbox("Selecione a Área", lista_areas)
+        safra              = st.text_input("Safra", placeholder="2024/2025")
+        produtividade_real = st.number_input("Produtividade Real (sc/ha)", min_value=0.0, value=60.0)
+        custo_total        = st.number_input("Custo Total por hectare (R$)", min_value=0.0, value=0.0)
+        observacoes        = st.text_area("Observações da Safra")
 
         if st.button("Salvar Histórico"):
             st.session_state.historico_produtividade.append({
@@ -3122,7 +3122,7 @@ if menu == "🌾 Lavoura":
             df_hist = pd.DataFrame(st.session_state.historico_produtividade)
             st.dataframe(df_hist, use_container_width=True)
             st.subheader("📊 Evolução Produtiva")
-            area_filtro = st.selectbox("Filtrar gráfico por área", df_hist["Área"].unique(), key="auto_filtrar_gr_fico_por__3124")
+            area_filtro = st.selectbox("Filtrar gráfico por área", df_hist["Área"].unique())
             df_area     = df_hist[df_hist["Área"] == area_filtro]
             grafico     = df_area.pivot_table(index="Safra", values="Produtividade", aggfunc="mean")
             st.line_chart(grafico)
@@ -3146,7 +3146,7 @@ if menu == "🌾 Lavoura":
         warning_box("Cadastre uma área primeiro.")
     else:
         lista_areas  = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-        area_chuva   = st.selectbox("Selecione a Área", lista_areas, key="auto_selecione_a__rea_3148")
+        area_chuva   = st.selectbox("Selecione a Área", lista_areas)
         id_area_chuva = area_chuva.split(" - ")[0]
         area_obj      = next((a for a in st.session_state.areas if a["ID"] == id_area_chuva), {})
         cultura_chuva = area_obj.get("Cultura", "Soja")
@@ -3164,8 +3164,8 @@ if menu == "🌾 Lavoura":
 
         mes        = st.selectbox("Mês", ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                                           "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"])
-        chuva_real = st.number_input("Chuva acumulada (mm)", min_value=0.0, value=0.0, key="auto_chuva_acumulada__mm__3166")
-        chuva_ideal = st.number_input("Chuva ideal da cultura (mm)", min_value=0.0, value=chuva_ideal_auto, key="auto_chuva_ideal_da_cultu_3167")
+        chuva_real = st.number_input("Chuva acumulada (mm)", min_value=0.0, value=0.0)
+        chuva_ideal = st.number_input("Chuva ideal da cultura (mm)", min_value=0.0, value=chuva_ideal_auto)
 
         if chuva_real < chuva_ideal * 0.7:
             perda  = round((chuva_ideal - chuva_real) * 0.15, 1)
@@ -3461,7 +3461,7 @@ if menu == "🧪 Solo & Adubação":
     }
     </style>
     """, unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("📄 Upload análise de solo", type=["xlsx","csv"], key="auto___upload_an_lise_de__3463")
+    uploaded_file = st.file_uploader("📄 Upload análise de solo", type=["xlsx","csv"])
     if uploaded_file is not None:
         if uploaded_file.name.endswith(".csv"):
             df_upload = pd.read_csv(uploaded_file)
@@ -3475,28 +3475,28 @@ if menu == "🧪 Solo & Adubação":
     else:
         col1, col2, col3 = st.columns(3)
         with col1:
-            ph       = st.number_input("pH do solo", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)), key="auto_ph_do_solo_3477")
-            fosforo  = st.number_input("Fósforo P", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)), key="auto_f_sforo_p_3478")
-            potassio = st.number_input("Potássio K", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)), key="auto_pot_ssio_k_3479")
+            ph       = st.number_input("pH do solo", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)))
+            fosforo  = st.number_input("Fósforo P", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)))
+            potassio = st.number_input("Potássio K", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)))
         with col2:
-            materia_organica = st.number_input("Matéria orgânica %", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)), key="auto_mat_ria_org_nica___3481")
-            calcio   = st.number_input("Cálcio Ca", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)), key="auto_c_lcio_ca_3482")
-            magnesio = st.number_input("Magnésio Mg", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)), key="auto_magn_sio_mg_3483")
+            materia_organica = st.number_input("Matéria orgânica %", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)))
+            calcio   = st.number_input("Cálcio Ca", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)))
+            magnesio = st.number_input("Magnésio Mg", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)))
         with col3:
-            aluminio = st.number_input("Alumínio Al", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)), key="auto_alum_nio_al_3485")
-            enxofre  = st.number_input("Enxofre S", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)), key="auto_enxofre_s_3486")
-            ctc      = st.number_input("CTC", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)), key="auto_ctc_3487")
+            aluminio = st.number_input("Alumínio Al", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)))
+            enxofre  = st.number_input("Enxofre S", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)))
+            ctc      = st.number_input("CTC", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)))
 
         st.subheader("Micronutrientes")
         col4, col5, col6 = st.columns(3)
         with col4:
-            boro  = st.number_input("Boro B", min_value=0.0, value=float(st.session_state.dados.get("boro", 0.3)), key="auto_boro_b_3492")
-            zinco = st.number_input("Zinco Zn", min_value=0.0, value=float(st.session_state.dados.get("zinco", 1.0)), key="auto_zinco_zn_3493")
+            boro  = st.number_input("Boro B", min_value=0.0, value=float(st.session_state.dados.get("boro", 0.3)))
+            zinco = st.number_input("Zinco Zn", min_value=0.0, value=float(st.session_state.dados.get("zinco", 1.0)))
         with col5:
-            manganes = st.number_input("Manganês Mn", min_value=0.0, value=float(st.session_state.dados.get("manganes", 5.0)), key="auto_mangan_s_mn_3495")
-            cobre    = st.number_input("Cobre Cu", min_value=0.0, value=float(st.session_state.dados.get("cobre", 0.5)), key="auto_cobre_cu_3496")
+            manganes = st.number_input("Manganês Mn", min_value=0.0, value=float(st.session_state.dados.get("manganes", 5.0)))
+            cobre    = st.number_input("Cobre Cu", min_value=0.0, value=float(st.session_state.dados.get("cobre", 0.5)))
         with col6:
-            argila = st.number_input("Argila %", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)), key="auto_argila___3498")
+            argila = st.number_input("Argila %", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)))
 
         # Validação de campos
         erros_val = []
@@ -3720,7 +3720,7 @@ if menu == "🧪 Solo & Adubação":
         </div>''', unsafe_allow_html=True)
 
         st.subheader("📍 Taxa Variável Inteligente")
-        zona = st.selectbox("Zona do talhão", ["Baixa Produtividade","Média Produtividade","Alta Produtividade"], key="auto_zona_do_talh_o_3722")
+        zona = st.selectbox("Zona do talhão", ["Baixa Produtividade","Média Produtividade","Alta Produtividade"])
         fator_zona = 0.85 if zona == "Baixa Produtividade" else (1.15 if zona == "Alta Produtividade" else 1.0)
         produtividade_ajustada = produtividade * fator_zona
         n    *= fator_zona
@@ -3857,12 +3857,12 @@ if menu == "💰 Financeiro":
         dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"])
         precisa_gesso, dose_gesso, total_gesso, _ = calcular_gesso(d)
 
-        preco_calcario    = st.number_input("Preço calcário R$/t",     min_value=0.0, value=180.0, key="auto_pre_o_calc_rio_r__t_3859")
-        frete_calcario    = st.number_input("Frete calcário R$/t",     min_value=0.0, value=50.0, key="auto_frete_calc_rio_r__t_3860")
-        aplicacao_calcario = st.number_input("Aplicação calcário R$/ha", min_value=0.0, value=80.0, key="auto_aplica__o_calc_rio_r_3861")
-        preco_gesso       = st.number_input("Preço gesso R$/t",        min_value=0.0, value=120.0, key="auto_pre_o_gesso_r__t_3862")
-        frete_gesso       = st.number_input("Frete gesso R$/t",        min_value=0.0, value=50.0, key="auto_frete_gesso_r__t_3863")
-        aplicacao_gesso   = st.number_input("Aplicação gesso R$/ha",   min_value=0.0, value=70.0, key="auto_aplica__o_gesso_r__h_3864")
+        preco_calcario    = st.number_input("Preço calcário R$/t",     min_value=0.0, value=180.0)
+        frete_calcario    = st.number_input("Frete calcário R$/t",     min_value=0.0, value=50.0)
+        aplicacao_calcario = st.number_input("Aplicação calcário R$/ha", min_value=0.0, value=80.0)
+        preco_gesso       = st.number_input("Preço gesso R$/t",        min_value=0.0, value=120.0)
+        frete_gesso       = st.number_input("Frete gesso R$/t",        min_value=0.0, value=50.0)
+        aplicacao_gesso   = st.number_input("Aplicação gesso R$/ha",   min_value=0.0, value=70.0)
 
         custo_total_calcario = (total_calcario * preco_calcario
                                 + total_calcario * frete_calcario
@@ -3873,11 +3873,11 @@ if menu == "💰 Financeiro":
 
         st.divider()
         st.subheader("💰 Custos Complementares")
-        custo_semente      = st.number_input("Custo sementes R$/ha",       min_value=0.0, step=1.0, key="auto_custo_sementes_r__ha_3875")
-        custo_fertilizante = st.number_input("Custo fertilizantes R$/ha",  min_value=0.0, step=1.0, key="auto_custo_fertilizantes__3876")
-        custo_defensivos   = st.number_input("Custo defensivos R$/ha",     min_value=0.0, step=1.0, key="auto_custo_defensivos_r___3877")
-        custo_diesel       = st.number_input("Custo diesel/máquinas R$/ha", min_value=0.0, step=1.0, key="auto_custo_diesel_m_quina_3878")
-        outros_custos      = st.number_input("Outros custos R$/ha",        min_value=0.0, step=1.0, key="auto_outros_custos_r__ha_3879")
+        custo_semente      = st.number_input("Custo sementes R$/ha",       min_value=0.0, step=1.0)
+        custo_fertilizante = st.number_input("Custo fertilizantes R$/ha",  min_value=0.0, step=1.0)
+        custo_defensivos   = st.number_input("Custo defensivos R$/ha",     min_value=0.0, step=1.0)
+        custo_diesel       = st.number_input("Custo diesel/máquinas R$/ha", min_value=0.0, step=1.0)
+        outros_custos      = st.number_input("Outros custos R$/ha",        min_value=0.0, step=1.0)
 
         custo_operacional_total = (custo_semente + custo_fertilizante + custo_defensivos + custo_diesel + outros_custos) * d["area"]
         custo_total_safra       = custo_total_calcario + custo_total_gesso + custo_operacional_total
@@ -3889,7 +3889,7 @@ if menu == "💰 Financeiro":
         st.metric("Custo por Hectare",    f"R$ {custo_por_hectare:,.2f}/ha")
 
         if "produtividade" in d:
-            preco_saca   = st.number_input("Preço da saca R$", min_value=0.0, step=1.0, key="auto_pre_o_da_saca_r__3891")
+            preco_saca   = st.number_input("Preço da saca R$", min_value=0.0, step=1.0)
             faturamento  = d["produtividade"] * preco_saca * d["area"]
             lucro        = faturamento - custo_total_safra
             margem       = (lucro / faturamento * 100) if faturamento > 0 else 0
@@ -4608,13 +4608,13 @@ if menu == "📦 Operacional":
             litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
             capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
         with col2:
-            quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0, key="auto_quantidade_em_estoqu_4610")
-            unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"], key="auto_unidade_do_estoque_4611")
+            quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0)
+            unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"])
         with col3:
-            valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0, key="auto_valor_unit_rio_r__4613")
-            estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0, key="auto_estoque_m_nimo_4614")
+            valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0)
+            estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0)
     
-        observacao = st.text_area("Observação", key="auto_observa__o_4616")
+        observacao = st.text_area("Observação")
     
         if st.button("Adicionar Produto ao Estoque"):
             nome_usar = nome_final.strip() if nome_final.strip() else nome_insumo.strip()
@@ -4698,15 +4698,15 @@ if menu == "📦 Operacional":
             "1ª Fungicida","2ª Fungicida","3ª Fungicida","4ª Fungicida",
             "5ª Fungicida","6ª Fungicida","Outra"
         ]
-        tipo_aplicacao = st.selectbox("Tipo de aplicação", tipos_aplicacao, key="auto_tipo_de_aplica__o_4700")
+        tipo_aplicacao = st.selectbox("Tipo de aplicação", tipos_aplicacao)
         nome_aplicacao = st.text_input("Nome da aplicação", placeholder="Ex: Aplicação de inseticida") if tipo_aplicacao == "Outra" else tipo_aplicacao
 
         col_a, col_b, col_c = st.columns(3)
         with col_a: data_aplicacao = st.date_input("Data da aplicação")
-        with col_b: area_aplicada  = st.number_input("Área aplicada em hectares", min_value=0.0, value=float(st.session_state.dados.get("area", 0.0)), key="auto__rea_aplicada_em_hec_4705")
-        with col_c: litros_por_hectare = st.number_input("Volume de calda L/ha", min_value=0.0, value=75.0, key="auto_volume_de_calda_l_ha_4706")
+        with col_b: area_aplicada  = st.number_input("Área aplicada em hectares", min_value=0.0, value=float(st.session_state.dados.get("area", 0.0)))
+        with col_c: litros_por_hectare = st.number_input("Volume de calda L/ha", min_value=0.0, value=75.0)
 
-        capacidade_tanque  = st.number_input("Capacidade do tanque em litros", min_value=0.0, value=3000.0, key="auto_capacidade_do_tanque_4708")
+        capacidade_tanque  = st.number_input("Capacidade do tanque em litros", min_value=0.0, value=3000.0)
         area_por_tanque    = (capacidade_tanque / litros_por_hectare) if litros_por_hectare > 0 else 0
         numero_tanques     = (area_aplicada / area_por_tanque) if area_por_tanque > 0 else 0
 
@@ -4716,13 +4716,13 @@ if menu == "📦 Operacional":
 
         # CORREÇÃO 6: campos do operador fora do loop de produtos
         st.subheader("🧑‍🌾 Dados do Operador")
-        operador         = st.text_input("Operador da aplicação", key="auto_operador_da_aplica___4718")
-        pulverizador     = st.text_input("Pulverizador / Máquina", key="auto_pulverizador___m_qui_4719")
-        velocidade       = st.number_input("Velocidade de aplicação (km/h)", min_value=0.0, value=0.0, key="auto_velocidade_de_aplica_4720")
-        pressao          = st.number_input("Pressão de trabalho (bar)", min_value=0.0, value=0.0, key="auto_press_o_de_trabalho__4721")
-        clima_aplicacao  = st.selectbox("Condição climática", ["Adequada","Vento alto","Muito seco","Chuva próxima","Muito quente"], key="auto_condi__o_clim_tica_4722")
+        operador         = st.text_input("Operador da aplicação")
+        pulverizador     = st.text_input("Pulverizador / Máquina")
+        velocidade       = st.number_input("Velocidade de aplicação (km/h)", min_value=0.0, value=0.0)
+        pressao          = st.number_input("Pressão de trabalho (bar)", min_value=0.0, value=0.0)
+        clima_aplicacao  = st.selectbox("Condição climática", ["Adequada","Vento alto","Muito seco","Chuva próxima","Muito quente"])
 
-        quantidade_produtos = st.number_input("Quantidade de produtos usados", min_value=1, max_value=10, value=1, key="auto_quantidade_de_produt_4724")
+        quantidade_produtos = st.number_input("Quantidade de produtos usados", min_value=1, max_value=10, value=1)
         produtos_usados = []
 
         for i in range(quantidade_produtos):
@@ -4842,7 +4842,7 @@ if menu == "📦 Operacional":
             st.subheader("🚜 Montagem Automática da Aplicação")
 
             if len(st.session_state.estoque) > 0:
-                cultura_aplicacao = st.selectbox("Cultura da aplicação", get_culturas(), key="auto_cultura_da_aplica__o_4844")
+                cultura_aplicacao = st.selectbox("Cultura da aplicação", get_culturas())
                 produtos_filtrados = [
                     item for item in st.session_state.estoque
                     if item["Cultura"] == cultura_aplicacao or item["Cultura"] == "Ambos"
@@ -5180,7 +5180,7 @@ if menu == "🌍 Inteligência":
         lat = st.number_input("Latitude",  value=float(lat),
                                format="%.4f", key="lat_clima")
     with col_loc2:
-        lon = st.number_input("Longitude", value=float(lon), key="auto_longitude_5182",
+        lon = st.number_input("Longitude", value=float(lon),
                                format="%.4f", key="lon_clima")
     with col_loc3:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -5690,7 +5690,7 @@ if menu == "🌍 Inteligência":
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            cult_sim_sel  = st.selectbox("Cultura", list(preco_map.keys(), key="auto_cultura_5692"),
+            cult_sim_sel  = st.selectbox("Cultura", list(preco_map.keys()),
                                           index=list(preco_map.keys()).index(cultura_sim)
                                           if cultura_sim in preco_map else 0,
                                           key="sim_cult")
@@ -6026,19 +6026,19 @@ if menu == "📦 Operacional":
 
     col1, col2 = st.columns(2)
     with col1:
-        os_numero     = st.text_input("Número da OS", value=f"OS-{datetime.now().strftime('%Y%m%d%H%M')}", key="auto_n_mero_da_os_6028")
+        os_numero     = st.text_input("Número da OS", value=f"OS-{datetime.now().strftime('%Y%m%d%H%M')}")
         os_data       = st.date_input("Data da OS", value=date.today())
-        os_fazenda    = st.text_input("Fazenda", value=st.session_state.dados.get("fazenda",""), key="auto_fazenda_6030")
-        os_talhao     = st.text_input("Talhão", value=st.session_state.dados.get("talhao",""), key="auto_talh_o_6031")
-        os_area       = st.number_input("Área (ha)", value=float(st.session_state.dados.get("area",0)), key="auto__rea__ha__6032")
-        os_cultura    = st.text_input("Cultura", value=st.session_state.dados.get("cultura",""), key="auto_cultura_6033")
+        os_fazenda    = st.text_input("Fazenda", value=st.session_state.dados.get("fazenda",""))
+        os_talhao     = st.text_input("Talhão", value=st.session_state.dados.get("talhao",""))
+        os_area       = st.number_input("Área (ha)", value=float(st.session_state.dados.get("area",0)))
+        os_cultura    = st.text_input("Cultura", value=st.session_state.dados.get("cultura",""))
     with col2:
-        os_operador   = st.text_input("Operador responsável", key="auto_operador_respons_vel_6035")
-        os_maquina    = st.text_input("Máquina / Pulverizador", key="auto_m_quina___pulverizad_6036")
-        os_velocidade = st.number_input("Velocidade (km/h)", value=6.0, key="auto_velocidade__km_h__6037")
-        os_pressao    = st.number_input("Pressão de trabalho (bar)", value=2.5, key="auto_press_o_de_trabalho__6038")
-        os_volume     = st.number_input("Volume de calda (L/ha)", value=100.0, key="auto_volume_de_calda__l_h_6039")
-        os_inicio     = st.text_input("Horário previsto de início", placeholder="Ex: 06:30", key="auto_hor_rio_previsto_de__6040")
+        os_operador   = st.text_input("Operador responsável")
+        os_maquina    = st.text_input("Máquina / Pulverizador")
+        os_velocidade = st.number_input("Velocidade (km/h)", value=6.0)
+        os_pressao    = st.number_input("Pressão de trabalho (bar)", value=2.5)
+        os_volume     = st.number_input("Volume de calda (L/ha)", value=100.0)
+        os_inicio     = st.text_input("Horário previsto de início", placeholder="Ex: 06:30")
 
     st.subheader("🧪 Produtos da OS")
     os_qtd_produtos = st.number_input("Quantidade de produtos", min_value=1, max_value=10, value=1, key="os_qtd")
@@ -6374,7 +6374,7 @@ if menu == "🌍 Inteligência":
             # Filtros
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
-                mes_sel = st.selectbox("Mês", range(1,13, key="auto_m_s_6376"),
+                mes_sel = st.selectbox("Mês", range(1,13),
                                         index=date.today().month-1,
                                         format_func=lambda m: ["Jan","Fev","Mar","Abr","Mai","Jun",
                                                                 "Jul","Ago","Set","Out","Nov","Dez"][m-1],
@@ -8770,7 +8770,7 @@ elif menu == "⚙️ Configurações":
         }
         </style>
         """, unsafe_allow_html=True)
-        arquivo_restore = st.file_uploader("Selecione o arquivo de backup (.json)", type=["json"], key="auto_selecione_o_arquivo__8772")
+        arquivo_restore = st.file_uploader("Selecione o arquivo de backup (.json)", type=["json"])
         if arquivo_restore:
             if st.button("🔄 Restaurar Backup Agora", key="btn_restore"):
                 ok, msg = restaurar_backup(arquivo_restore)
@@ -8819,14 +8819,14 @@ elif menu == "⚙️ Configurações":
         cfg = st.session_state.email_config
         col1, col2 = st.columns(2)
         with col1:
-            cfg["remetente"]     = st.text_input("Email remetente (Gmail)", value=cfg.get("remetente",""), key="auto_email_remetente__gma_8821")
-            cfg["senha"]         = st.text_input("Senha de app Gmail", type="password", value=cfg.get("senha",""), key="auto_senha_de_app_gmail_8822")
+            cfg["remetente"]     = st.text_input("Email remetente (Gmail)", value=cfg.get("remetente",""))
+            cfg["senha"]         = st.text_input("Senha de app Gmail", type="password", value=cfg.get("senha",""))
         with col2:
-            cfg["email_destino"] = st.text_input("Email destino dos alertas", value=cfg.get("email_destino",""), key="auto_email_destino_dos_al_8824")
-            cfg["porta"]         = st.number_input("Porta SMTP", value=int(cfg.get("porta",587)), min_value=1, key="auto_porta_smtp_8825")
+            cfg["email_destino"] = st.text_input("Email destino dos alertas", value=cfg.get("email_destino",""))
+            cfg["porta"]         = st.number_input("Porta SMTP", value=int(cfg.get("porta",587)), min_value=1)
 
-        cfg["smtp"] = st.text_input("Servidor SMTP", value=cfg.get("smtp","smtp.gmail.com"), key="auto_servidor_smtp_8827")
-        cfg["ativo"] = st.checkbox("✅ Ativar alertas por email", value=cfg.get("ativo", False), key="auto___ativar_alertas_por_8828")
+        cfg["smtp"] = st.text_input("Servidor SMTP", value=cfg.get("smtp","smtp.gmail.com"))
+        cfg["ativo"] = st.checkbox("✅ Ativar alertas por email", value=cfg.get("ativo", False))
 
         col_a, col_b = st.columns(2)
         with col_a:
