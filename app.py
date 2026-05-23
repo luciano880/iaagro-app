@@ -2749,16 +2749,14 @@ if st.session_state.area_selecionada:
 SEGMENTOS_INFO = {
     "🌾 Grãos":        {"desc":"Soja, Milho, Trigo e outros cereais",   "cor":"#14532d","borda":"#22c55e"},
     "🌿 Horticultura": {"desc":"Hortaliças, verduras e legumes",         "cor":"#14532d","borda":"#84cc16"},
-    "☕ Café":          {"desc":"Cafeicultura e beneficiamento",          "cor":"#431407","borda":"#f59e0b"},
-    "🍎 Fruticultura": {"desc":"Frutas tropicais, uva, maçã e outras",  "cor":"#7f1d1d","borda":"#f87171"},
+    "🍎 Fruticultura": {"desc":"Frutas tropicais, uva, café e outras",  "cor":"#7f1d1d","borda":"#f87171"},
     "🌲 Silvicultura": {"desc":"Eucalipto, Pinus e reflorestamento",     "cor":"#1e3a5f","borda":"#38bdf8"},
 }
 
 CULTURAS_POR_SEGMENTO = {
     "🌾 Grãos":        ["Soja","Milho","Trigo","Feijão","Canola","Aveia","Arroz","Sorgo","Cevada","Girassol"],
-    "🌿 Horticultura": ["Tomate","Batata","Cebola","Alho","Mandioca","Feijão","Milho"],
-    "☕ Café":          ["Café","Milho","Feijão"],
-    "🍎 Fruticultura": ["Laranja","Banana","Uva","Maçã","Manga","Abacate","Limão","Pêssego","Caqui"],
+    "🌿 Horticultura": ["Tomate","Batata","Cebola","Alho","Mandioca"],
+    "🍎 Fruticultura": ["Laranja","Banana","Uva","Maçã","Manga","Abacate","Limão","Pêssego","Caqui","Café"],
     "🌲 Silvicultura": ["Eucalipto","Pinus","Teca","Paricá","Cedro"],
 }
 
@@ -8335,8 +8333,7 @@ elif menu == "⚙️ Configurações":
         SEGMENTOS_CFG = {
             "🌾 Grãos":        "Soja, Milho, Trigo e outros cereais",
             "🌿 Horticultura": "Hortaliças, verduras e legumes",
-            "☕ Café":          "Cafeicultura e beneficiamento",
-            "🍎 Fruticultura": "Frutas tropicais, uva, maçã e outras",
+            "🍎 Fruticultura": "Frutas tropicais, uva, café e outras",
             "🌲 Silvicultura": "Eucalipto, Pinus e reflorestamento",
         }
         st.markdown("#### Selecione o novo segmento:")
