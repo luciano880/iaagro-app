@@ -793,7 +793,7 @@ def buscar_dolar_awesomeapi():
                             "fonte": "Banco Central do Brasil PTAX (tempo real)",
                             "horario": data}
     except Exception:
-        pass
+        pass  # erro silenciado intencionalmente
     # 2. AwesomeAPI
     try:
         r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
@@ -805,7 +805,7 @@ def buscar_dolar_awesomeapi():
                 return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
                         "horario": d["USDBRL"].get("create_date", "")}
     except Exception:
-        pass
+        pass  # erro silenciado intencionalmente
     # 3. ExchangeRate-API
     try:
         r3 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5, headers=headers)
@@ -814,7 +814,7 @@ def buscar_dolar_awesomeapi():
             if brl > 0:
                 return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
     except Exception:
-        pass
+        pass  # erro silenciado intencionalmente
     return {"preco": 5.80, "fonte": "Offline"}
 
 
@@ -867,7 +867,7 @@ def buscar_precos_cepea_ia():
                 if all(isinstance(dados.get(c, 0), (int, float)) and float(dados.get(c, 0)) > 0 for c in campos):
                     return dados
     except Exception:
-        pass
+        pass  # erro silenciado intencionalmente
     return None
 
 
@@ -1147,7 +1147,8 @@ def tela_login():
             entrar  = st.form_submit_button("Entrar", use_container_width=True)
 
         if entrar:
-            u = st.session_state.usuarios.get(usuario)
+            _usuarios = st.session_state.usuarios if isinstance(st.session_state.usuarios, dict) else {}
+            u = _usuarios.get(usuario)
             if u and verificar_senha(senha, u["senha"]):
                 st.session_state.logado = True
                 st.session_state.usuario_atual = usuario
@@ -1372,7 +1373,8 @@ if st.sidebar.button("Sair", key="botao_sair"):
 dados_carregados = carregar_dados_iaagro()
 
 if "dados"   not in st.session_state:
-    st.session_state.dados   = dados_carregados.get("dados", {})
+    _d = dados_carregados.get("dados", {})
+    st.session_state.dados   = _d if isinstance(_d, dict) else {}
 if "areas"   not in st.session_state:
     st.session_state.areas   = dados_carregados.get("areas", [])
 if "contador_area" not in st.session_state:
@@ -1408,6 +1410,15 @@ if "clima_data"        not in st.session_state: st.session_state.clima_data     
 if "precos_data"       not in st.session_state: st.session_state.precos_data       = None
 if "receituarios"      not in st.session_state: st.session_state.receituarios      = dados_carregados.get("receituarios", [])
 if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinida  = False
+
+# ── GPS session_states — inicialização segura ───────────────────
+if "_gps_lat"       not in st.session_state: st.session_state._gps_lat       = None
+if "_gps_lon"       not in st.session_state: st.session_state._gps_lon       = None
+if "_gps_mf_lat"    not in st.session_state: st.session_state._gps_mf_lat    = None
+if "_gps_mf_lon"    not in st.session_state: st.session_state._gps_mf_lon    = None
+if "_gps_clima_lat" not in st.session_state: st.session_state._gps_clima_lat = None
+if "_gps_clima_lon" not in st.session_state: st.session_state._gps_clima_lon = None
+if "filtro_out"     not in st.session_state: st.session_state.filtro_out     = []
 
 # ─────────────────────────────────────────────
 
@@ -3301,7 +3312,7 @@ elif menu == "Mapa de Fertilidade":
                         st.session_state["_gps_mf_lon"] = geo["coords"]["longitude"]
                         st.rerun()
                 except Exception:
-                    pass
+                    pass  # erro silenciado intencionalmente
         if st.session_state.get("_gps_mf_lat"):
             latitude  = st.session_state["_gps_mf_lat"]
             longitude = st.session_state["_gps_mf_lon"]
@@ -4037,7 +4048,7 @@ elif menu == "Estoque de Insumos":
                                         )
                                         fabricante = p.get("brands", "")
                             except Exception:
-                                pass
+                                pass  # erro silenciado intencionalmente
 
                         # Adiciona no estoque
                         novo = {
@@ -7399,7 +7410,7 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
             if resp.status_code == 200:
                 return resp.json()["content"][0]["text"]
         except Exception:
-            pass
+            pass  # erro silenciado intencionalmente
         return None
 
     # ══ UPLOAD ═══════════════════════════════════════════════════════════
