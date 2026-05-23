@@ -3482,7 +3482,9 @@ elif menu == "Diagnóstico Completo":
 
         st.subheader("💰 Inteligência Econômica")
         area          = float(d["area"])
-        preco_soja    = st.session_state.get("precos_data", {}).get("soja_sc", {}).get("preco", 115.0)
+        _precos_data  = st.session_state.get("precos_data") or {}
+        _soja_sc      = _precos_data.get("soja_sc") or {}
+        preco_soja    = float(_soja_sc.get("preco", 115.0) or 115.0)
         custo_base    = 3200
         receita_estimada = produtividade_ia * preco_soja * area
         lucro_estimado   = receita_estimada - (custo_base * area)
@@ -5409,8 +5411,9 @@ elif menu == "💰 Preços de Mercado":
         atualizar = st.button("🔄 Atualizar Preços", key="btn_precos", use_container_width=True)
     with col_btn2:
         if st.session_state.get("precos_data"):
-            fonte_exib = st.session_state.precos_data.get("soja_sc", {}).get("fonte", "")
-            horario_dolar = st.session_state.precos_data.get("dolar", {}).get("horario", "")
+            _pd        = st.session_state.precos_data or {}
+            fonte_exib    = (_pd.get("soja_sc") or {}).get("fonte", "")
+            horario_dolar = (_pd.get("dolar")   or {}).get("horario", "")
             st.markdown(f'<div style="background:#0f3460;color:#6ee7b7;padding:8px 14px;border-radius:8px;'
                         f'font-size:12px;font-weight:700;">✅ Última atualização: {fonte_exib}'
                         f'{" | Dólar: " + horario_dolar if horario_dolar else ""}</div>',
@@ -5426,7 +5429,7 @@ elif menu == "💰 Preços de Mercado":
         st.session_state.precos_data = precos
 
     # Detectar se veio de API real ou fallback
-    fonte_soja  = precos.get("soja_sc", {}).get("fonte", "")
+    fonte_soja   = (precos.get("soja_sc") or {}).get("fonte", "")
     ult_at_preco = precos.get("_atualizado_em", "")
     is_realtime = "CBOT" in fonte_soja or "ICE" in fonte_soja or "BrapiDev" in fonte_soja
 
@@ -5441,8 +5444,8 @@ elif menu == "💰 Preços de Mercado":
             f'</div>', unsafe_allow_html=True
         )
     with col_st2:
-        dolar_fonte = precos.get("dolar", {}).get("fonte", "")
-        dolar_hor   = precos.get("dolar", {}).get("horario", "")
+        dolar_fonte = (precos.get("dolar") or {}).get("fonte", "")
+        dolar_hor   = (precos.get("dolar") or {}).get("horario", "")
         cor_d = "#14532d" if "tempo real" in dolar_fonte.lower() or "VatComply" in dolar_fonte else "#78350f"
         st.markdown(
             f'<div style="background:{cor_d};color:#fff;padding:8px 14px;border-radius:8px;'
@@ -5453,16 +5456,16 @@ elif menu == "💰 Preços de Mercado":
         )
 
     # ── Extrai todos os valores ──────────────────────────────────────
-    soja_p     = precos.get("soja_sc",    {}).get("preco", 115.0)
-    milho_p    = precos.get("milho_sc",   {}).get("preco",  58.0)
-    trigo_p    = precos.get("trigo_sc",   {}).get("preco",  69.0)
-    cafe_p     = precos.get("cafe_sc",    {}).get("preco", 2250.0)
-    algodao_p  = precos.get("algodao_at", {}).get("preco", 120.0)
-    boi_p      = precos.get("boi_at",     {}).get("preco", 320.0)
-    arroz_p    = precos.get("arroz_sc",   {}).get("preco",  74.0)
-    dolar_p    = precos.get("dolar",      {}).get("preco",   5.80)
-    fonte_dolar= precos.get("dolar",      {}).get("fonte", "")
-    fonte_graos= precos.get("soja_sc",    {}).get("fonte", "")
+    soja_p     = (precos.get("soja_sc") or {}).get("preco", 115.0)
+    milho_p    = (precos.get("milho_sc") or {}).get("preco",  58.0)
+    trigo_p    = (precos.get("trigo_sc") or {}).get("preco",  69.0)
+    cafe_p     = (precos.get("cafe_sc") or {}).get("preco", 2250.0)
+    algodao_p  = (precos.get("algodao_at") or {}).get("preco", 120.0)
+    boi_p      = (precos.get("boi_at") or {}).get("preco", 320.0)
+    arroz_p    = (precos.get("arroz_sc") or {}).get("preco",  74.0)
+    dolar_p    = (precos.get("dolar") or {}).get("preco",   5.80)
+    fonte_dolar= (precos.get("dolar") or {}).get("fonte", "")
+    fonte_graos= (precos.get("soja_sc") or {}).get("fonte", "")
 
     # ── Painel de cotações ───────────────────────────────────────────
     st.subheader("📊 Cotações Atuais")
@@ -5471,22 +5474,22 @@ elif menu == "💰 Preços de Mercado":
     st.markdown("**🌾 Grãos (R$/saca 60kg)**")
     cg1, cg2, cg3, cg4 = st.columns(4)
     cg1.metric("🌱 Soja",   f"R$ {soja_p:.2f}",
-               precos.get("soja_sc",{}).get("praca","PR"))
+               (precos.get("soja_sc") or {}).get("praca","PR"))
     cg2.metric("🌽 Milho",  f"R$ {milho_p:.2f}",
-               precos.get("milho_sc",{}).get("praca","PR"))
+               (precos.get("milho_sc") or {}).get("praca","PR"))
     cg3.metric("🌾 Trigo",  f"R$ {trigo_p:.2f}",
-               precos.get("trigo_sc",{}).get("praca","PR"))
+               (precos.get("trigo_sc") or {}).get("praca","PR"))
     cg4.metric("🍚 Arroz",  f"R$ {arroz_p:.2f}",
-               precos.get("arroz_sc",{}).get("praca","RS") + " sc 50kg")
+               (precos.get("arroz_sc") or {}).get("praca","RS") + " sc 50kg")
 
     st.markdown("**🐄 Pecuária & Fibra**")
     cp1, cp2, cp3, cp4 = st.columns(4)
     cp1.metric("☕ Café",      f"R$ {cafe_p:.2f}",
-               precos.get("cafe_sc",{}).get("praca","SP") + " sc 60kg")
+               (precos.get("cafe_sc") or {}).get("praca","SP") + " sc 60kg")
     cp2.metric("🏭 Algodão",  f"R$ {algodao_p:.2f}",
-               precos.get("algodao_at",{}).get("praca","MT") + " @")
+               (precos.get("algodao_at") or {}).get("praca","MT") + " @")
     cp3.metric("🐂 Boi Gordo",f"R$ {boi_p:.2f}",
-               precos.get("boi_at",{}).get("praca","SP") + " @")
+               (precos.get("boi_at") or {}).get("praca","SP") + " @")
     fonte_dolar_label = "Tempo real" if "AwesomeAPI" in fonte_dolar else "Offline"
     cp4.metric("💵 Dólar",    f"R$ {dolar_p:.4f}", fonte_dolar_label)
 
