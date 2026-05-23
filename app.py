@@ -4793,6 +4793,16 @@ if menu == "📦 Operacional":
                     prod_sel = resultados[escolha_idx]
                     st.session_state.ac_selecionado = prod_sel
                     st.session_state.ac_query = prod_sel["nome"]
+                    # Força preenchimento dos campos via session_state
+                    st.session_state["nome_insumo_final"] = prod_sel["nome"]
+                    cat_map_tmp = {
+                        "Fungicida":"Fungicida","Herbicida":"Herbicida","Inseticida":"Inseticida",
+                        "Acaricida":"Outro","Nematicida":"Outro","Fungicida Biológico":"Biológico",
+                        "Inseticida Biológico":"Biológico","Bioestimulante":"Foliar",
+                        "Foliar / Nutrição":"Foliar","Regulador de Crescimento":"Outro",
+                        "Adjuvante":"Adjuvante","Tratamento de Sementes":"Outro",
+                        "Fertilizante":"Fertilizante",
+                    }
                     st.rerun()
     
             else:
@@ -4846,17 +4856,16 @@ if menu == "📦 Operacional":
         st.divider()
         col1, col2, col3 = st.columns(3)
         with col1:
-            # Nome editável (pré-preenchido pelo autocomplete)
-            nome_final = st.text_input("Nome do produto / insumo", value=nome_insumo, key="nome_insumo_final")
-            categoria  = st.selectbox("Categoria", [
-                "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-            ], index=["Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                      "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                     ].index(cat_sugerida) if cat_sugerida in [
-                      "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                      "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                     ] else 0)
+            # Pré-preenche via session_state quando produto é selecionado do catálogo
+            if "nome_insumo_final" not in st.session_state:
+                st.session_state["nome_insumo_final"] = nome_insumo
+            elif nome_insumo and st.session_state.get("ac_selecionado"):
+                st.session_state["nome_insumo_final"] = nome_insumo
+            nome_final = st.text_input("Nome do produto / insumo", key="nome_insumo_final")
+            _cats = ["Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
+                     "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"]
+            _cat_idx = _cats.index(cat_sugerida) if cat_sugerida in _cats else 0
+            categoria  = st.selectbox("Categoria", _cats, index=_cat_idx, key="sel_categoria_estoque")
             cultura    = st.selectbox("Cultura", get_culturas() + ["Ambos"], key="cultura_estoque")
             litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
             capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
