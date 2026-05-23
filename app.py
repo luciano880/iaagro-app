@@ -4868,6 +4868,7 @@ if menu == "📦 Operacional":
             categoria  = st.selectbox("Categoria", _cats, index=_cat_idx, key="sel_categoria_estoque")
             cultura    = st.selectbox("Cultura", get_culturas() + ["Ambos"], key="cultura_estoque")
             litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
+            dose_ha    = st.number_input("Dose por hectare (kg/L)", min_value=0.0, value=0.0, key="dose_ha_estoque")
             capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
         with col2:
             quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0, key="num_quantidade_em_e_4611")
