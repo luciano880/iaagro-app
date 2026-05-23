@@ -3931,75 +3931,175 @@ if menu == "📦 Operacional":
         # MODO 1 — LEITOR USB (digita o código direto)
         # ════════════════════════════════════════════
         if modo_bc == "⌨️ Leitor USB / Teclado":
-            st.info("🔌 Clique no campo abaixo e passe o leitor USB no código de barras. Pressione Enter para adicionar.")
+            st.info("🔌 Clique no campo abaixo, passe o leitor USB no código — **não precisa clicar em nada**, o produto entra sozinho.")
 
-            with st.form("form_barcode_usb", clear_on_submit=True):
-                codigo_usb = st.text_input(
-                    "Código de barras",
-                    placeholder="Passe o leitor aqui e pressione Enter...",
-                    key="barcode_usb_input",
-                )
-                submitted = st.form_submit_button("📥 Adicionar ao Estoque", use_container_width=True)
+            # Inicializa estado
+            if "ultimo_cod_processado" not in st.session_state:
+                st.session_state.ultimo_cod_processado = ""
 
-            if submitted and codigo_usb and codigo_usb.strip():
-                valor_cod = codigo_usb.strip()
+            def _processar_barcode_usb():
+                cod = st.session_state.get("bc_usb_field","").strip()
+                if cod and cod != st.session_state.ultimo_cod_processado:
+                    st.session_state.ultimo_cod_processado = cod
+                    st.session_state["_bc_usb_pending"] = cod
 
-                # Evita duplicar
+            st.text_input(
+                "📦 Código de barras — passe o leitor aqui",
+                key="bc_usb_field",
+                on_change=_processar_barcode_usb,
+                placeholder="Aguardando leitura...",
+            )
+
+            # Processa código pendente
+            valor_cod = st.session_state.pop("_bc_usb_pending", None)
+            if valor_cod:
+                valor_cod = valor_cod.strip()
                 ja_adicionado = any(
                     str(valor_cod) in str(i.get("Observação",""))
                     for i in st.session_state.estoque
                 )
                 if ja_adicionado:
                     st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
-                else:
-                    # Detecta chave NF-e (44 dígitos)
-                    if valor_cod.isdigit() and len(valor_cod) == 44:
-                        st.error("⚠️ Este é o código da DANFE (NF-e). Use a aba **📄 Importar Nota Fiscal (XML)**.")
-                        st.info(f"Chave: `{valor_cod}`")
-                    else:
-                        # Busca nome na Open Food Facts
-                        nome_produto = f"Produto {valor_cod}"
-                        fabricante   = ""
-                        with st.spinner(f"🌐 Buscando produto {valor_cod}..."):
-                            try:
-                                resp = requests.get(
-                                    f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
-                                    timeout=5
-                                )
-                                if resp.status_code == 200:
-                                    data = resp.json()
-                                    if data.get("status") == 1:
-                                        p = data.get("product", {})
-                                        nome_produto = (
-                                            p.get("product_name_pt")
-                                            or p.get("product_name")
-                                            or nome_produto
-                                        )
-                                        fabricante = p.get("brands", "")
-                            except Exception:
-                                pass
+                elif valor_cod.isdigit() and len(valor_cod) == 44:
+                    # Busca produtos da NF-e automaticamente via IA + SEFAZ
+                    st.info(f"📋 Chave NF-e detectada — buscando produtos automaticamente...")
+                    itens_nfe_usb = []
+                    emit_usb = ""
+                    n_nf_usb = valor_cod[25:34]
 
-                        novo = {
-                            "Insumo":            nome_produto,
-                            "Categoria":         "Outro",
-                            "Quantidade":        1.0,
-                            "Unidade":           "unidades",
-                            "Valor Unitário R$": 0.0,
-                            "Valor Total R$":    0.0,
-                            "Estoque Mínimo":    0.0,
-                            "Observação":        f"Código: {valor_cod} (USB)",
-                            "Cultura":           "Ambos",
-                            "Dose ha":           0.0,
-                            "Litros ha":         75.0,
-                            "Tanque litros":     2000,
-                            "Fabricante":        fabricante,
-                            "Ingrediente Ativo": "",
-                        }
-                        st.session_state.estoque.append(novo)
+                    with st.spinner("🌐 Consultando SEFAZ via IA..."):
+                        try:
+                            api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+                            if api_key:
+                                prompt = (
+                                    f"Consulte a NF-e com chave {valor_cod} no portal nfe.fazenda.gov.br "
+                                    f"e extraia os itens/produtos da nota. "
+                                    f"Retorne APENAS JSON válido sem markdown:\n"
+                                    f'{{"emitente":"nome","numero":"nNF","itens":['
+                                    f'{{"nome":"xProd","quantidade":0.0,"unidade":"uCom","valor_unitario":0.0}}]}}'
+                                    f"\nSe não encontrar, retorne itens vazio."
+                                )
+                                resp_ai = requests.post(
+                                    "https://api.anthropic.com/v1/messages",
+                                    headers={
+                                        "Content-Type":      "application/json",
+                                        "x-api-key":         api_key,
+                                        "anthropic-version": "2023-06-01",
+                                    },
+                                    json={
+                                        "model":    "claude-sonnet-4-20250514",
+                                        "max_tokens": 1000,
+                                        "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
+                                        "messages": [{"role": "user", "content": prompt}]
+                                    },
+                                    timeout=45
+                                )
+                                if resp_ai.status_code == 200:
+                                    blocos = resp_ai.json().get("content", [])
+                                    texto  = "".join(b.get("text","") for b in blocos if b.get("type")=="text")
+                                    texto  = texto.replace("```json","").replace("```","").strip()
+                                    idx_s  = texto.find("{")
+                                    idx_e  = texto.rfind("}") + 1
+                                    if idx_s >= 0 and idx_e > idx_s:
+                                        dados_ai = json.loads(texto[idx_s:idx_e])
+                                        emit_usb   = dados_ai.get("emitente", "")
+                                        n_nf_usb   = dados_ai.get("numero", n_nf_usb)
+                                        itens_nfe_usb = dados_ai.get("itens", [])
+                        except Exception:
+                            pass
+
+                    uni_map_usb = {
+                        "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
+                        "L":"litros","LT":"litros","LTS":"litros",
+                        "SC":"sacos","SAC":"sacos","UN":"unidades",
+                        "BL":"unidades","PT":"unidades","CX":"unidades",
+                    }
+
+                    if itens_nfe_usb:
+                        adicionados = 0
+                        for item in itens_nfe_usb:
+                            uni_raw  = str(item.get("unidade","UN")).upper()
+                            uni_norm = uni_map_usb.get(uni_raw, "unidades")
+                            qtd      = float(item.get("quantidade", 1))
+                            vul      = float(item.get("valor_unitario", 0))
+                            novo = {
+                                "Insumo":            str(item.get("nome","Produto")),
+                                "Categoria":         "Outro",
+                                "Quantidade":        qtd,
+                                "Unidade":           uni_norm,
+                                "Valor Unitário R$": vul,
+                                "Valor Total R$":    round(qtd * vul, 2),
+                                "Estoque Mínimo":    0.0,
+                                "Observação":        f"NF-e {n_nf_usb} — chave: {valor_cod[:20]}...",
+                                "Cultura":           "Ambos",
+                                "Dose ha":           0.0,
+                                "Litros ha":         75.0,
+                                "Tanque litros":     2000,
+                                "Fabricante":        emit_usb,
+                                "Ingrediente Ativo": "",
+                            }
+                            st.session_state.estoque.append(novo)
+                            adicionados += 1
                         salvar_dados_iaagro()
-                        st.success(f"✅ **{nome_produto}** adicionado ao estoque! (Código: {valor_cod})")
+                        st.success(f"✅ {adicionados} produto(s) da NF-e {n_nf_usb} importados automaticamente!")
                         st.balloons()
                         st.rerun()
+                    else:
+                        # Fallback: orienta baixar XML
+                        st.warning("⚠️ Não foi possível buscar os produtos automaticamente via SEFAZ.")
+                        st.markdown(f"""
+                        <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #f59e0b;'>
+                        <b style='color:#f59e0b;'>📥 Importe o XML manualmente:</b><br>
+                        <span style='color:#f1f5f9;font-size:13px;'>
+                        1. Acesse <b>nfe.fazenda.gov.br/portal</b><br>
+                        2. Cole a chave abaixo e baixe o XML<br>
+                        3. Use a aba <b>📄 Importar Nota Fiscal (XML)</b>
+                        </span><br><br>
+                        <span style='color:#94a3b8;font-size:11px;word-break:break-all;'>{valor_cod}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    nome_produto = f"Produto {valor_cod}"
+                    fabricante   = ""
+                    with st.spinner(f"🌐 Buscando produto {valor_cod}..."):
+                        try:
+                            resp = requests.get(
+                                f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
+                                timeout=4
+                            )
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                if data.get("status") == 1:
+                                    p = data.get("product", {})
+                                    nome_produto = (
+                                        p.get("product_name_pt")
+                                        or p.get("product_name")
+                                        or nome_produto
+                                    )
+                                    fabricante = p.get("brands", "")
+                        except Exception:
+                            pass
+                    novo = {
+                        "Insumo":            nome_produto,
+                        "Categoria":         "Outro",
+                        "Quantidade":        1.0,
+                        "Unidade":           "unidades",
+                        "Valor Unitário R$": 0.0,
+                        "Valor Total R$":    0.0,
+                        "Estoque Mínimo":    0.0,
+                        "Observação":        f"Código: {valor_cod} (USB)",
+                        "Cultura":           "Ambos",
+                        "Dose ha":           0.0,
+                        "Litros ha":         75.0,
+                        "Tanque litros":     2000,
+                        "Fabricante":        fabricante,
+                        "Ingrediente Ativo": "",
+                    }
+                    st.session_state.estoque.append(novo)
+                    salvar_dados_iaagro()
+                    st.success(f"✅ **{nome_produto}** adicionado! (Código: {valor_cod})")
+                    st.balloons()
+                    st.rerun()
 
         # ════════════════════════════════════════════
         # MODO 2 — CÂMERA / FOTO
