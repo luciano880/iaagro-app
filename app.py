@@ -4872,7 +4872,23 @@ if menu == "📦 Operacional":
             capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
         with col2:
             quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0, key="num_quantidade_em_e_4611")
-            unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"], key="sel_unidade_do_esto_4612")
+            unidade     = st.selectbox("Unidade do estoque", ["kg","litros","ton","sacos","galões","unidades"], key="sel_unidade_do_esto_4612")
+
+            # Embalagem baseada na unidade
+            if unidade == "kg":
+                embalagem_opts = ["1 kg","2 kg","5 kg","10 kg","15 kg","20 kg","25 kg","30 kg","50 kg","Granel"]
+            elif unidade == "litros":
+                embalagem_opts = ["200 ml","500 ml","1 litro","2 litros","5 litros","10 litros","20 litros","200 litros","Granel"]
+            elif unidade == "sacos":
+                embalagem_opts = ["Saco 20 kg","Saco 25 kg","Saco 40 kg","Saco 50 kg","Saco 60 kg"]
+            elif unidade == "ton":
+                embalagem_opts = ["Big Bag 500 kg","Big Bag 1000 kg","Granel tonelada"]
+            elif unidade == "galões":
+                embalagem_opts = ["Galão 5L","Galão 10L","Galão 20L","Galão 50L"]
+            else:
+                embalagem_opts = ["Unidade","Caixa","Fardo","Par"]
+
+            embalagem = st.selectbox("Embalagem / Apresentação", embalagem_opts, key="sel_embalagem_estoque")
         with col3:
             valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0, key="num_valor_unit_rio__4614")
             estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0, key="num_estoque_m_nimo_4615")
@@ -4887,6 +4903,7 @@ if menu == "📦 Operacional":
                 novo_item = {
                     "Insumo": nome_usar, "Categoria": categoria,
                     "Quantidade": quantidade, "Unidade": unidade,
+                    "Embalagem": embalagem,
                     "Valor Unitário R$": valor_unitario,
                     "Valor Total R$": quantidade * valor_unitario,
                     "Estoque Mínimo": estoque_minimo,
@@ -4908,6 +4925,11 @@ if menu == "📦 Operacional":
             info_box("Nenhum produto cadastrado ainda.")
         else:
             tabela_estoque = pd.DataFrame(st.session_state.estoque)
+            # Garante coluna Embalagem mesmo em registros antigos
+            if "Embalagem" not in tabela_estoque.columns:
+                tabela_estoque["Embalagem"] = "—"
+            else:
+                tabela_estoque["Embalagem"] = tabela_estoque["Embalagem"].fillna("—")
     
             st.markdown("### 🗑️ Excluir Produto")
             produto_excluir = st.selectbox(
