@@ -2700,34 +2700,20 @@ def baixar_estoque(nome_insumo, quantidade_usada):
 # ─────────────────────────────────────────────
 # MENU
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# MENU
+# ─────────────────────────────────────────────
 menu = st.sidebar.radio(
     "📋 Menu",
     [
-        "Início",
-        "Cadastro da Área",
-        "Áreas Cadastradas",
-        "Histórico de Produtividade",
-        "Pluviômetro",
-        "Mapa de Fertilidade",
-        "Análise de Solo",
-        "Diagnóstico Completo",
-        "Adubação",
-        "Custos",
-        "Estoque de Insumos",
-        "Aplicações",
-        "Relatório Final",
-        "🌤️ Clima & Alertas",
-        "💰 Preços de Mercado",
-        "📄 OCR Laudo de Solo",
-        "⏱️ Prazo de Carência",
-        "📋 Ordem de Serviço",
-        "💹 Dashboard Financeiro",
-        "📅 Calendário Agrícola",
-        "🗺️ Mapa de Colheita IA",
-        "📜 Receituário Agronômico",
-        "📊 Comparativo de Safras",
+        "🏠 Início",
+        "🌾 Lavoura",
+        "🧪 Solo & Adubação",
+        "💰 Financeiro",
+        "📦 Operacional",
+        "🌍 Inteligência",
         "🌱 Segunda Safra / Safrinha",
-        "🧾 Imposto de Renda Rural",
+        "📄 Relatório Final",
         "⚙️ Configurações"
     ]
 )
@@ -2781,7 +2767,7 @@ def get_culturas():
 # ─────────────────────────────────────────────
 # MENU: INÍCIO
 # ─────────────────────────────────────────────
-if menu == "Início":
+if menu == "🏠 Início":
 
     # ── Segmentos disponíveis ──────────────────────────────────────────
     SEGMENTOS = SEGMENTOS_INFO
@@ -2895,7 +2881,11 @@ if menu == "Início":
 # ─────────────────────────────────────────────
 # MENU: ÁREAS CADASTRADAS
 # ─────────────────────────────────────────────
-elif menu == "Áreas Cadastradas":
+elif menu == "🌾 Lavoura":
+    _sub_lav = st.tabs(["📍 Áreas Cadastradas","➕ Cadastro da Área","📈 Histórico de Produtividade","🌧️ Pluviômetro","🗺️ Mapa de Fertilidade"])
+
+if menu == "🌾 Lavoura":
+  with _sub_lav[0]:
     st.header("Áreas Cadastradas")
 
     if len(st.session_state.areas) == 0:
@@ -2963,7 +2953,8 @@ elif menu == "Áreas Cadastradas":
 # ─────────────────────────────────────────────
 # MENU: CADASTRO DA ÁREA
 # ─────────────────────────────────────────────
-elif menu == "Cadastro da Área":
+if menu == "🌾 Lavoura":
+  with _sub_lav[1]:
     st.header("Cadastro da Área")
 
     fazenda   = st.text_input("Nome da fazenda",  st.session_state.dados.get("fazenda", ""))
@@ -3104,7 +3095,8 @@ elif menu == "Cadastro da Área":
 # ─────────────────────────────────────────────
 # MENU: HISTÓRICO DE PRODUTIVIDADE
 # ─────────────────────────────────────────────
-elif menu == "Histórico de Produtividade":
+if menu == "🌾 Lavoura":
+  with _sub_lav[2]:
     st.header("📈 Histórico de Produtividade")
 
     if len(st.session_state.areas) == 0:
@@ -3146,7 +3138,8 @@ elif menu == "Histórico de Produtividade":
 # ─────────────────────────────────────────────
 # MENU: PLUVIÔMETRO
 # ─────────────────────────────────────────────
-elif menu == "Pluviômetro":
+if menu == "🌾 Lavoura":
+  with _sub_lav[3]:
     st.header("🌧️ Pluviômetro Inteligente")
 
     if len(st.session_state.areas) == 0:
@@ -3233,7 +3226,8 @@ elif menu == "Pluviômetro":
 # ─────────────────────────────────────────────
 # MENU: MAPA DE FERTILIDADE
 # ─────────────────────────────────────────────
-elif menu == "Mapa de Fertilidade":
+if menu == "🌾 Lavoura":
+  with _sub_lav[4]:
     st.header("🗺️ Mapa de Fertilidade por Cores")
     st.subheader("🌦️ Mapa Climático dos Talhões")
 
@@ -3420,7 +3414,11 @@ elif menu == "Mapa de Fertilidade":
 # ─────────────────────────────────────────────
 # MENU: ANÁLISE DE SOLO
 # ─────────────────────────────────────────────
-elif menu == "Análise de Solo":
+elif menu == "🧪 Solo & Adubação":
+    _sub_solo = st.tabs(["🧪 Análise de Solo","🔬 Diagnóstico Completo","🌱 Adubação","📄 OCR Laudo de Solo"])
+
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[0]:
     st.header("Análise de Solo")
 
     # Injeta estilo escuro no componente de upload via JS
@@ -3566,7 +3564,8 @@ elif menu == "Análise de Solo":
 # ─────────────────────────────────────────────
 # MENU: DIAGNÓSTICO COMPLETO
 # ─────────────────────────────────────────────
-elif menu == "Diagnóstico Completo":
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[1]:
     st.header("Diagnóstico Completo")
     d = st.session_state.dados
 
@@ -3659,7 +3658,8 @@ elif menu == "Diagnóstico Completo":
 # ─────────────────────────────────────────────
 # MENU: ADUBAÇÃO
 # ─────────────────────────────────────────────
-elif menu == "Adubação":
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[2]:
     st.header("🌱 Adubação Inteligente")
     d = st.session_state.dados
 
@@ -3843,7 +3843,11 @@ elif menu == "Adubação":
 # ─────────────────────────────────────────────
 # MENU: CUSTOS
 # ─────────────────────────────────────────────
-elif menu == "Custos":
+elif menu == "💰 Financeiro":
+    _sub_fin = st.tabs(["💸 Custos","💹 Dashboard Financeiro","📊 Comparativo de Safras","🧾 Imposto de Renda Rural"])
+
+if menu == "💰 Financeiro":
+  with _sub_fin[0]:
     st.header("Custos Estimados")
     d = st.session_state.dados
 
@@ -3895,7 +3899,11 @@ elif menu == "Custos":
 
 
 # ─────────────────────────────────────────────
-elif menu == "Estoque de Insumos":
+elif menu == "📦 Operacional":
+    _sub_op = st.tabs(["📦 Estoque de Insumos","🚜 Aplicações","⏱️ Prazo de Carência","📋 Ordem de Serviço","📜 Receituário Agronômico"])
+
+if menu == "📦 Operacional":
+  with _sub_op[0]:
     st.header("📦 Estoque de Insumos")
 
     # ── TABS principais ───────────────────────────────────────────────────
@@ -4675,7 +4683,8 @@ elif menu == "Estoque de Insumos":
 #   - loop aninhado duplicado removido
 #   - key duplicada no botão corrigida com índice único
 # ─────────────────────────────────────────────
-elif menu == "Aplicações":
+if menu == "📦 Operacional":
+  with _sub_op[1]:
     st.header("🚜 Aplicações Agrícolas")
 
     if "aplicacoes" not in st.session_state:
@@ -4948,7 +4957,7 @@ elif menu == "Aplicações":
 # ─────────────────────────────────────────────
 # MENU: RELATÓRIO FINAL
 # ─────────────────────────────────────────────
-elif menu == "Relatório Final":
+elif menu == "📄 Relatório Final":
     st.header("Relatório Final IAAgro")
 
     def gerar_pdf_relatorio(dados):
@@ -5141,7 +5150,11 @@ elif menu == "Relatório Final":
 # ─────────────────────────────────────────────
 # MENU: CLIMA & ALERTAS
 # ─────────────────────────────────────────────
-elif menu == "🌤️ Clima & Alertas":
+elif menu == "🌍 Inteligência":
+    _sub_int = st.tabs(["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","📅 Calendário Agrícola"])
+
+if menu == "🌍 Inteligência":
+  with _sub_int[0]:
     st.header("🌤️ Clima em Tempo Real & Alertas de Aplicação")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 12px 0;font-size:13px;">
@@ -5529,7 +5542,8 @@ elif menu == "🌤️ Clima & Alertas":
 # ─────────────────────────────────────────────
 # MENU: PREÇOS DE MERCADO
 # ─────────────────────────────────────────────
-elif menu == "💰 Preços de Mercado":
+if menu == "🌍 Inteligência":
+  with _sub_int[1]:
     st.header("💰 Preços de Commodities em Tempo Real")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 12px 0;font-size:13px;">
@@ -5759,7 +5773,8 @@ elif menu == "💰 Preços de Mercado":
 # ─────────────────────────────────────────────
 # MENU: OCR LAUDO DE SOLO
 # ─────────────────────────────────────────────
-elif menu == "📄 OCR Laudo de Solo":
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[3]:
     st.header("📄 Leitura Automática de Laudo de Solo")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
@@ -5868,7 +5883,8 @@ elif menu == "📄 OCR Laudo de Solo":
 # ─────────────────────────────────────────────
 # MENU: PRAZO DE CARÊNCIA
 # ─────────────────────────────────────────────
-elif menu == "⏱️ Prazo de Carência":
+if menu == "📦 Operacional":
+  with _sub_op[2]:
     st.header("⏱️ Controle de Prazo de Carência e Reentrada")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
@@ -6000,7 +6016,8 @@ elif menu == "⏱️ Prazo de Carência":
 # ─────────────────────────────────────────────
 # MENU: ORDEM DE SERVIÇO
 # ─────────────────────────────────────────────
-elif menu == "📋 Ordem de Serviço":
+if menu == "📦 Operacional":
+  with _sub_op[3]:
     st.header("📋 Ordem de Serviço")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
@@ -6140,7 +6157,8 @@ elif menu == "📋 Ordem de Serviço":
 # ─────────────────────────────────────────────
 # MENU: DASHBOARD FINANCEIRO
 # ─────────────────────────────────────────────
-elif menu == "💹 Dashboard Financeiro":
+if menu == "💰 Financeiro":
+  with _sub_fin[1]:
     st.header("💹 Dashboard Financeiro — DRE por Safra")
 
     if "dre_registros" not in st.session_state:
@@ -6300,7 +6318,8 @@ elif menu == "💹 Dashboard Financeiro":
 # ─────────────────────────────────────────────
 # MENU: CALENDÁRIO AGRÍCOLA
 # ─────────────────────────────────────────────
-elif menu == "📅 Calendário Agrícola":
+if menu == "🌍 Inteligência":
+  with _sub_int[3]:
     st.header("📅 Calendário Agrícola")
 
     if "calendario_eventos" not in st.session_state:
@@ -6483,7 +6502,8 @@ elif menu == "📅 Calendário Agrícola":
 # ═══════════════════════════════════════════════════════════════════
 # MENU: RECEITUÁRIO AGRONÔMICO
 # ═══════════════════════════════════════════════════════════════════
-elif menu == "📜 Receituário Agronômico":
+if menu == "📦 Operacional":
+  with _sub_op[4]:
     st.header("📜 Receituário Agronômico")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
@@ -6880,7 +6900,8 @@ elif menu == "📜 Receituário Agronômico":
 # ═══════════════════════════════════════════════════════════════════
 # MENU: COMPARATIVO DE SAFRAS
 # ═══════════════════════════════════════════════════════════════════
-elif menu == "📊 Comparativo de Safras":
+if menu == "💰 Financeiro":
+  with _sub_fin[2]:
     st.header("📊 Comparativo de Safras")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
@@ -7295,7 +7316,8 @@ Seja objetivo, técnico e prático para o produtor rural brasileiro. Máximo 400
 # ─────────────────────────────────────────────
 # MENU: MAPA DE COLHEITA IA
 # ─────────────────────────────────────────────
-elif menu == "🗺️ Mapa de Colheita IA":
+if menu == "🌍 Inteligência":
+  with _sub_int[2]:
     st.header("🗺️ Mapa de Colheita — Análise por Inteligência Artificial")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
     border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
@@ -8126,7 +8148,8 @@ elif menu == "🌱 Segunda Safra / Safrinha":
             c3.metric("🔄 Rotações planejadas",   len(df_an))
 
 # ─────────────────────────────────────────────
-elif menu == "🧾 Imposto de Renda Rural":
+if menu == "💰 Financeiro":
+  with _sub_fin[3]:
     import io
     st.header("🧾 Imposto de Renda — Produtor Rural")
 
