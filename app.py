@@ -2744,18 +2744,46 @@ if st.session_state.area_selecionada:
     st.sidebar.markdown(f'<div style="background:#14532d;color:#fff;padding:8px 12px;border-radius:8px;font-weight:700;font-size:13px;margin-top:6px;">🌾 Área ativa: {st.session_state.area_selecionada}</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
+# MAPEAMENTO GLOBAL DE CULTURAS POR SEGMENTO
+# ─────────────────────────────────────────────
+SEGMENTOS_INFO = {
+    "🌾 Grãos":        {"desc":"Soja, Milho, Trigo e outros cereais",   "cor":"#14532d","borda":"#22c55e"},
+    "🌿 Horticultura": {"desc":"Hortaliças, verduras e legumes",         "cor":"#14532d","borda":"#84cc16"},
+    "☕ Café":          {"desc":"Cafeicultura e beneficiamento",          "cor":"#431407","borda":"#f59e0b"},
+    "🍎 Fruticultura": {"desc":"Frutas tropicais, uva, maçã e outras",  "cor":"#7f1d1d","borda":"#f87171"},
+    "🌲 Silvicultura": {"desc":"Eucalipto, Pinus e reflorestamento",     "cor":"#1e3a5f","borda":"#38bdf8"},
+}
+
+CULTURAS_POR_SEGMENTO = {
+    "🌾 Grãos":        ["Soja","Milho","Trigo","Feijão","Canola","Aveia","Arroz","Sorgo","Cevada","Girassol"],
+    "🌿 Horticultura": ["Tomate","Batata","Cebola","Alho","Mandioca","Feijão","Milho"],
+    "☕ Café":          ["Café","Milho","Feijão"],
+    "🍎 Fruticultura": ["Laranja","Banana","Uva","Maçã","Manga","Abacate","Limão","Pêssego","Caqui"],
+    "🌲 Silvicultura": ["Eucalipto","Pinus","Teca","Paricá","Cedro"],
+}
+
+def get_culturas():
+    """Retorna lista de culturas filtrada pelo segmento ativo."""
+    seg = st.session_state.get("segmento")
+    if seg and seg in CULTURAS_POR_SEGMENTO:
+        return CULTURAS_POR_SEGMENTO[seg]
+    # Sem segmento: retorna todas
+    todas = []
+    seen = set()
+    for culturas in CULTURAS_POR_SEGMENTO.values():
+        for c in culturas:
+            if c not in seen:
+                todas.append(c)
+                seen.add(c)
+    return todas
+
+# ─────────────────────────────────────────────
 # MENU: INÍCIO
 # ─────────────────────────────────────────────
 if menu == "Início":
 
     # ── Segmentos disponíveis ──────────────────────────────────────────
-    SEGMENTOS = {
-        "🌾 Grãos":        {"desc": "Soja, Milho, Trigo e outros cereais",     "cor": "#14532d", "borda": "#22c55e"},
-        "🌿 Horticultura": {"desc": "Hortaliças, verduras e legumes",           "cor": "#14532d", "borda": "#84cc16"},
-        "☕ Café":          {"desc": "Cafeicultura e beneficiamento",            "cor": "#431407", "borda": "#f59e0b"},
-        "🍎 Fruticultura": {"desc": "Frutas tropicais, uva, maçã e outras",    "cor": "#7f1d1d", "borda": "#f87171"},
-        "🌲 Silvicultura": {"desc": "Eucalipto, Pinus e reflorestamento",       "cor": "#1e3a5f", "borda": "#38bdf8"},
-    }
+    SEGMENTOS = SEGMENTOS_INFO
 
     # ── Tela de seleção (só aparece se segmento não foi escolhido ainda) ──
     if not st.session_state.segmento:
@@ -2944,12 +2972,7 @@ elif menu == "Cadastro da Área":
     area      = st.number_input("Área do talhão em hectares", min_value=0.0,
                                 value=float(st.session_state.dados.get("area", 10.0)))
 
-    culturas_disponiveis = [
-        "Soja","Milho","Trigo","Feijão","Canola","Aveia","Cana-de-açúcar",
-        "Arroz","Sorgo","Girassol","Cevada","Pastagem","Algodão","Café",
-        "Tabaco","Mandioca","Batata","Tomate","Cebola","Alho","Uva",
-        "Maçã","Laranja","Banana","Eucalipto","Pinus"
-    ]
+    culturas_disponiveis = get_culturas()
     config_culturas = {
         "Soja":          {"ph_ideal":"5.8 - 6.5","chuva_ideal":"450 - 800 mm","produtividade_media":65,"nutriente_principal":"Potássio"},
         "Milho":         {"ph_ideal":"5.5 - 6.8","chuva_ideal":"500 - 800 mm","produtividade_media":180,"nutriente_principal":"Nitrogênio"},
@@ -4572,7 +4595,7 @@ elif menu == "Estoque de Insumos":
                       "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
                       "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
                      ] else 0)
-            cultura    = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="cultura_estoque")
+            cultura    = st.selectbox("Cultura", get_culturas() + ["Ambos"], key="cultura_estoque")
             litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
             capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
         with col2:
@@ -4809,7 +4832,7 @@ elif menu == "Aplicações":
             st.subheader("🚜 Montagem Automática da Aplicação")
 
             if len(st.session_state.estoque) > 0:
-                cultura_aplicacao = st.selectbox("Cultura da aplicação", ["Soja","Milho"])
+                cultura_aplicacao = st.selectbox("Cultura da aplicação", get_culturas())
                 produtos_filtrados = [
                     item for item in st.session_state.estoque
                     if item["Cultura"] == cultura_aplicacao or item["Cultura"] == "Ambos"
@@ -5526,13 +5549,26 @@ elif menu == "💰 Preços de Mercado":
                         unsafe_allow_html=True)
 
     if atualizar:
-        with st.spinner("🌐 Buscando cotações em tempo real (BrapiDev/Yahoo + AwesomeAPI)..."):
+        with st.spinner("🌐 Buscando cotações em tempo real via CEPEA + AwesomeAPI..."):
             st.session_state.precos_data = buscar_precos_commodities()
         success_box("✅ Preços atualizados!")
 
-    precos = st.session_state.get("precos_data") or buscar_precos_commodities()
+    # Na primeira carga usa fallback offline imediato — SEM chamar API
     if not st.session_state.get("precos_data"):
-        st.session_state.precos_data = precos
+        hoje = datetime.now().strftime("%d/%m/%Y")
+        st.session_state.precos_data = {
+            "soja_sc":    {"preco":115.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+            "milho_sc":   {"preco": 58.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+            "trigo_sc":   {"preco": 69.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+            "cafe_sc":    {"preco":2250.0,"unidade":"R$/sc 60kg","praca":"SP","fonte":f"Referência {hoje}"},
+            "algodao_at": {"preco":120.0, "unidade":"R$/@",      "praca":"MT","fonte":f"Referência {hoje}"},
+            "boi_at":     {"preco":320.0, "unidade":"R$/@",      "praca":"SP","fonte":f"Referência {hoje}"},
+            "arroz_sc":   {"preco": 74.0, "unidade":"R$/sc 50kg","praca":"RS","fonte":f"Referência {hoje}"},
+            "dolar":      {"preco":  5.80,"fonte":"Referência","horario":""},
+            "_atualizado_em": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        }
+
+    precos = st.session_state.precos_data
 
     # Detectar se veio de API real ou fallback
     fonte_soja   = (precos.get("soja_sc") or {}).get("fonte", "")
@@ -5627,10 +5663,14 @@ elif menu == "💰 Preços de Mercado":
         area_sim    = float(d.get("area", 10))
         produt_sim  = float(d.get("produtividade", 60))
 
-        preco_map = {
+        preco_map_completo = {
             "Soja": soja_p, "Milho": milho_p, "Trigo": trigo_p,
             "Arroz": arroz_p, "Café": cafe_p
         }
+        culturas_seg_sim = get_culturas()
+        preco_map = {k:v for k,v in preco_map_completo.items() if k in culturas_seg_sim}
+        if not preco_map:
+            preco_map = preco_map_completo
         preco_sim = preco_map.get(cultura_sim, soja_p)
 
         col_s1, col_s2 = st.columns(2)
@@ -5844,7 +5884,7 @@ elif menu == "⏱️ Prazo de Carência":
     col1, col2, col3 = st.columns(3)
     with col1:
         car_produto    = st.text_input("Nome do produto/defensivo", key="car_produto")
-        car_cultura    = st.selectbox("Cultura", ["Soja","Milho","Trigo","Feijão","Outra"], key="car_cultura")
+        car_cultura    = st.selectbox("Cultura", get_culturas() + ["Outra"], key="car_cultura")
         car_data_aplic = st.date_input("Data da aplicação", key="car_data")
     with col2:
         car_carencia   = st.number_input("Prazo de carência (dias)", min_value=0, value=14, key="car_carencia",
@@ -6393,14 +6433,26 @@ elif menu == "📅 Calendário Agrícola":
 
     with tab_plantio:
         st.subheader("🌱 Cronograma de Plantio por Cultura")
-        cronograma = {
-            "Soja":    {"plantio":["Out","Nov"],"floração":["Dez","Jan"],"colheita":["Mar","Abr"],"ciclo":"120-140 dias"},
-            "Milho":   {"plantio":["Set","Out","Nov"],"floração":["Dez","Jan"],"colheita":["Fev","Mar","Abr"],"ciclo":"120-150 dias"},
-            "Trigo":   {"plantio":["Abr","Mai","Jun"],"floração":["Jul","Ago"],"colheita":["Set","Out"],"ciclo":"100-130 dias"},
-            "Feijão":  {"plantio":["Jan","Jul","Out"],"floração":["Fev","Ago","Nov"],"colheita":["Mar","Set","Dez"],"ciclo":"70-90 dias"},
-            "Canola":  {"plantio":["Abr","Mai"],"floração":["Jun","Jul"],"colheita":["Set","Out"],"ciclo":"120-150 dias"},
-            "Aveia":   {"plantio":["Abr","Mai","Jun"],"floração":["Jul","Ago"],"colheita":["Set","Out"],"ciclo":"100-120 dias"},
+        cronograma_completo = {
+            "Soja":      {"plantio":["Out","Nov"],"floração":["Dez","Jan"],"colheita":["Mar","Abr"],"ciclo":"120-140 dias"},
+            "Milho":     {"plantio":["Set","Out","Nov"],"floração":["Dez","Jan"],"colheita":["Fev","Mar","Abr"],"ciclo":"120-150 dias"},
+            "Trigo":     {"plantio":["Abr","Mai","Jun"],"floração":["Jul","Ago"],"colheita":["Set","Out"],"ciclo":"100-130 dias"},
+            "Feijão":    {"plantio":["Jan","Jul","Out"],"floração":["Fev","Ago","Nov"],"colheita":["Mar","Set","Dez"],"ciclo":"70-90 dias"},
+            "Canola":    {"plantio":["Abr","Mai"],"floração":["Jun","Jul"],"colheita":["Set","Out"],"ciclo":"120-150 dias"},
+            "Aveia":     {"plantio":["Abr","Mai","Jun"],"floração":["Jul","Ago"],"colheita":["Set","Out"],"ciclo":"100-120 dias"},
+            "Café":      {"plantio":["Out","Nov"],"floração":["Jul","Ago"],"colheita":["Mai","Jun","Jul"],"ciclo":"3-4 anos"},
+            "Tomate":    {"plantio":["Ago","Set","Jan"],"floração":["Out","Fev"],"colheita":["Dez","Abr"],"ciclo":"90-120 dias"},
+            "Batata":    {"plantio":["Jul","Ago","Jan"],"floração":["Set","Mar"],"colheita":["Nov","Mai"],"ciclo":"90-120 dias"},
+            "Eucalipto": {"plantio":["Out","Nov"],"floração":["N/A"],"colheita":["6-7 anos"],"ciclo":"6-7 anos"},
+            "Pinus":     {"plantio":["Set","Out"],"floração":["N/A"],"colheita":["15-20 anos"],"ciclo":"15-20 anos"},
+            "Uva":       {"plantio":["Jun","Jul"],"floração":["Set","Out"],"colheita":["Jan","Fev"],"ciclo":"2-3 anos"},
+            "Laranja":   {"plantio":["Set","Out"],"floração":["Ago","Set"],"colheita":["Jun","Jul","Ago"],"ciclo":"3-4 anos"},
+            "Banana":    {"plantio":["Set","Out"],"floração":["Jan","Fev"],"colheita":["Mar","Abr","Mai"],"ciclo":"12-18 meses"},
         }
+        culturas_seg = get_culturas()
+        cronograma = {k:v for k,v in cronograma_completo.items() if k in culturas_seg}
+        if not cronograma:
+            cronograma = cronograma_completo
         cultura_cron = st.selectbox("Selecione a cultura", list(cronograma.keys()), key="cron_cultura")
         cron = cronograma[cultura_cron]
         col1,col2,col3,col4 = st.columns(4)
@@ -6454,7 +6506,7 @@ elif menu == "📜 Receituário Agronômico":
             rec_municipio     = st.text_input("Município / UF", key="rec_mun")
             rec_area_ha       = st.number_input("Área a tratar (ha)", min_value=0.1,
                                                 value=float(st.session_state.dados.get("area", 1.0)), key="rec_area")
-            rec_cultura       = st.selectbox("Cultura", ["Soja","Milho","Trigo","Feijão","Algodão",
+            rec_cultura       = st.selectbox("Cultura", get_culturas() + [
                                              "Arroz","Cana-de-Açúcar","Café","Pastagem","Outro"], key="rec_cult")
             rec_alvo          = st.text_input("Alvo / Problema a combater",
                                               placeholder="Ex: Ferrugem asiática, Lagarta-do-cartucho", key="rec_alvo")
@@ -7423,7 +7475,7 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
             help="CSV/Excel: John Deere Ops Center, Climate, AFS Connect | GeoJSON/Shapefile ZIP"
         )
     with col_up2:
-        cultura_mapa = st.selectbox("Cultura", ["Soja","Milho","Trigo","Feijão","Algodão","Arroz","Canola","Café","Outro"], key="cultura_mapa_sel")
+        cultura_mapa = st.selectbox("Cultura", get_culturas() + ["Outro"], key="cultura_mapa_sel")
         area_mapa    = st.number_input("Área (ha)", min_value=0.1, value=float(st.session_state.dados.get("area",50.0)), key="area_mapa_num")
 
     if arquivo is not None and arquivo.name != st.session_state.harvest_arquivo:
@@ -7898,7 +7950,7 @@ elif menu == "🧾 Imposto de Renda Rural":
         st.divider()
         st.subheader("🌾 Produção por Cultura (opcional)")
         st.caption("Para o memorial descritivo do relatório")
-        culturas_ir = ["Soja", "Milho", "Trigo", "Arroz", "Feijão", "Café", "Algodão", "Outro"]
+        culturas_ir = get_culturas() + (["Outro"] if "Outro" not in get_culturas() else [])
         col_p1, col_p2 = st.columns(2)
         for i, cult in enumerate(culturas_ir):
             with (col_p1 if i % 2 == 0 else col_p2):
