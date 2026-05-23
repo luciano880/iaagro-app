@@ -3918,152 +3918,48 @@ if menu == "📦 Operacional":
     # ════════════════════════════════════════════════════════════════════
     with tab_barcode:
         st.subheader("📷 Leitura de Código de Barras")
-        if not PYZBAR_OK:
-            st.error("❌ Biblioteca pyzbar não disponível. Verifique o requirements.txt e o redeploy.")
-        else:
-            st.info("📸 Envie a foto do código de barras — o produto entra no estoque automaticamente, sem digitar nada.")
-            img_barcode = st.file_uploader(
-                "📸 Foto do código de barras",
-                type=["jpg","jpeg","png","bmp","webp"],
-                key="uploader_barcode"
+
+        # ── Modo de leitura ──────────────────────────────────────
+        modo_bc = st.radio(
+            "Modo de leitura",
+            ["⌨️ Leitor USB / Teclado", "📷 Câmera / Foto"],
+            horizontal=True,
+            key="modo_barcode"
+        )
+
+        # ════════════════════════════════════════════
+        # MODO 1 — LEITOR USB (digita o código direto)
+        # ════════════════════════════════════════════
+        if modo_bc == "⌨️ Leitor USB / Teclado":
+            st.info("🔌 Clique no campo abaixo e passe o leitor USB no código de barras. O produto será adicionado automaticamente.")
+
+            codigo_usb = st.text_input(
+                "📦 Código de barras (leitor USB)",
+                placeholder="Aponte o leitor aqui...",
+                key="barcode_usb_input",
+                label_visibility="collapsed"
             )
-            if img_barcode:
-                img_pil = PILImage.open(img_barcode).convert("RGB")
-                st.image(img_pil, caption="Imagem enviada", use_container_width=True)
 
-                with st.spinner("🔍 Lendo código de barras..."):
-                    codigos = pyzbar_decode(img_pil)
-                    if not codigos:
-                        w, h = img_pil.size
-                        img_grande = img_pil.resize((w * 2, h * 2), PILImage.LANCZOS)
-                        codigos = pyzbar_decode(img_grande)
+            if codigo_usb and codigo_usb.strip():
+                valor_cod = codigo_usb.strip()
 
-                if not codigos:
-                    st.warning("⚠️ Código não detectado. Tente com mais luz e o código bem centralizado na foto.")
+                # Evita duplicar
+                ja_adicionado = any(
+                    str(valor_cod) in str(i.get("Observação",""))
+                    for i in st.session_state.estoque
+                )
+                if ja_adicionado:
+                    st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
                 else:
-                    for cod in codigos:
-                        valor_cod = cod.data.decode("utf-8").strip()
-                        tipo_cod  = str(cod.type)
-
-                        # Detecta chave de acesso NF-e (44 dígitos numéricos)
-                        if valor_cod.isdigit() and len(valor_cod) == 44:
-                            st.info(f"📋 Chave NF-e detectada: `{valor_cod[:10]}...` — buscando produtos automaticamente...")
-
-                            itens_nfe = []
-                            emit_nome = ""
-                            n_nf      = valor_cod[25:34]  # nNF dentro da chave
-                            erro_api  = ""
-
-                            # ── Tenta buscar XML via API pública da SEFAZ (nfe.fazenda.gov.br) ──
-                            with st.spinner("🌐 Consultando SEFAZ para obter os produtos da nota..."):
-                                try:
-                                    api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-                                    if api_key:
-                                        prompt = (
-                                            f"Consulte a API pública da NF-e brasileira (nfe.fazenda.gov.br) "
-                                            f"para a chave de acesso {valor_cod}. "
-                                            f"Extraia os produtos/itens da nota fiscal. "
-                                            f"Responda APENAS com JSON válido sem markdown:\n"
-                                            f'{{"emitente":"nome","numero":"nNF","itens":['
-                                            f'{{"nome":"xProd","quantidade":0.0,"unidade":"uCom","valor_unitario":0.0}}]}}'
-                                            f"\nSe não conseguir acessar, retorne itens vazio."
-                                        )
-                                        resp_ai = requests.post(
-                                            "https://api.anthropic.com/v1/messages",
-                                            headers={
-                                                "Content-Type":      "application/json",
-                                                "x-api-key":         api_key,
-                                                "anthropic-version": "2023-06-01",
-                                            },
-                                            json={
-                                                "model":    "claude-sonnet-4-20250514",
-                                                "max_tokens": 1000,
-                                                "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
-                                                "messages": [{"role": "user", "content": prompt}]
-                                            },
-                                            timeout=45
-                                        )
-                                        if resp_ai.status_code == 200:
-                                            blocos = resp_ai.json().get("content", [])
-                                            texto  = "".join(b.get("text","") for b in blocos if b.get("type")=="text")
-                                            texto  = texto.replace("```json","").replace("```","").strip()
-                                            idx_s  = texto.find("{")
-                                            idx_e  = texto.rfind("}") + 1
-                                            if idx_s >= 0 and idx_e > idx_s:
-                                                dados_ai = json.loads(texto[idx_s:idx_e])
-                                                emit_nome = dados_ai.get("emitente", "")
-                                                n_nf      = dados_ai.get("numero", n_nf)
-                                                itens_nfe = dados_ai.get("itens", [])
-                                except Exception as ex:
-                                    erro_api = str(ex)
-
-                            uni_map = {
-                                "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
-                                "L":"litros","LT":"litros","LTS":"litros",
-                                "SC":"sacos","SAC":"sacos","UN":"unidades",
-                                "UNI":"unidades","UND":"unidades","GAL":"galões",
-                                "BL":"unidades","PT":"unidades","CX":"unidades",
-                            }
-
-                            if itens_nfe:
-                                adicionados = 0
-                                for item in itens_nfe:
-                                    uni_raw  = str(item.get("unidade","UN")).upper()
-                                    uni_norm = uni_map.get(uni_raw, "unidades")
-                                    qtd      = float(item.get("quantidade", 1))
-                                    vul      = float(item.get("valor_unitario", 0))
-                                    nome_i   = str(item.get("nome","Produto"))
-                                    novo = {
-                                        "Insumo":            nome_i,
-                                        "Categoria":         "Outro",
-                                        "Quantidade":        qtd,
-                                        "Unidade":           uni_norm,
-                                        "Valor Unitário R$": vul,
-                                        "Valor Total R$":    round(qtd * vul, 2),
-                                        "Estoque Mínimo":    0.0,
-                                        "Observação":        f"NF-e {n_nf} — chave: {valor_cod[:20]}...",
-                                        "Cultura":           "Ambos",
-                                        "Dose ha":           0.0,
-                                        "Litros ha":         75.0,
-                                        "Tanque litros":     2000,
-                                        "Fabricante":        emit_nome,
-                                        "Ingrediente Ativo": "",
-                                    }
-                                    st.session_state.estoque.append(novo)
-                                    adicionados += 1
-                                salvar_dados_iaagro()
-                                st.success(f"✅ {adicionados} produto(s) importado(s) automaticamente da NF-e {n_nf}!")
-                                st.balloons()
-                                st.rerun()
-                            else:
-                                # Fallback: orienta baixar XML manualmente
-                                st.warning("⚠️ Não foi possível buscar os produtos automaticamente via SEFAZ.")
-                                st.markdown(f"""
-                                <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #f59e0b;margin-top:8px;'>
-                                <b style='color:#f59e0b'>📥 Importe o XML manualmente:</b><br>
-                                <span style='color:#f1f5f9;font-size:13px;'>
-                                1. Acesse <b>nfe.fazenda.gov.br/portal</b><br>
-                                2. Cole a chave abaixo e baixe o XML<br>
-                                3. Use a aba <b>📄 Importar Nota Fiscal (XML)</b>
-                                </span><br><br>
-                                <span style='color:#94a3b8;font-size:11px;word-break:break-all;'>{valor_cod}</span>
-                                </div>
-                                """, unsafe_allow_html=True)
-                            continue
-
-                        # Evita duplicar
-                        ja_adicionado = any(
-                            str(valor_cod) in str(i.get("Observação",""))
-                            for i in st.session_state.estoque
-                        )
-                        if ja_adicionado:
-                            st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
-                            continue
-
+                    # Detecta chave NF-e (44 dígitos)
+                    if valor_cod.isdigit() and len(valor_cod) == 44:
+                        st.error("⚠️ Este é o código da DANFE (NF-e). Use a aba **📄 Importar Nota Fiscal (XML)**.")
+                        st.info(f"Chave: `{valor_cod}`")
+                    else:
                         # Busca nome na Open Food Facts
-                        nome_produto  = f"Produto {valor_cod}"
-                        fabricante    = ""
-                        with st.spinner(f"🌐 Buscando informações do produto {valor_cod}..."):
+                        nome_produto = f"Produto {valor_cod}"
+                        fabricante   = ""
+                        with st.spinner(f"🌐 Buscando produto {valor_cod}..."):
                             try:
                                 resp = requests.get(
                                     f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
@@ -4080,9 +3976,8 @@ if menu == "📦 Operacional":
                                         )
                                         fabricante = p.get("brands", "")
                             except Exception:
-                                pass  # erro silenciado intencionalmente
+                                pass
 
-                        # Adiciona no estoque
                         novo = {
                             "Insumo":            nome_produto,
                             "Categoria":         "Outro",
@@ -4091,7 +3986,7 @@ if menu == "📦 Operacional":
                             "Valor Unitário R$": 0.0,
                             "Valor Total R$":    0.0,
                             "Estoque Mínimo":    0.0,
-                            "Observação":        f"Código: {valor_cod} ({tipo_cod})",
+                            "Observação":        f"Código: {valor_cod} (USB)",
                             "Cultura":           "Ambos",
                             "Dose ha":           0.0,
                             "Litros ha":         75.0,
@@ -4101,10 +3996,201 @@ if menu == "📦 Operacional":
                         }
                         st.session_state.estoque.append(novo)
                         salvar_dados_iaagro()
-                        st.success(f"✅ **{nome_produto}** adicionado ao estoque!")
+                        st.success(f"✅ **{nome_produto}** adicionado ao estoque! (Código: {valor_cod})")
                         st.balloons()
                         st.rerun()
 
+        # ════════════════════════════════════════════
+        # MODO 2 — CÂMERA / FOTO
+        # ════════════════════════════════════════════
+        else:
+            if not PYZBAR_OK:
+                st.error("❌ Biblioteca pyzbar não disponível.")
+            else:
+                st.info("📸 Envie a foto do código de barras — o produto entra no estoque automaticamente.")
+                img_barcode = st.file_uploader(
+                    "📸 Foto do código de barras",
+                    type=["jpg","jpeg","png","bmp","webp"],
+                    key="uploader_barcode"
+                )
+                if img_barcode:
+                    img_pil = PILImage.open(img_barcode).convert("RGB")
+                    st.image(img_pil, caption="Imagem enviada", use_container_width=True)
+    
+                    with st.spinner("🔍 Lendo código de barras..."):
+                        codigos = pyzbar_decode(img_pil)
+                        if not codigos:
+                            w, h = img_pil.size
+                            img_grande = img_pil.resize((w * 2, h * 2), PILImage.LANCZOS)
+                            codigos = pyzbar_decode(img_grande)
+    
+                    if not codigos:
+                        st.warning("⚠️ Código não detectado. Tente com mais luz e o código bem centralizado na foto.")
+                    else:
+                        for cod in codigos:
+                            valor_cod = cod.data.decode("utf-8").strip()
+                            tipo_cod  = str(cod.type)
+    
+                            # Detecta chave de acesso NF-e (44 dígitos numéricos)
+                            if valor_cod.isdigit() and len(valor_cod) == 44:
+                                st.info(f"📋 Chave NF-e detectada: `{valor_cod[:10]}...` — buscando produtos automaticamente...")
+    
+                                itens_nfe = []
+                                emit_nome = ""
+                                n_nf      = valor_cod[25:34]  # nNF dentro da chave
+                                erro_api  = ""
+    
+                                # ── Tenta buscar XML via API pública da SEFAZ (nfe.fazenda.gov.br) ──
+                                with st.spinner("🌐 Consultando SEFAZ para obter os produtos da nota..."):
+                                    try:
+                                        api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+                                        if api_key:
+                                            prompt = (
+                                                f"Consulte a API pública da NF-e brasileira (nfe.fazenda.gov.br) "
+                                                f"para a chave de acesso {valor_cod}. "
+                                                f"Extraia os produtos/itens da nota fiscal. "
+                                                f"Responda APENAS com JSON válido sem markdown:\n"
+                                                f'{{"emitente":"nome","numero":"nNF","itens":['
+                                                f'{{"nome":"xProd","quantidade":0.0,"unidade":"uCom","valor_unitario":0.0}}]}}'
+                                                f"\nSe não conseguir acessar, retorne itens vazio."
+                                            )
+                                            resp_ai = requests.post(
+                                                "https://api.anthropic.com/v1/messages",
+                                                headers={
+                                                    "Content-Type":      "application/json",
+                                                    "x-api-key":         api_key,
+                                                    "anthropic-version": "2023-06-01",
+                                                },
+                                                json={
+                                                    "model":    "claude-sonnet-4-20250514",
+                                                    "max_tokens": 1000,
+                                                    "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
+                                                    "messages": [{"role": "user", "content": prompt}]
+                                                },
+                                                timeout=45
+                                            )
+                                            if resp_ai.status_code == 200:
+                                                blocos = resp_ai.json().get("content", [])
+                                                texto  = "".join(b.get("text","") for b in blocos if b.get("type")=="text")
+                                                texto  = texto.replace("```json","").replace("```","").strip()
+                                                idx_s  = texto.find("{")
+                                                idx_e  = texto.rfind("}") + 1
+                                                if idx_s >= 0 and idx_e > idx_s:
+                                                    dados_ai = json.loads(texto[idx_s:idx_e])
+                                                    emit_nome = dados_ai.get("emitente", "")
+                                                    n_nf      = dados_ai.get("numero", n_nf)
+                                                    itens_nfe = dados_ai.get("itens", [])
+                                    except Exception as ex:
+                                        erro_api = str(ex)
+    
+                                uni_map = {
+                                    "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
+                                    "L":"litros","LT":"litros","LTS":"litros",
+                                    "SC":"sacos","SAC":"sacos","UN":"unidades",
+                                    "UNI":"unidades","UND":"unidades","GAL":"galões",
+                                    "BL":"unidades","PT":"unidades","CX":"unidades",
+                                }
+    
+                                if itens_nfe:
+                                    adicionados = 0
+                                    for item in itens_nfe:
+                                        uni_raw  = str(item.get("unidade","UN")).upper()
+                                        uni_norm = uni_map.get(uni_raw, "unidades")
+                                        qtd      = float(item.get("quantidade", 1))
+                                        vul      = float(item.get("valor_unitario", 0))
+                                        nome_i   = str(item.get("nome","Produto"))
+                                        novo = {
+                                            "Insumo":            nome_i,
+                                            "Categoria":         "Outro",
+                                            "Quantidade":        qtd,
+                                            "Unidade":           uni_norm,
+                                            "Valor Unitário R$": vul,
+                                            "Valor Total R$":    round(qtd * vul, 2),
+                                            "Estoque Mínimo":    0.0,
+                                            "Observação":        f"NF-e {n_nf} — chave: {valor_cod[:20]}...",
+                                            "Cultura":           "Ambos",
+                                            "Dose ha":           0.0,
+                                            "Litros ha":         75.0,
+                                            "Tanque litros":     2000,
+                                            "Fabricante":        emit_nome,
+                                            "Ingrediente Ativo": "",
+                                        }
+                                        st.session_state.estoque.append(novo)
+                                        adicionados += 1
+                                    salvar_dados_iaagro()
+                                    st.success(f"✅ {adicionados} produto(s) importado(s) automaticamente da NF-e {n_nf}!")
+                                    st.balloons()
+                                    st.rerun()
+                                else:
+                                    # Fallback: orienta baixar XML manualmente
+                                    st.warning("⚠️ Não foi possível buscar os produtos automaticamente via SEFAZ.")
+                                    st.markdown(f"""
+                                    <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #f59e0b;margin-top:8px;'>
+                                    <b style='color:#f59e0b'>📥 Importe o XML manualmente:</b><br>
+                                    <span style='color:#f1f5f9;font-size:13px;'>
+                                    1. Acesse <b>nfe.fazenda.gov.br/portal</b><br>
+                                    2. Cole a chave abaixo e baixe o XML<br>
+                                    3. Use a aba <b>📄 Importar Nota Fiscal (XML)</b>
+                                    </span><br><br>
+                                    <span style='color:#94a3b8;font-size:11px;word-break:break-all;'>{valor_cod}</span>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                continue
+    
+                            # Evita duplicar
+                            ja_adicionado = any(
+                                str(valor_cod) in str(i.get("Observação",""))
+                                for i in st.session_state.estoque
+                            )
+                            if ja_adicionado:
+                                st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
+                                continue
+    
+                            # Busca nome na Open Food Facts
+                            nome_produto  = f"Produto {valor_cod}"
+                            fabricante    = ""
+                            with st.spinner(f"🌐 Buscando informações do produto {valor_cod}..."):
+                                try:
+                                    resp = requests.get(
+                                        f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
+                                        timeout=5
+                                    )
+                                    if resp.status_code == 200:
+                                        data = resp.json()
+                                        if data.get("status") == 1:
+                                            p = data.get("product", {})
+                                            nome_produto = (
+                                                p.get("product_name_pt")
+                                                or p.get("product_name")
+                                                or nome_produto
+                                            )
+                                            fabricante = p.get("brands", "")
+                                except Exception:
+                                    pass  # erro silenciado intencionalmente
+    
+                            # Adiciona no estoque
+                            novo = {
+                                "Insumo":            nome_produto,
+                                "Categoria":         "Outro",
+                                "Quantidade":        1.0,
+                                "Unidade":           "unidades",
+                                "Valor Unitário R$": 0.0,
+                                "Valor Total R$":    0.0,
+                                "Estoque Mínimo":    0.0,
+                                "Observação":        f"Código: {valor_cod} ({tipo_cod})",
+                                "Cultura":           "Ambos",
+                                "Dose ha":           0.0,
+                                "Litros ha":         75.0,
+                                "Tanque litros":     2000,
+                                "Fabricante":        fabricante,
+                                "Ingrediente Ativo": "",
+                            }
+                            st.session_state.estoque.append(novo)
+                            salvar_dados_iaagro()
+                            st.success(f"✅ **{nome_produto}** adicionado ao estoque!")
+                            st.balloons()
+                            st.rerun()
+    
     # ════════════════════════════════════════════════════════════════════
     # TAB 3 — IMPORTAR NOTA FISCAL XML (NF-e)
     # ════════════════════════════════════════════════════════════════════
