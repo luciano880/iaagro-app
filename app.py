@@ -3316,26 +3316,66 @@ elif menu == "Mapa de Fertilidade":
         ).add_to(mapa_folium)
         folium.LayerControl(position="topright", collapsed=False).add_to(mapa_folium)
         Draw(
-            draw_options={"polyline":False,"rectangle":True,"circle":False,"marker":False,"circlemarker":False,"polygon":True},
-            edit_options={"edit":True,"remove":True}
+            draw_options={
+                "polyline":     False,
+                "rectangle":    True,
+                "circle":       False,
+                "marker":       False,
+                "circlemarker": False,
+                "polygon": {
+                    "allowIntersection": True,
+                    "showArea": True,
+                    "metric": True,
+                }
+            },
+            edit_options={"edit": True, "remove": True}
         ).add_to(mapa_folium)
         folium.Marker(location=[latitude, longitude], popup="Minha localização",
                       tooltip="Local atual", icon=folium.Icon(color="darkgreen", icon="leaf")
         ).add_to(mapa_folium)
         dados_mapa_folium = st_folium(mapa_folium, width=900, height=500)
         st.subheader("💾 Salvar Desenho do Talhão")
+
+        st.info("💡 **Dica no celular:** Marque os pontos no sentido horário ao redor do talhão, sem cruzar as linhas. Use o botão **Delete last point** para desfazer o último ponto.")
+
         if dados_mapa_folium and dados_mapa_folium.get("last_active_drawing"):
             desenho = dados_mapa_folium["last_active_drawing"]
             coords  = desenho["geometry"]["coordinates"][0]
+
+            # Corrige automaticamente polígonos com bordas cruzadas usando convex hull
+            def convex_hull(points):
+                pts = sorted(set(map(tuple, points)))
+                if len(pts) <= 1: return pts
+                def cross(O, A, B):
+                    return (A[0]-O[0])*(B[1]-O[1]) - (A[1]-O[1])*(B[0]-O[0])
+                lower = []
+                for p in pts:
+                    while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+                        lower.pop()
+                    lower.append(p)
+                upper = []
+                for p in reversed(pts):
+                    while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+                        upper.pop()
+                    upper.append(p)
+                return lower[:-1] + upper[:-1]
+
             def calcular_area_ha(coords):
                 area_val = 0
                 for i in range(len(coords) - 1):
-                    x1, y1 = coords[i]; x2, y2 = coords[i + 1]
+                    x1, y1 = coords[i][0], coords[i][1]
+                    x2, y2 = coords[i+1][0], coords[i+1][1]
                     area_val += (x1 * y2) - (x2 * y1)
                 return abs(area_val) / 2 * 111139 * 111139 / 10000
+
             area_calculada = calcular_area_ha(coords)
             success_box(f"Área calculada automaticamente: {area_calculada:.2f} ha")
             if st.button("Salvar desenho no talhão", key="salvar_desenho_talhao"):
+                # Garante que o polígono salvo é válido (sem bordas cruzadas)
+                pts_hull = convex_hull([[c[0], c[1]] for c in coords])
+                if len(pts_hull) >= 3:
+                    pts_hull.append(pts_hull[0])  # fecha o polígono
+                    desenho["geometry"]["coordinates"][0] = [[p[0], p[1]] for p in pts_hull]
                 st.session_state.dados["desenho_talhao"] = desenho
                 salvar_dados_iaagro()
                 success_box("Desenho do talhão salvo com sucesso!")
