@@ -2623,60 +2623,231 @@ def estimar_producao(meta, nota):
 
 
 def recomendacao_npk(cultura, produtividade, fosforo, potassio, materia_organica, argila=50, ph=5.5):
+    """
+    Recomendação NPK baseada em:
+    - EMBRAPA Soja (Circular Técnica 98/2023)
+    - EMBRAPA Milho e Sorgo (Circular Técnica 100/2023)
+    - Manual de Adubação e Calagem RS/SC (SBCS/CQFS 2016)
+    - IAC/MAPA para culturas complementares
+    Unidades: kg/ha de N, P2O5, K2O
+    """
     n = p2o5 = k2o = 0
+
     if cultura == "Soja":
+        # EMBRAPA: soja fixa N biologicamente — N = 0 se boa nodulação
         n = 0
-        if   fosforo < 10:  p2o5 = 120
-        elif fosforo < 20:  p2o5 = 90
-        elif fosforo < 35:  p2o5 = 60
+        # P2O5 — baseado em P (Mehlich-1), solo argiloso 40-60%
+        if   fosforo < 6:   p2o5 = 130
+        elif fosforo < 12:  p2o5 = 100
+        elif fosforo < 18:  p2o5 = 80
+        elif fosforo < 30:  p2o5 = 60
         else:               p2o5 = 30
-        if   potassio < 80:  k2o = 140
-        elif potassio < 150: k2o = 100
-        elif potassio < 250: k2o = 70
-        else:                k2o = 40
-        if produtividade > 70: p2o5 += 20; k2o += 20
+        # K2O — baseado em K (cmolc/dm³ ou mg/dm³)
+        if   potassio < 60:  k2o = 120
+        elif potassio < 100: k2o = 90
+        elif potassio < 150: k2o = 70
+        elif potassio < 250: k2o = 50
+        else:                k2o = 30
+        # Ajuste produtividade alta (>60 sc/ha)
+        if produtividade > 60: p2o5 += 15; k2o += 20
+        if produtividade > 80: p2o5 += 10; k2o += 10
+
     elif cultura == "Milho":
-        n = produtividade * 2.2
-        if   fosforo < 10:  p2o5 = 140
-        elif fosforo < 20:  p2o5 = 100
-        elif fosforo < 35:  p2o5 = 70
-        else:               p2o5 = 40
-        k2o = produtividade * 1.8
-        if potassio < 120:  k2o += 50
-    elif cultura == "Trigo":
-        n = produtividade * 1.8
-        if   fosforo < 10:  p2o5 = 100
+        # EMBRAPA: N = 25-30 kg plantio + cobertura
+        n_base = min(produtividade * 1.5, 30)  # plantio
+        n_cob  = min(produtividade * 1.2, 120) # cobertura
+        n = round(n_base + n_cob, 1)
+        # P2O5
+        if   fosforo < 6:   p2o5 = 120
+        elif fosforo < 12:  p2o5 = 90
         elif fosforo < 20:  p2o5 = 70
+        elif fosforo < 35:  p2o5 = 50
+        else:               p2o5 = 30
+        # K2O
+        if   potassio < 60:  k2o = 120
+        elif potassio < 100: k2o = 90
+        elif potassio < 150: k2o = 70
+        elif potassio < 250: k2o = 50
+        else:                k2o = 30
+        if produtividade > 120: p2o5 += 20; k2o += 25; n += 20
+
+    elif cultura == "Trigo":
+        # CQFS RS/SC 2016
+        n = 15 + produtividade * 0.8  # base + produtividade
+        n = min(n, 90)
+        if   fosforo < 6:   p2o5 = 100
+        elif fosforo < 12:  p2o5 = 75
+        elif fosforo < 20:  p2o5 = 55
+        else:               p2o5 = 30
+        if   potassio < 60:  k2o = 80
+        elif potassio < 100: k2o = 60
+        elif potassio < 150: k2o = 45
+        else:                k2o = 25
+
+    elif cultura == "Feijão":
+        # IAC/EMBRAPA: feijão tem fixação parcial
+        n = 20  # starter
+        if   fosforo < 10:  p2o5 = 90
+        elif fosforo < 20:  p2o5 = 70
+        elif fosforo < 35:  p2o5 = 50
+        else:               p2o5 = 25
+        if   potassio < 60:  k2o = 80
+        elif potassio < 100: k2o = 60
+        elif potassio < 150: k2o = 40
+        else:                k2o = 20
+
+    elif cultura == "Arroz":
+        # EMBRAPA Arroz e Feijão
+        n = 20 + produtividade * 1.8
+        n = min(n, 120)
+        if   fosforo < 10:  p2o5 = 80
+        elif fosforo < 20:  p2o5 = 60
         else:               p2o5 = 40
-        k2o = produtividade * 1.4
-    # Ajustes solo
-    if argila < 25:        k2o += 20
-    elif argila > 60:      k2o -= 10
-    if materia_organica >= 4: n *= 0.85
-    if ph < 5.2:           p2o5 += 15
+        if   potassio < 80:  k2o = 80
+        elif potassio < 150: k2o = 60
+        else:                k2o = 40
+
+    elif cultura == "Canola":
+        # MAPA/EMBRAPA Trigo (adaptado canola)
+        n = 20 + produtividade * 1.5
+        n = min(n, 100)
+        if   fosforo < 10:  p2o5 = 80
+        elif fosforo < 20:  p2o5 = 60
+        else:               p2o5 = 40
+        if   potassio < 80:  k2o = 70
+        elif potassio < 150: k2o = 50
+        else:                k2o = 30
+
+    elif cultura in ["Aveia","Cevada","Sorgo"]:
+        n = 15 + produtividade * 1.2
+        n = min(n, 80)
+        if   fosforo < 10:  p2o5 = 70
+        elif fosforo < 20:  p2o5 = 50
+        else:               p2o5 = 30
+        if   potassio < 80:  k2o = 60
+        elif potassio < 150: k2o = 45
+        else:                k2o = 25
+
+    elif cultura in ["Café"]:
+        # EMBRAPA Café (produção por ha)
+        n  = 80 + produtividade * 1.2
+        p2o5 = 40 + (20 if fosforo < 15 else 0)
+        k2o  = 100 + (30 if potassio < 120 else 0)
+
+    elif cultura in ["Tomate","Batata"]:
+        n  = 120 + produtividade * 0.5
+        p2o5 = 80 if fosforo < 20 else 50
+        k2o  = 150 if potassio < 150 else 100
+
+    elif cultura in ["Eucalipto","Pinus"]:
+        # Silvicultura — EMBRAPA Florestas
+        n  = 30; p2o5 = 80; k2o = 40
+
+    else:
+        # Genérico
+        n = 40; p2o5 = 60; k2o = 60
+
+    # ── Ajustes gerais de solo ──────────────────────────────
+    # Textura: solos arenosos precisam mais K
+    if argila < 20:     k2o += 30
+    elif argila < 35:   k2o += 15
+    elif argila > 70:   k2o -= 10
+
+    # MO alta reduz necessidade de N
+    if materia_organica >= 5.0: n  = round(n * 0.75, 1)
+    elif materia_organica >= 3.5: n = round(n * 0.85, 1)
+
+    # pH muito baixo dificulta absorção de P
+    if ph < 5.0: p2o5 = round(p2o5 * 1.25, 1)
+    elif ph < 5.5: p2o5 = round(p2o5 * 1.10, 1)
+
     return round(n, 1), round(p2o5, 1), round(k2o, 1)
 
 
-def score_solo(d):
+def score_solo(d, cultura="Soja"):
+    """
+    Score de qualidade do solo baseado nos parâmetros EMBRAPA/CQFS RS-SC 2016
+    Considera limites ideais por cultura
+    """
     score   = 100
     alertas = []
-    ph              = d.get("ph", 0)
-    fosforo         = d.get("fosforo", 0)
-    potassio        = d.get("potassio", 0)
-    calcio          = d.get("calcio", 0)
-    magnesio        = d.get("magnesio", 0)
-    aluminio        = d.get("aluminio", 0)
+    ph               = d.get("ph", 0)
+    fosforo          = d.get("fosforo", 0)
+    potassio         = d.get("potassio", 0)
+    calcio           = d.get("calcio", 0)
+    magnesio         = d.get("magnesio", 0)
+    aluminio         = d.get("aluminio", 0)
     materia_organica = d.get("materia_organica", 0)
-    if ph < 5.0:    score -= 20; alertas.append("pH baixo")
-    elif ph < 5.5:  score -= 10; alertas.append("pH abaixo do ideal")
-    if fosforo < 10: score -= 20; alertas.append("Fósforo muito baixo")
-    elif fosforo < 20: score -= 10; alertas.append("Fósforo baixo")
-    if potassio < 80:  score -= 15; alertas.append("Potássio baixo")
-    elif potassio < 120: score -= 8; alertas.append("Potássio médio/baixo")
-    if calcio < 3:   score -= 15; alertas.append("Cálcio baixo")
-    if magnesio < 1: score -= 10; alertas.append("Magnésio baixo")
-    if aluminio > 0.5: score -= 20; alertas.append("Alumínio elevado")
-    if materia_organica < 2.5: score -= 10; alertas.append("Matéria orgânica baixa")
+    enxofre          = d.get("enxofre", 0)
+    zinco            = d.get("zinco", 0)
+    boro             = d.get("boro", 0)
+
+    # pH ideal por cultura (EMBRAPA/CQFS)
+    ph_ideais = {
+        "Soja": (5.8, 6.5), "Milho": (5.8, 6.5), "Trigo": (5.8, 6.5),
+        "Feijão": (6.0, 6.5), "Arroz": (5.5, 6.0), "Canola": (6.0, 6.5),
+        "Café": (5.5, 6.5), "Tomate": (6.0, 6.8), "Batata": (5.5, 6.0),
+        "Eucalipto": (5.0, 6.0), "Pinus": (4.5, 5.5),
+    }
+    ph_min, ph_max = ph_ideais.get(cultura, (5.8, 6.5))
+
+    # pH
+    if ph > 0:
+        if ph < ph_min - 0.5:
+            score -= 20; alertas.append(f"pH muito baixo para {cultura} (ideal {ph_min}-{ph_max})")
+        elif ph < ph_min:
+            score -= 10; alertas.append(f"pH abaixo do ideal para {cultura}")
+        elif ph > ph_max + 0.5:
+            score -= 10; alertas.append(f"pH elevado — risco de deficiência de micronutrientes")
+
+    # Fósforo (mg/dm³ — Mehlich-1)
+    if fosforo > 0:
+        if   fosforo < 6:   score -= 20; alertas.append("Fósforo muito baixo (<6 mg/dm³)")
+        elif fosforo < 12:  score -= 12; alertas.append("Fósforo baixo (6-12 mg/dm³)")
+        elif fosforo < 18:  score -= 6;  alertas.append("Fósforo médio — atenção")
+
+    # Potássio (mg/dm³)
+    if potassio > 0:
+        if   potassio < 60:  score -= 20; alertas.append("Potássio muito baixo (<60 mg/dm³)")
+        elif potassio < 100: score -= 12; alertas.append("Potássio baixo (60-100 mg/dm³)")
+        elif potassio < 150: score -= 5;  alertas.append("Potássio médio — monitorar")
+
+    # Cálcio (cmolc/dm³)
+    if calcio > 0:
+        if   calcio < 2.0: score -= 20; alertas.append("Cálcio muito baixo (<2 cmolc/dm³)")
+        elif calcio < 3.5: score -= 10; alertas.append("Cálcio baixo (2-3,5 cmolc/dm³)")
+
+    # Magnésio (cmolc/dm³)
+    if magnesio > 0:
+        if   magnesio < 0.5: score -= 15; alertas.append("Magnésio muito baixo (<0,5 cmolc/dm³)")
+        elif magnesio < 1.0: score -= 8;  alertas.append("Magnésio baixo (0,5-1,0 cmolc/dm³)")
+
+    # Relação Ca:Mg ideal 3:1 a 5:1
+    if calcio > 0 and magnesio > 0:
+        rel = calcio / magnesio
+        if rel < 2.5: alertas.append(f"Relação Ca:Mg baixa ({rel:.1f}:1) — risco de toxidez Mg")
+        elif rel > 8:  alertas.append(f"Relação Ca:Mg alta ({rel:.1f}:1) — deficiência Mg possível")
+
+    # Alumínio (cmolc/dm³) — tóxico acima de 0,3
+    if aluminio > 0:
+        if aluminio > 1.0: score -= 25; alertas.append(f"Alumínio tóxico ({aluminio} cmolc/dm³) — urgente calcário")
+        elif aluminio > 0.5: score -= 15; alertas.append(f"Alumínio elevado ({aluminio} cmolc/dm³)")
+        elif aluminio > 0.3: score -= 8;  alertas.append(f"Alumínio detectado ({aluminio} cmolc/dm³)")
+
+    # Matéria orgânica (%)
+    if materia_organica > 0:
+        if   materia_organica < 1.5: score -= 15; alertas.append("MO muito baixa (<1,5%) — solo degradado")
+        elif materia_organica < 2.5: score -= 8;  alertas.append("MO baixa (1,5-2,5%) — adubação verde recomendada")
+        elif materia_organica > 6.0: alertas.append("MO alta — reduzir N mineral")
+
+    # Micronutrientes (quando disponíveis)
+    if enxofre > 0 and enxofre < 5:
+        score -= 8; alertas.append(f"Enxofre baixo (<5 mg/dm³) — usar fertilizante com S")
+    if zinco > 0 and zinco < 0.6:
+        score -= 5; alertas.append(f"Zinco baixo (<0,6 mg/dm³)")
+    if boro > 0 and boro < 0.2:
+        score -= 5; alertas.append(f"Boro baixo (<0,2 mg/dm³) — importante para soja/café")
+
     score = max(0, min(100, score))
     if   score >= 85: classe = "Excelente"
     elif score >= 70: classe = "Boa"
@@ -4051,11 +4222,14 @@ if menu == "📦 Operacional":
             with col_bc2:
                 btn_add_bc = st.button("📥 Adicionar", key="btn_add_bc_usb", use_container_width=True)
 
-            cod_para_processar = ""
+            # Salva código no session_state via botão ou on_change
             if btn_add_bc:
-                cod_para_processar = st.session_state.get("bc_usb_live", "").strip()
-            elif st.session_state.bc_cod_pendente:
-                cod_para_processar = st.session_state.bc_cod_pendente.strip()
+                v = st.session_state.get("bc_usb_live","").strip()
+                if v:
+                    st.session_state.bc_cod_pendente = v
+
+            cod_para_processar = st.session_state.get("bc_cod_pendente","").strip()
+            if cod_para_processar:
                 st.session_state.bc_cod_pendente = ""
 
             if cod_para_processar:
