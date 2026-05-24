@@ -5120,8 +5120,18 @@ elif menu == "📄 Relatório Final":
 
         story = []
 
-        # ── Cabeçalho ──────────────────────────────────────────
-        story.append(Paragraph("🌾 IAAGRO — RELATÓRIO TÉCNICO DE PRECISÃO", s_title))
+        # ── Cabeçalho com Logo ──────────────────────────────────
+        from reportlab.platypus import Image as RLImage
+
+        if os.path.exists("IAAgrologo.jpeg"):
+            logo = RLImage("IAAgrologo.jpeg", width=6*cm, height=3*cm)
+            logo.hAlign = "CENTER"
+            story.append(logo)
+            story.append(Spacer(1, 4))
+        else:
+            story.append(Paragraph("🌾 IAAGRO", s_title))
+
+        story.append(Paragraph("RELATÓRIO TÉCNICO DE AGRICULTURA DE PRECISÃO", s_title))
         story.append(Paragraph(
             f"Gerado em {date.today().strftime('%d/%m/%Y')} | "
             f"{d.get('fazenda','')} — {d.get('talhao','')} | "
@@ -7678,7 +7688,7 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
                         try:
                             df_raw["latitude"]  = gdf.geometry.centroid.y
                             df_raw["longitude"] = gdf.geometry.centroid.x
-                        except Exception: pass
+                        except Exception: pass  # erro silenciado — não crítico
                     else:
                         dados_geo = json.load(arquivo)
                         rows = []
@@ -7702,7 +7712,7 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
                                 try:
                                     df_raw["latitude"]  = gdf.geometry.centroid.y
                                     df_raw["longitude"] = gdf.geometry.centroid.x
-                                except Exception: pass
+                                except Exception: pass  # erro silenciado — não crítico
                 elif nome.endswith(".zip"):
                     st.markdown('''<div style="background:#78350f;color:#fff;padding:12px 18px;border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">⚠️ Para Shapefile: pip install geopandas</div>''', unsafe_allow_html=True)
 
@@ -7847,7 +7857,7 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
                             radius=4, color=cores_z.get(row.get("Zona",""),"gray"),
                             fill=True, fill_opacity=0.7,
                             popup=f"{col_prod}: {row[col_prod]:.1f}").add_to(mf)
-                    except Exception: pass
+                    except Exception: pass  # erro silenciado — não crítico
                 st_folium(mf, width=700, height=500)
             else:
                 info_box("Arquivo sem coordenadas geográficas — mapa indisponível. Veja os gráficos e laudo nas outras abas.")
