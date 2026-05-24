@@ -5076,82 +5076,177 @@ if menu == "📦 Operacional":
 # MENU: RELATÓRIO FINAL
 # ─────────────────────────────────────────────
 elif menu == "📄 Relatório Final":
-    st.header("Relatório Final IAAgro")
+    st.header("📄 Relatório Final IAAgro")
 
-    def gerar_pdf_relatorio(dados):
+    def gerar_pdf_relatorio(d):
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from io import BytesIO
+
         buffer = BytesIO()
-        doc    = SimpleDocTemplate(buffer, pagesize=A4,
-                                   rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
-        styles    = getSampleStyleSheet()
-        elementos = []
+        # Margens apertadas para caber em uma folha
+        doc = SimpleDocTemplate(buffer, pagesize=A4,
+                                rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                topMargin=1.2*cm, bottomMargin=1.2*cm)
 
-        # Logo (com fallback se arquivo não existir)
-        if os.path.exists("IAAgrologo.jpeg"):
-            logo = Image("IAAgrologo.jpeg", width=140, height=70)
-            elementos.append(logo)
-        elementos.append(Spacer(1, 20))
+        VERDE  = colors.HexColor("#16a34a")
+        AZUL   = colors.HexColor("#0f3460")
+        CINZA  = colors.HexColor("#64748b")
+        BRANCO = colors.white
 
-        elementos.append(Paragraph(
-            f"<b>Relatório Técnico IAAgro</b><br/>Data: {date.today()}<br/>Sistema Inteligente de Agricultura de Precisão",
-            styles['BodyText']
+        styles = getSampleStyleSheet()
+        s_title  = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=13, textColor=VERDE,   spaceAfter=2,  alignment=TA_CENTER)
+        s_sub    = ParagraphStyle("s", fontName="Helvetica",      fontSize=8,  textColor=CINZA,   spaceAfter=2,  alignment=TA_CENTER)
+        s_sec    = ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=9,  textColor=VERDE,   spaceBefore=6, spaceAfter=2)
+        s_body   = ParagraphStyle("b", fontName="Helvetica",      fontSize=8,  textColor=colors.HexColor("#1e293b"), spaceAfter=1)
+        s_rodape = ParagraphStyle("r", fontName="Helvetica",      fontSize=7,  textColor=CINZA,   alignment=TA_CENTER)
+
+        nota              = calcular_nota(d)
+        score_v, classe_v, alertas_v = score_solo(d, d.get("cultura","Soja"))
+        prioridade_final  = prioridade(nota)
+        dose_calc, total_calc = calcular_calcario_por_ph(d.get("ph",0), d.get("area",0))
+        precisa_gesso, dose_gesso, total_gesso, motivos_gesso = calcular_gesso(d)
+        producao_est = estimar_producao(d.get("produtividade",0), nota)
+        n, p2o5, k2o = recomendacao_npk(
+            d.get("cultura","Soja"), d.get("produtividade",0),
+            d.get("fosforo",0), d.get("potassio",0), d.get("materia_organica",0),
+            d.get("argila",50), d.get("ph",5.5)
+        )
+        area = d.get("area", 0)
+
+        story = []
+
+        # ── Cabeçalho ──────────────────────────────────────────
+        story.append(Paragraph("🌾 IAAGRO — RELATÓRIO TÉCNICO DE PRECISÃO", s_title))
+        story.append(Paragraph(
+            f"Gerado em {date.today().strftime('%d/%m/%Y')} | "
+            f"{d.get('fazenda','')} — {d.get('talhao','')} | "
+            f"{d.get('cidade','')} | {area:.1f} ha | {d.get('cultura','')}",
+            s_sub
         ))
-        elementos.append(Spacer(1, 15))
-        elementos.append(Paragraph("<b>IAAgro Pro V9 - Relatório Técnico</b>", styles['Title']))
+        story.append(HRFlowable(width="100%", thickness=1.5, color=VERDE, spaceAfter=4))
 
-        dados_tabela = [["Campo","Valor"]]
-        for chave, valor in dados.items():
-            dados_tabela.append([str(chave), str(valor)])
-
-        tabela = Table(dados_tabela, colWidths=[180, 280])
-        tabela.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.darkgreen),
-            ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
-            ('GRID',       (0,0), (-1,-1), 1, colors.black),
-            ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTNAME',   (0,1), (-1,-1), 'Helvetica'),
-            ('FONTSIZE',   (0,0), (-1,-1), 10),
-            ('BOTTOMPADDING', (0,0), (-1,0), 12),
-            ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+        # ── Bloco 1: Identificação + Score lado a lado ──────────
+        story.append(Paragraph("1. IDENTIFICAÇÃO & SCORE DO SOLO", s_sec))
+        dados_id = [
+            ["Fazenda", d.get("fazenda","—"), "Nota Solo", f"{nota}/100"],
+            ["Talhão",  d.get("talhao","—"),  "Score",     f"{score_v}/100 ({classe_v})"],
+            ["Área",    f"{area:.1f} ha",      "Prioridade",prioridade_final],
+            ["Cultura", d.get("cultura","—"), "Prod. Estimada", f"{producao_est:.1f} sc/ha"],
+            ["pH",      str(d.get("ph",0)),   "P (mg/dm³)", str(d.get("fosforo",0))],
+            ["K (mg/dm³)", str(d.get("potassio",0)), "MO (%)", str(d.get("materia_organica",0))],
+            ["Ca (cmolc)", str(d.get("calcio",0)), "Mg (cmolc)", str(d.get("magnesio",0))],
+            ["Al (cmolc)", str(d.get("aluminio",0)), "S (mg/dm³)", str(d.get("enxofre",0))],
+            ["Zn (mg/dm³)",str(d.get("zinco",0)), "B (mg/dm³)", str(d.get("boro",0))],
+            ["Mn (mg/dm³)",str(d.get("manganes",0)), "Cu (mg/dm³)", str(d.get("cobre",0))],
+        ]
+        t_id = Table(dados_id, colWidths=[3.5*cm,4*cm,3.5*cm,4*cm])
+        t_id.setStyle(TableStyle([
+            ("FONTNAME",  (0,0),(-1,-1), "Helvetica"),
+            ("FONTNAME",  (0,0),(0,-1),  "Helvetica-Bold"),
+            ("FONTNAME",  (2,0),(2,-1),  "Helvetica-Bold"),
+            ("FONTSIZE",  (0,0),(-1,-1), 7.5),
+            ("TEXTCOLOR", (0,0),(0,-1),  AZUL),
+            ("TEXTCOLOR", (2,0),(2,-1),  AZUL),
+            ("ROWBACKGROUNDS",(0,0),(-1,-1), [colors.HexColor("#f8fafc"), BRANCO]),
+            ("GRID",      (0,0),(-1,-1), 0.3, CINZA),
+            ("PADDING",   (0,0),(-1,-1), 3),
         ]))
-        elementos.append(tabela)
-        elementos.append(Spacer(1, 20))
+        story.append(t_id)
 
-        if   dados.get("ph",0) >= 5.5 and dados.get("materia_organica",0) >= 2:
-            classificacao     = "ALTO POTENCIAL PRODUTIVO"
-            cor_classificacao = colors.green
-        elif dados.get("ph",0) >= 5.0:
-            classificacao     = "POTENCIAL MÉDIO"
-            cor_classificacao = colors.orange
+        # ── Bloco 2: Correção e Adubação ────────────────────────
+        story.append(Paragraph("2. CORREÇÃO E ADUBAÇÃO (EMBRAPA/CQFS RS-SC 2016)", s_sec))
+        correcao = [
+            ["Item","Dose (t ou kg/ha)","Total na Área","Observação"],
+            ["Calcário", f"{dose_calc} t/ha", f"{total_calc:.1f} t",
+             "PRNT 100% — incorporar ou sup. app."],
+            ["Gesso Agrícola", f"{dose_gesso} t/ha", f"{total_gesso:.1f} t",
+             ", ".join(motivos_gesso) if motivos_gesso else "Sem indicação"],
+            ["N (Nitrogênio)",  f"{n} kg/ha",    f"{n*area:.0f} kg", "Parcelado: plantio + cobertura"],
+            ["P₂O₅ (Fósforo)", f"{p2o5} kg/ha", f"{p2o5*area:.0f} kg", "Plantio"],
+            ["K₂O (Potássio)", f"{k2o} kg/ha",  f"{k2o*area:.0f} kg", "Plantio + cobertura"],
+        ]
+        t_corr = Table(correcao, colWidths=[3.5*cm, 3*cm, 3*cm, 5.5*cm])
+        t_corr.setStyle(TableStyle([
+            ("BACKGROUND",  (0,0),(-1,0), VERDE),
+            ("TEXTCOLOR",   (0,0),(-1,0), BRANCO),
+            ("FONTNAME",    (0,0),(-1,0), "Helvetica-Bold"),
+            ("FONTNAME",    (0,1),(-1,-1),"Helvetica"),
+            ("FONTSIZE",    (0,0),(-1,-1), 7.5),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.HexColor("#f8fafc"), BRANCO]),
+            ("GRID",        (0,0),(-1,-1), 0.3, CINZA),
+            ("PADDING",     (0,0),(-1,-1), 3),
+        ]))
+        story.append(t_corr)
+
+        # ── Bloco 3: Alertas de solo ─────────────────────────────
+        if alertas_v:
+            story.append(Paragraph("3. ALERTAS DO SOLO", s_sec))
+            alertas_texto = " • ".join(alertas_v)
+            story.append(Paragraph(f"⚠️ {alertas_texto}", s_body))
+
+        # ── Bloco 4: Estoque resumido ────────────────────────────
+        story.append(Paragraph("4. ESTOQUE DE INSUMOS", s_sec))
+        estoque = st.session_state.get("estoque", [])
+        if estoque:
+            est_rows = [["Produto","Categoria","Qtd","Unid","Valor Total"]]
+            for item in estoque[:8]:  # máx 8 itens para caber na folha
+                est_rows.append([
+                    str(item.get("Insumo",""))[:25],
+                    str(item.get("Categoria",""))[:12],
+                    str(item.get("Quantidade",0)),
+                    str(item.get("Unidade","")),
+                    f"R$ {item.get('Valor Total R$',0):,.2f}",
+                ])
+            if len(estoque) > 8:
+                est_rows.append([f"... +{len(estoque)-8} itens","","","",""])
+            t_est = Table(est_rows, colWidths=[5*cm,2.8*cm,1.5*cm,1.5*cm,2.7*cm])
+            t_est.setStyle(TableStyle([
+                ("BACKGROUND",  (0,0),(-1,0), AZUL),
+                ("TEXTCOLOR",   (0,0),(-1,0), BRANCO),
+                ("FONTNAME",    (0,0),(-1,0), "Helvetica-Bold"),
+                ("FONTNAME",    (0,1),(-1,-1),"Helvetica"),
+                ("FONTSIZE",    (0,0),(-1,-1), 7),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.HexColor("#f8fafc"), BRANCO]),
+                ("GRID",        (0,0),(-1,-1), 0.3, CINZA),
+                ("PADDING",     (0,0),(-1,-1), 2.5),
+            ]))
+            story.append(t_est)
         else:
-            classificacao     = "SOLO COM LIMITAÇÕES"
-            cor_classificacao = colors.red
+            story.append(Paragraph("Nenhum insumo cadastrado.", s_body))
 
-        class_box = Table([["Classificação IAAgro", classificacao]], colWidths=[220, 240])
-        class_box.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (0,0), colors.darkgreen),
-            ('BACKGROUND', (1,0), (1,0), cor_classificacao),
-            ('TEXTCOLOR',  (0,0), (-1,-1), colors.white),
-            ('FONTNAME',   (0,0), (-1,-1), 'Helvetica-Bold'),
-            ('FONTSIZE',   (0,0), (-1,-1), 12),
-            ('GRID',       (0,0), (-1,-1), 1, colors.black),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        # ── Bloco 5: Parecer final ───────────────────────────────
+        story.append(Paragraph("5. PARECER TÉCNICO IAAGRO", s_sec))
+        if   nota >= 80: parecer_cor = colors.HexColor("#14532d"); parecer_txt = "EXCELENTE — Solo em ótimas condições. Manter manejo."
+        elif nota >= 60: parecer_cor = colors.HexColor("#1e3a5f"); parecer_txt = "BOM — Pequenos ajustes recomendados. Seguir plano."
+        elif nota >= 40: parecer_cor = colors.HexColor("#78350f"); parecer_txt = "REGULAR — Necessita correção. Priorizar calcário/gesso."
+        else:            parecer_cor = colors.HexColor("#7f1d1d"); parecer_txt = "CRÍTICO — Solo com limitações severas. Correção urgente."
+
+        t_par = Table([[parecer_txt]], colWidths=[15*cm])
+        t_par.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,-1), parecer_cor),
+            ("TEXTCOLOR", (0,0),(-1,-1), BRANCO),
+            ("FONTNAME",  (0,0),(-1,-1), "Helvetica-Bold"),
+            ("FONTSIZE",  (0,0),(-1,-1), 8.5),
+            ("PADDING",   (0,0),(-1,-1), 6),
+            ("RADIUS",    (0,0),(-1,-1), 4),
         ]))
-        elementos.append(class_box)
-        elementos.append(Spacer(1, 20))
-        elementos.append(Paragraph(
-            """<b>Recomendação Inteligente IAAgro:</b><br/><br/>
-            • Solo com potencial produtivo médio/alto.<br/>
-            • Recomendado monitoramento de fósforo e matéria orgânica.<br/>
-            • Ajustar manejo conforme produtividade esperada.<br/>
-            • Realizar acompanhamento de micronutrientes durante o ciclo.<br/>
-            • Sistema gerado automaticamente pela IA do IAAgro.""",
-            styles['BodyText']
+        story.append(t_par)
+
+        # ── Rodapé ───────────────────────────────────────────────
+        story.append(Spacer(1, 4))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=CINZA))
+        story.append(Paragraph(
+            f"IAAGRO — Inteligência Agrícola de Precisão | Gerado em {date.today().strftime('%d/%m/%Y')} | "
+            f"Base técnica: EMBRAPA, CQFS RS-SC 2016, MAPA/IAC | Este relatório é um auxílio técnico.",
+            s_rodape
         ))
-        elementos.append(PageBreak())
-        elementos.append(Paragraph("<b>Mapa GPS do Talhão</b>", styles['Title']))
-        elementos.append(Spacer(1, 20))
-        elementos.append(Paragraph("Imagem do mapa GPS do talhão será inserida aqui.", styles["BodyText"]))
-        doc.build(elementos)
+
+        doc.build(story)
         pdf = buffer.getvalue()
         buffer.close()
         return pdf
@@ -5159,113 +5254,55 @@ elif menu == "📄 Relatório Final":
     d = st.session_state.dados
 
     if "ph" not in d or "fazenda" not in d:
-        warning_box("Preencha os dados antes de gerar relatório.")
+        warning_box("Preencha os dados de área e análise de solo antes de gerar o relatório.")
     else:
-        nota             = calcular_nota(d)
-        prioridade_final = prioridade(nota)
-        dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"])
+        nota              = calcular_nota(d)
+        prioridade_final  = prioridade(nota)
+        dose_calc, total_calc = calcular_calcario_por_ph(d.get("ph",0), d.get("area",0))
         precisa_gesso, dose_gesso, total_gesso, motivos_gesso = calcular_gesso(d)
-        producao_estimada = estimar_producao(d["produtividade"], nota)
-
-        # IA de previsão
-        indice_produtivo = 0
-        score_rel        = 75
-        indice_produtivo += score_rel * 0.45
-        if 5.8 <= d["ph"] <= 6.5:               indice_produtivo += 15
-        if d["fosforo"] >= 12:                   indice_produtivo += 10
-        if d["potassio"] >= 0.35:                indice_produtivo += 10
-        if d["materia_organica"] >= 3:           indice_produtivo += 10
-        if d.get("argila", 0) >= 35:             indice_produtivo += 5
-        indice_produtivo = min(indice_produtivo, 100)
-        produtividade_ia = d["produtividade"] * (indice_produtivo / 100)
-
-        if   produtividade_ia >= d["produtividade"] * 0.9: status_ia = "🟢 Alto Potencial"
-        elif produtividade_ia >= d["produtividade"] * 0.7: status_ia = "🟡 Médio Potencial"
-        else:                                               status_ia = "🔴 Baixo Potencial"
-
+        producao_est = estimar_producao(d.get("produtividade",0), nota)
         n, p2o5, k2o = recomendacao_npk(
-            d["cultura"], d["produtividade"], d["fosforo"], d["potassio"], d["materia_organica"]
+            d.get("cultura","Soja"), d.get("produtividade",0),
+            d.get("fosforo",0), d.get("potassio",0), d.get("materia_organica",0),
+            d.get("argila",50), d.get("ph",5.5)
         )
+        area = d.get("area",0)
 
-        st.subheader("Resumo da Área")
-        st.write(f"ID da área: {d.get('id_area','')}")
-        st.write(f"Fazenda: {d['fazenda']}")
-        st.write(f"Talhão: {d['talhao']}")
-        st.write(f"Cidade/Estado: {d['cidade']}")
-        st.write(f"Área: {d['area']} hectares")
-        st.write(f"Cultura: {d['cultura']}")
-        st.write(f"Meta de produtividade: {d['produtividade']} sacas/ha")
+        # Preview na tela
+        col1,col2,col3,col4,col5,col6 = st.columns(6)
+        col1.metric("Nota",        f"{nota}/100")
+        col2.metric("Prioridade",  prioridade_final)
+        col3.metric("Prod. Est.",  f"{producao_est:.1f} sc/ha")
+        col4.metric("Calcário",    f"{dose_calc} t/ha")
+        col5.metric("Gesso",       f"{dose_gesso} t/ha")
+        col6.metric("N-P-K",       f"{n}/{p2o5}/{k2o}")
 
-        st.subheader("Resultado Geral")
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Nota",              f"{nota}/100")
-        col2.metric("Prioridade",        prioridade_final)
-        col3.metric("Produção Estimada", f"{producao_estimada:.1f} sc/ha")
-        col4.metric("Calcário",          f"{dose_calcario} t/ha")
-        col5.metric("Gesso",             f"{dose_gesso} t/ha")
-        col6.metric("IA Produtividade",  f"{produtividade_ia:.1f} sc/ha")
-
-        st.subheader("Correção")
-        st.write(f"Dose estimada de calcário: {dose_calcario} t/ha")
-        st.write(f"Total estimado de calcário: {total_calcario:.1f} toneladas")
-        st.write(f"Dose estimada de gesso: {dose_gesso} t/ha")
-        st.write(f"Total estimado de gesso: {total_gesso:.1f} toneladas")
-
-        st.subheader("Adubação NPK")
-        tabela_npk = pd.DataFrame({
-            "Nutriente":          ["N","P2O5","K2O"],
-            "Dose kg/ha":         [n, p2o5, k2o],
-            "Total no talhão kg": [n * d["area"], p2o5 * d["area"], k2o * d["area"]]
-        })
-        st.dataframe(tabela_npk, use_container_width=True)
-
-        st.subheader("Estoque Atual")
-        if len(st.session_state.estoque) == 0:
-            info_box("Nenhum produto cadastrado.")
-        else:
-            st.dataframe(pd.DataFrame(st.session_state.estoque), use_container_width=True)
-
-        st.subheader("Aplicações Registradas")
-        if len(st.session_state.aplicacoes) == 0:
-            info_box("Nenhuma aplicação registrada.")
-        else:
-            historico_linhas = []
-            for aplicacao in st.session_state.aplicacoes:
-                for prod in aplicacao.get("Produtos", []):
-                    historico_linhas.append({
-                        "Data":    aplicacao.get("Data",""),
-                        "ID Área": aplicacao.get("ID Área",""),
-                        "Talhão":  aplicacao.get("Talhão",""),
-                        "Tipo":    aplicacao.get("Tipo",""),
-                        "Produto": prod.get("Insumo", prod.get("Produto","")),
-                        "Dose/ha": prod.get("Dose por ha", prod.get("Dose ha","")),
-                        "Quantidade usada": prod.get("Total usado", prod.get("Quantidade usada","")),
-                        "Unidade": prod.get("Unidade",""),
-                    })
-            st.dataframe(pd.DataFrame(historico_linhas), use_container_width=True)
-
-        st.subheader("Parecer IAAgro")
-        st.markdown(f'''<div style="background:#1e3a5f;color:#fff;padding:15px 18px;
-        border-radius:12px;border-left:5px solid #3b82f6;
-        font-size:15px;font-weight:600;line-height:2.0;margin:8px 0;">
-        📋 A área <b>{d.get('id_area','')}</b> apresenta prioridade de correção <b>{prioridade_final}</b>.<br>
-        📈 Produtividade estimada: <b>{producao_estimada:.1f} sacas/ha</b><br>
-        🧪 O sistema avaliou calcário, gesso, adubação, estoque e aplicações.<br>
-        🗂️ Cada área possui ID próprio e pode ser carregada pela aba Áreas Cadastradas.
-        </div>''', unsafe_allow_html=True)
         st.divider()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown(f"**Fazenda:** {d.get('fazenda','')} — {d.get('talhao','')}")
+            st.markdown(f"**Área:** {area:.1f} ha | **Cultura:** {d.get('cultura','')}")
+            st.markdown(f"**Calcário:** {dose_calc} t/ha = {total_calc:.1f} t total")
+            st.markdown(f"**Gesso:** {dose_gesso} t/ha = {total_gesso:.1f} t total")
+        with col_b:
+            st.markdown(f"**pH:** {d.get('ph',0)} | **Fósforo:** {d.get('fosforo',0)} mg/dm³")
+            st.markdown(f"**Potássio:** {d.get('potassio',0)} mg/dm³ | **MO:** {d.get('materia_organica',0)}%")
+            st.markdown(f"**N:** {n} kg/ha | **P₂O₅:** {p2o5} kg/ha | **K₂O:** {k2o} kg/ha")
 
-        pdf_relatorio = gerar_pdf_relatorio(d)
-        st.download_button(
-            label="📄 Baixar Relatório PDF",
-            data=pdf_relatorio,
-            file_name="relatorio_iaagro.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-
-# ─────────────────────────────────────────────
+        st.divider()
+        if st.button("📄 Gerar PDF — Uma Folha A4", use_container_width=True, key="btn_gerar_relatorio_pdf"):
+            with st.spinner("Gerando PDF..."):
+                pdf_bytes = gerar_pdf_relatorio(d)
+            nome_arq = f"Relatorio_IAAgro_{d.get('fazenda','').replace(' ','_')}_{d.get('talhao','').replace(' ','_')}.pdf"
+            st.download_button(
+                "📥 Baixar Relatório PDF",
+                data=pdf_bytes,
+                file_name=nome_arq,
+                mime="application/pdf",
+                use_container_width=True,
+                key="btn_download_relatorio"
+            )
+            st.success("✅ PDF gerado! Pronto para impressão em uma folha A4.")
 # MENU: CLIMA & ALERTAS
 # ─────────────────────────────────────────────
 elif menu == "🌍 Inteligência":
