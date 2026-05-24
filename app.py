@@ -4222,16 +4222,17 @@ if menu == "📦 Operacional":
             with col_bc2:
                 btn_add_bc = st.button("📥 Adicionar", key="btn_add_bc_usb", use_container_width=True)
 
-            # Salva código no session_state via botão ou on_change
+            # Captura código do botão
             if btn_add_bc:
                 v = st.session_state.get("bc_usb_live","").strip()
                 if v:
                     st.session_state.bc_cod_pendente = v
+                    st.rerun()
 
             cod_para_processar = st.session_state.get("bc_cod_pendente","").strip()
             if cod_para_processar:
-                st.session_state.bc_cod_pendente = ""
-
+                st.session_state.bc_cod_pendente = ""  # limpa DEPOIS de ler
+            
             if cod_para_processar:
                 valor_cod = cod_para_processar
                 if valor_cod.isdigit() and len(valor_cod) == 44:
