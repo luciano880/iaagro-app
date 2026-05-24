@@ -4031,36 +4031,44 @@ if menu == "📦 Operacional":
         if modo_bc == "⌨️ Leitor USB / Teclado":
             st.info("🔌 Digite ou passe o leitor USB no campo abaixo e clique em **Adicionar**.")
 
-            if "nfe_modo_manual" not in st.session_state:
-                st.session_state.nfe_modo_manual = False
-            if "nfe_itens_usb" not in st.session_state:
-                st.session_state.nfe_itens_usb = []
-            if "nfe_chave_usb" not in st.session_state:
-                st.session_state.nfe_chave_usb = ""
+            if "nfe_modo_manual"  not in st.session_state: st.session_state.nfe_modo_manual  = False
+            if "nfe_itens_usb"    not in st.session_state: st.session_state.nfe_itens_usb    = []
+            if "nfe_chave_usb"    not in st.session_state: st.session_state.nfe_chave_usb    = ""
+            if "bc_cod_pendente"  not in st.session_state: st.session_state.bc_cod_pendente  = ""
 
-            # Campo + botão dentro de um form — captura Enter do leitor
-            with st.form("form_bc_usb", clear_on_submit=True):
-                codigo_digitado = st.text_input(
+            def _captura_cod():
+                st.session_state.bc_cod_pendente = st.session_state.get("bc_usb_live", "")
+
+            col_bc1, col_bc2 = st.columns([4,1])
+            with col_bc1:
+                st.text_input(
                     "Código de barras",
-                    placeholder="Passe o leitor ou digite o código...",
-                    key="bc_usb_field"
+                    placeholder="Passe o leitor ou digite...",
+                    key="bc_usb_live",
+                    on_change=_captura_cod,
+                    label_visibility="collapsed"
                 )
-                btn_ler = st.form_submit_button("📥 Adicionar ao Estoque", use_container_width=True)
+            with col_bc2:
+                btn_add_bc = st.button("📥 Adicionar", key="btn_add_bc_usb", use_container_width=True)
 
-            if btn_ler and codigo_digitado.strip():
-                valor_cod = codigo_digitado.strip()
+            cod_para_processar = ""
+            if btn_add_bc:
+                cod_para_processar = st.session_state.get("bc_usb_live", "").strip()
+            elif st.session_state.bc_cod_pendente:
+                cod_para_processar = st.session_state.bc_cod_pendente.strip()
+                st.session_state.bc_cod_pendente = ""
 
+            if cod_para_processar:
+                valor_cod = cod_para_processar
                 if valor_cod.isdigit() and len(valor_cod) == 44:
-                    # Chave NF-e — ativa modo manual
-                    st.session_state.nfe_chave_usb   = valor_cod
-                    st.session_state.nfe_modo_manual  = True
-                    st.session_state.nfe_itens_usb   = []
-                    st.info(f"📋 Chave NF-e detectada. Adicione os produtos abaixo.")
+                    st.session_state.nfe_chave_usb  = valor_cod
+                    st.session_state.nfe_modo_manual = True
+                    st.session_state.nfe_itens_usb  = []
+                    st.info("📋 Chave NF-e detectada. Adicione os produtos abaixo.")
                 else:
-                    # EAN normal — busca e adiciona direto
                     nome_produto = f"Produto {valor_cod}"
                     fabricante   = ""
-                    with st.spinner(f"🌐 Buscando produto..."):
+                    with st.spinner("🌐 Buscando produto..."):
                         try:
                             resp = requests.get(
                                 f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
@@ -4078,15 +4086,13 @@ if menu == "📦 Operacional":
                                     fabricante = p.get("brands", "")
                         except Exception:
                             pass
-
-                    # Verifica duplicata
                     existente = next((e for e in st.session_state.estoque
                         if e.get("Insumo","").lower() == nome_produto.lower()), None)
                     if existente:
-                        existente["Quantidade"] = existente.get("Quantidade", 0) + 1
+                        existente["Quantidade"]     = existente.get("Quantidade", 0) + 1
                         existente["Valor Total R$"] = existente["Quantidade"] * existente.get("Valor Unitário R$", 0)
                         salvar_dados_iaagro()
-                        st.success(f"✅ Quantidade de **{nome_produto}** atualizada no estoque!")
+                        st.success(f"✅ Quantidade de **{nome_produto}** atualizada!")
                     else:
                         st.session_state.estoque.append({
                             "Insumo":            nome_produto,
@@ -4108,7 +4114,8 @@ if menu == "📦 Operacional":
                         st.success(f"✅ **{nome_produto}** adicionado ao estoque!")
                     st.balloons()
                     st.rerun()
-            # ── Formulário manual NF-e — persiste mesmo sem código pendente ──
+
+                        # ── Formulário manual NF-e — persiste mesmo sem código pendente ──
             if st.session_state.get("nfe_modo_manual") and st.session_state.get("nfe_chave_usb"):
                 chave_atual = st.session_state.nfe_chave_usb
                 st.warning("⚠️ Consulta automática indisponível. Digite os produtos da nota abaixo.")
