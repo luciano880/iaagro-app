@@ -3593,92 +3593,6 @@ if menu == "🌾 Lavoura":
                 salvar_dados_iaagro()
                 success_box("✅ Desenho do talhão salvo com sucesso!")
 
-            # ── Exportar Croqui ──────────────────────────────────
-            st.divider()
-            st.subheader("🗺️ Exportar Croqui do Talhão")
-
-            # Lista áreas com desenho salvo
-            areas_com_desenho = [a for a in st.session_state.areas if a.get("desenho")]
-            if st.session_state.dados.get("desenho_talhao"):
-                tem_desenho_geral = True
-            else:
-                tem_desenho_geral = False
-
-            if not areas_com_desenho and not tem_desenho_geral:
-                st.info("Nenhum desenho salvo ainda. Desenhe e salve um talhão acima.")
-            else:
-                # Escolhe qual croqui exportar
-                opcoes_croqui = []
-                if tem_desenho_geral:
-                    opcoes_croqui.append("Último desenho salvo")
-                for a in areas_com_desenho:
-                    opcoes_croqui.append(f"{a.get('Fazenda','')} — {a.get('Talhão','')}")
-
-                croqui_sel = st.selectbox("Selecione o talhão para exportar:", opcoes_croqui, key="sel_croqui_export")
-
-                # Recupera o desenho selecionado
-                if croqui_sel == "Último desenho salvo":
-                    desenho_exp = st.session_state.dados["desenho_talhao"]
-                    titulo_croqui = "Talhão"
-                    area_exp_ha  = calcular_area_ha(desenho_exp["geometry"]["coordinates"][0])
-                else:
-                    idx_exp = opcoes_croqui.index(croqui_sel) - (1 if tem_desenho_geral else 0)
-                    area_exp = areas_com_desenho[idx_exp]
-                    desenho_exp  = area_exp["desenho"]
-                    titulo_croqui = f"{area_exp.get('Fazenda','')} — {area_exp.get('Talhão','')}"
-                    area_exp_ha  = area_exp.get("area_calculada_ha", 0)
-
-                if st.button("📥 Gerar Croqui para Download", key="btn_gerar_croqui", use_container_width=True):
-                    coords_exp = desenho_exp["geometry"]["coordinates"][0]
-                    # Centro do polígono
-                    lat_c = sum(c[1] for c in coords_exp) / len(coords_exp)
-                    lon_c = sum(c[0] for c in coords_exp) / len(coords_exp)
-                    # Converte para GeoJSON string
-                    geojson_str = json.dumps({"type":"FeatureCollection","features":[{
-                        "type":"Feature",
-                        "geometry": desenho_exp["geometry"],
-                        "properties": {"nome": titulo_croqui, "area_ha": area_exp_ha}
-                    }]})
-                    # Gera HTML com mapa Leaflet embutido
-                    html_croqui = f"""<!DOCTYPE html>
-<html><head><meta charset='utf-8'>
-<title>Croqui — {titulo_croqui}</title>
-<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'/>
-<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
-<style>body{{margin:0;font-family:Arial,sans-serif}}
-#map{{height:75vh;width:100%}}
-.info{{padding:16px;background:#0f3460;color:#fff;text-align:center}}
-h2{{margin:4px 0;color:#22c55e}}</style>
-</head><body>
-<div class='info'>
-<h2>🌾 IAAGRO — Croqui do Talhão</h2>
-<b>{titulo_croqui}</b> &nbsp;|&nbsp; Área: <b>{area_exp_ha:.2f} ha</b>
-</div>
-<div id='map'></div>
-<script>
-var map = L.map('map').setView([{lat_c},{lon_c}],15);
-L.tileLayer('https://{{s}}.google.com/vt/lyrs=s&x={{x}}&y={{y}}&z={{z}}',
-  {{subdomains:['mt0','mt1','mt2','mt3'],attribution:'Google Satellite'}}).addTo(map);
-var geojson = {geojson_str};
-var layer = L.geoJSON(geojson,{{
-  style:{{color:'#22c55e',weight:3,fillColor:'#22c55e',fillOpacity:0.2}}
-}}).addTo(map);
-map.fitBounds(layer.getBounds());
-L.popup().setLatLng([{lat_c},{lon_c}]).setContent('<b>{titulo_croqui}</b><br>Área: {area_exp_ha:.2f} ha').addTo(map).openOn(map);
-</script>
-</body></html>"""
-
-                    st.download_button(
-                        "📥 Baixar Croqui HTML",
-                        data=html_croqui,
-                        file_name=f"croqui_{titulo_croqui.replace(' ','_').replace('—','')}.html",
-                        mime="text/html",
-                        use_container_width=True,
-                        key="btn_download_croqui"
-                    )
-                    st.success("✅ Croqui gerado! Abra o arquivo HTML no navegador para visualizar o mapa interativo.")
-        else:
-            info_box("Desenhe um polígono no mapa para salvar.")
 
 # ─────────────────────────────────────────────
 # MENU: ANÁLISE DE SOLO
@@ -3909,19 +3823,104 @@ if menu == "🧪 Solo & Adubação":
         else:
             success_box("Sem indicação inicial forte para gesso.")
 
+        cultura_diag = d.get("cultura", "Soja")
+        score, classe_score, alertas_score = score_solo(d, cultura_diag)
+
+        # Tabela completa com micronutrientes
+        # Limites EMBRAPA/CQFS RS-SC 2016 por parâmetro
+        def _classif_micro(valor, lim_baixo, lim_medio):
+            if valor == 0: return "—"
+            if   valor < lim_baixo:  return "🔴 Baixo"
+            elif valor < lim_medio:  return "🟡 Médio"
+            else:                    return "🟢 Adequado"
+
         tabela = pd.DataFrame({
-            "Indicador": ["pH","Fósforo","Potássio","Matéria Orgânica","Cálcio","Magnésio","Enxofre","Alumínio","CTC","Argila"],
-            "Valor": [d["ph"],d["fosforo"],d["potassio"],d["materia_organica"],d["calcio"],d["magnesio"],d["enxofre"],d["aluminio"],d["ctc"],d["argila"]],
-            "Classificação": [
-                "Baixo" if d["ph"] < 5.5 else "Adequado",
-                classificar(d["fosforo"],15,30), classificar(d["potassio"],120,200),
-                classificar(d["materia_organica"],3,5), classificar(d["calcio"],3,6),
-                classificar(d["magnesio"],1,2), classificar(d["enxofre"],8,15),
-                "Alto" if d["aluminio"] > 0.3 else "Seguro",
-                classificar(d["ctc"],6,10), classificar(d["argila"],20,40)
+            "Indicador": [
+                "pH","Fósforo (mg/dm³)","Potássio (mg/dm³)",
+                "Matéria Orgânica (%)","Cálcio (cmolc/dm³)","Magnésio (cmolc/dm³)",
+                "Enxofre (mg/dm³)","Alumínio (cmolc/dm³)","CTC (cmolc/dm³)","Argila (%)",
+                "Zinco Zn (mg/dm³)","Boro B (mg/dm³)","Manganês Mn (mg/dm³)","Cobre Cu (mg/dm³)"
+            ],
+            "Valor": [
+                d.get("ph",0), d.get("fosforo",0), d.get("potassio",0),
+                d.get("materia_organica",0), d.get("calcio",0), d.get("magnesio",0),
+                d.get("enxofre",0), d.get("aluminio",0), d.get("ctc",0), d.get("argila",0),
+                d.get("zinco",0), d.get("boro",0), d.get("manganes",0), d.get("cobre",0)
+            ],
+            "Classificação (EMBRAPA)": [
+                "🔴 Baixo" if d.get("ph",0) < 5.5 else ("🟢 Adequado" if d.get("ph",0) <= 6.5 else "🟡 Alto"),
+                _classif_micro(d.get("fosforo",0), 6, 18),
+                _classif_micro(d.get("potassio",0), 60, 150),
+                _classif_micro(d.get("materia_organica",0), 2.5, 4.5),
+                _classif_micro(d.get("calcio",0), 2.0, 4.0),
+                _classif_micro(d.get("magnesio",0), 0.5, 1.5),
+                _classif_micro(d.get("enxofre",0), 5, 10),
+                "🟢 OK" if d.get("aluminio",0) <= 0.3 else ("🟡 Atenção" if d.get("aluminio",0) <= 1.0 else "🔴 Tóxico"),
+                _classif_micro(d.get("ctc",0), 5, 10),
+                _classif_micro(d.get("argila",0), 15, 35),
+                _classif_micro(d.get("zinco",0), 0.6, 1.5),
+                _classif_micro(d.get("boro",0), 0.2, 0.6),
+                _classif_micro(d.get("manganes",0), 1.2, 5.0),
+                _classif_micro(d.get("cobre",0), 0.2, 0.8),
+            ],
+            "Referência EMBRAPA": [
+                "5.8–6.5","6–30 (Mehlich-1)","60–200","2.5–4.5%","2–6","0.5–2",
+                "5–15","<0.3 ideal","6–15","20–60%",
+                "0.6–2.0","0.2–0.6","1.2–5.0","0.2–0.8"
             ]
         })
         st.dataframe(tabela, use_container_width=True)
+
+        # Parecer específico de micronutrientes
+        st.subheader("🔬 Parecer de Micronutrientes")
+        micro_alertas = []
+        zinco_v  = d.get("zinco",0)
+        boro_v   = d.get("boro",0)
+        mn_v     = d.get("manganes",0)
+        cu_v     = d.get("cobre",0)
+        enx_v    = d.get("enxofre",0)
+
+        # Zinco — crítico para milho, soja
+        if zinco_v > 0:
+            if zinco_v < 0.6:
+                micro_alertas.append(("🔴", "Zinco", f"{zinco_v} mg/dm³", "Deficiência crítica — aplicar 2-3 kg/ha ZnSO4 ou quelato", "Milho e soja muito sensíveis"))
+            elif zinco_v < 1.0:
+                micro_alertas.append(("🟡", "Zinco", f"{zinco_v} mg/dm³", "Nível médio — monitorar", "Foliar preventivo em culturas sensíveis"))
+
+        # Boro — crítico para soja, café, algodão
+        if boro_v > 0:
+            if boro_v < 0.2:
+                micro_alertas.append(("🔴", "Boro", f"{boro_v} mg/dm³", "Deficiência — aplicar 1-2 kg/ha B (ácido bórico ou ulexita)", "Soja: afeta enchimento de grãos"))
+            elif boro_v < 0.4:
+                micro_alertas.append(("🟡", "Boro", f"{boro_v} mg/dm³", "Nível baixo-médio — foliar recomendado no florescimento", "Soja, café e algodão"))
+
+        # Manganês — importante pH>6.5 causa deficiência
+        if mn_v > 0:
+            if mn_v < 1.2:
+                micro_alertas.append(("🔴", "Manganês", f"{mn_v} mg/dm³", "Deficiência — verificar pH (>6.5 indisponibiliza Mn)", "Soja mais sensível"))
+            elif mn_v > 20:
+                micro_alertas.append(("🟠", "Manganês", f"{mn_v} mg/dm³", "Nível elevado — pH baixo pode causar toxidez", "Elevar pH com calcário"))
+
+        # Cobre
+        if cu_v > 0 and cu_v < 0.2:
+            micro_alertas.append(("🟡", "Cobre", f"{cu_v} mg/dm³", "Baixo — aplicar CuSO4 0.5-1 kg/ha ou foliar", "Solos orgânicos mais suscetíveis"))
+
+        # Enxofre
+        if enx_v > 0 and enx_v < 5:
+            micro_alertas.append(("🔴", "Enxofre", f"{enx_v} mg/dm³", "Deficiência — usar gesso agrícola ou fertilizante com S", "Soja: 10-20 kg S/ha; Milho: 10-15 kg S/ha"))
+
+        if micro_alertas:
+            for icone, nut, val, rec, obs in micro_alertas:
+                st.markdown(f"""
+                <div style='background:#1e293b;border-radius:10px;padding:12px 16px;
+                margin-bottom:8px;border-left:4px solid {"#ef4444" if icone=="🔴" else "#f59e0b"}'>
+                <b style='color:#f1f5f9;'>{icone} {nut}: {val}</b><br>
+                <span style='color:#22c55e;font-size:13px;'>💊 Recomendação: {rec}</span><br>
+                <span style='color:#94a3b8;font-size:12px;'>📌 {obs}</span>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("✅ Micronutrientes dentro dos limites adequados (EMBRAPA/CQFS RS-SC).")
 
 
 # ─────────────────────────────────────────────
