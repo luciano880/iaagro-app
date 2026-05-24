@@ -3399,15 +3399,113 @@ if menu == "🌾 Lavoura":
 
             area_calculada = calcular_area_ha(coords)
             success_box(f"Área calculada automaticamente: {area_calculada:.2f} ha")
+
+            # Seleção da área para vincular o desenho
+            areas_disp = [f"{a.get('Fazenda','')} — {a.get('Talhão','')}" for a in st.session_state.areas]
+            area_vincular = st.selectbox("Vincular desenho à área:", ["— Não vincular —"] + areas_disp, key="sel_area_croqui")
+
             if st.button("Salvar desenho no talhão", key="salvar_desenho_talhao"):
-                # Garante que o polígono salvo é válido (sem bordas cruzadas)
                 pts_hull = convex_hull([[c[0], c[1]] for c in coords])
                 if len(pts_hull) >= 3:
-                    pts_hull.append(pts_hull[0])  # fecha o polígono
+                    pts_hull.append(pts_hull[0])
                     desenho["geometry"]["coordinates"][0] = [[p[0], p[1]] for p in pts_hull]
+
+                # Salva no session_state global
                 st.session_state.dados["desenho_talhao"] = desenho
+
+                # Salva também na área específica se selecionada
+                if area_vincular != "— Não vincular —":
+                    idx_area = areas_disp.index(area_vincular)
+                    st.session_state.areas[idx_area]["desenho"] = desenho
+                    st.session_state.areas[idx_area]["area_calculada_ha"] = round(area_calculada, 2)
+
                 salvar_dados_iaagro()
-                success_box("Desenho do talhão salvo com sucesso!")
+                success_box("✅ Desenho do talhão salvo com sucesso!")
+
+            # ── Exportar Croqui ──────────────────────────────────
+            st.divider()
+            st.subheader("🗺️ Exportar Croqui do Talhão")
+
+            # Lista áreas com desenho salvo
+            areas_com_desenho = [a for a in st.session_state.areas if a.get("desenho")]
+            if st.session_state.dados.get("desenho_talhao"):
+                tem_desenho_geral = True
+            else:
+                tem_desenho_geral = False
+
+            if not areas_com_desenho and not tem_desenho_geral:
+                st.info("Nenhum desenho salvo ainda. Desenhe e salve um talhão acima.")
+            else:
+                # Escolhe qual croqui exportar
+                opcoes_croqui = []
+                if tem_desenho_geral:
+                    opcoes_croqui.append("Último desenho salvo")
+                for a in areas_com_desenho:
+                    opcoes_croqui.append(f"{a.get('Fazenda','')} — {a.get('Talhão','')}")
+
+                croqui_sel = st.selectbox("Selecione o talhão para exportar:", opcoes_croqui, key="sel_croqui_export")
+
+                # Recupera o desenho selecionado
+                if croqui_sel == "Último desenho salvo":
+                    desenho_exp = st.session_state.dados["desenho_talhao"]
+                    titulo_croqui = "Talhão"
+                    area_exp_ha  = calcular_area_ha(desenho_exp["geometry"]["coordinates"][0])
+                else:
+                    idx_exp = opcoes_croqui.index(croqui_sel) - (1 if tem_desenho_geral else 0)
+                    area_exp = areas_com_desenho[idx_exp]
+                    desenho_exp  = area_exp["desenho"]
+                    titulo_croqui = f"{area_exp.get('Fazenda','')} — {area_exp.get('Talhão','')}"
+                    area_exp_ha  = area_exp.get("area_calculada_ha", 0)
+
+                if st.button("📥 Gerar Croqui para Download", key="btn_gerar_croqui", use_container_width=True):
+                    coords_exp = desenho_exp["geometry"]["coordinates"][0]
+                    # Centro do polígono
+                    lat_c = sum(c[1] for c in coords_exp) / len(coords_exp)
+                    lon_c = sum(c[0] for c in coords_exp) / len(coords_exp)
+                    # Converte para GeoJSON string
+                    geojson_str = json.dumps({"type":"FeatureCollection","features":[{
+                        "type":"Feature",
+                        "geometry": desenho_exp["geometry"],
+                        "properties": {"nome": titulo_croqui, "area_ha": area_exp_ha}
+                    }]})
+                    # Gera HTML com mapa Leaflet embutido
+                    html_croqui = f"""<!DOCTYPE html>
+<html><head><meta charset='utf-8'>
+<title>Croqui — {titulo_croqui}</title>
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'/>
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
+<style>body{{margin:0;font-family:Arial,sans-serif}}
+#map{{height:75vh;width:100%}}
+.info{{padding:16px;background:#0f3460;color:#fff;text-align:center}}
+h2{{margin:4px 0;color:#22c55e}}</style>
+</head><body>
+<div class='info'>
+<h2>🌾 IAAGRO — Croqui do Talhão</h2>
+<b>{titulo_croqui}</b> &nbsp;|&nbsp; Área: <b>{area_exp_ha:.2f} ha</b>
+</div>
+<div id='map'></div>
+<script>
+var map = L.map('map').setView([{lat_c},{lon_c}],15);
+L.tileLayer('https://{{s}}.google.com/vt/lyrs=s&x={{x}}&y={{y}}&z={{z}}',
+  {{subdomains:['mt0','mt1','mt2','mt3'],attribution:'Google Satellite'}}).addTo(map);
+var geojson = {geojson_str};
+var layer = L.geoJSON(geojson,{{
+  style:{{color:'#22c55e',weight:3,fillColor:'#22c55e',fillOpacity:0.2}}
+}}).addTo(map);
+map.fitBounds(layer.getBounds());
+L.popup().setLatLng([{lat_c},{lon_c}]).setContent('<b>{titulo_croqui}</b><br>Área: {area_exp_ha:.2f} ha').addTo(map).openOn(map);
+</script>
+</body></html>"""
+
+                    st.download_button(
+                        "📥 Baixar Croqui HTML",
+                        data=html_croqui,
+                        file_name=f"croqui_{titulo_croqui.replace(' ','_').replace('—','')}.html",
+                        mime="text/html",
+                        use_container_width=True,
+                        key="btn_download_croqui"
+                    )
+                    st.success("✅ Croqui gerado! Abra o arquivo HTML no navegador para visualizar o mapa interativo.")
         else:
             info_box("Desenhe um polígono no mapa para salvar.")
 
@@ -4900,25 +4998,38 @@ if menu == "📦 Operacional":
             if not nome_usar:
                 error_box("Digite ou selecione o nome do produto.")
             else:
-                novo_item = {
-                    "Insumo": nome_usar, "Categoria": categoria,
-                    "Quantidade": quantidade, "Unidade": unidade,
-                    "Embalagem": embalagem,
-                    "Valor Unitário R$": valor_unitario,
-                    "Valor Total R$": quantidade * valor_unitario,
-                    "Estoque Mínimo": estoque_minimo,
-                    "Observação": observacao, "Cultura": cultura,
-                    "Dose ha": dose_ha, "Litros ha": litros_ha,
-                    "Tanque litros": capacidade_tanque,
-                    "Fabricante": st.session_state.ac_selecionado["fab"] if st.session_state.ac_selecionado else "",
-                    "Ingrediente Ativo": st.session_state.ac_selecionado["ia"] if st.session_state.ac_selecionado else "",
-                }
-                st.session_state.estoque.append(novo_item)
+                # Verifica se produto já existe — se sim, soma quantidade e valor
+                existente = next((i for i in st.session_state.estoque
+                                  if i.get("Insumo","").strip().lower() == nome_usar.lower()), None)
+                if existente:
+                    existente["Quantidade"]      = existente.get("Quantidade", 0) + quantidade
+                    existente["Valor Total R$"]  = existente["Quantidade"] * existente.get("Valor Unitário R$", valor_unitario)
+                    if valor_unitario > 0:
+                        existente["Valor Unitário R$"] = valor_unitario
+                    if estoque_minimo > 0:
+                        existente["Estoque Mínimo"] = estoque_minimo
+                    salvar_dados_iaagro()
+                    success_box(f"✅ Estoque de **{nome_usar}** atualizado! Nova quantidade: {existente['Quantidade']:.1f} {existente.get('Unidade','')}")
+                else:
+                    novo_item = {
+                        "Insumo": nome_usar, "Categoria": categoria,
+                        "Quantidade": quantidade, "Unidade": unidade,
+                        "Embalagem": embalagem,
+                        "Valor Unitário R$": valor_unitario,
+                        "Valor Total R$": quantidade * valor_unitario,
+                        "Estoque Mínimo": estoque_minimo,
+                        "Observação": observacao, "Cultura": cultura,
+                        "Dose ha": dose_ha, "Litros ha": litros_ha,
+                        "Tanque litros": capacidade_tanque,
+                        "Fabricante": st.session_state.ac_selecionado["fab"] if st.session_state.ac_selecionado else "",
+                        "Ingrediente Ativo": st.session_state.ac_selecionado["ia"] if st.session_state.ac_selecionado else "",
+                    }
+                    st.session_state.estoque.append(novo_item)
+                    salvar_dados_iaagro()
+                    success_box(f"✅ {nome_usar} adicionado ao estoque.")
                 # Reseta autocomplete após adicionar
                 st.session_state.ac_selecionado = None
                 st.session_state.ac_query = ""
-                salvar_dados_iaagro()
-                success_box(f"✅ {nome_usar} adicionado ao estoque.")
     
         st.subheader("Estoque Atual")
         if len(st.session_state.estoque) == 0:
@@ -5975,10 +6086,9 @@ if menu == "🌍 Inteligência":
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            cult_sim_sel  = st.selectbox("Cultura", list(preco_map.keys(), key="sel_cultura_5693"),
-                                          index=list(preco_map.keys()).index(cultura_sim)
-                                          if cultura_sim in preco_map else 0,
-                                          key="sim_cult")
+            _pm_keys = list(preco_map.keys()) if preco_map else ["Soja"]
+            _pm_idx  = _pm_keys.index(cultura_sim) if cultura_sim in _pm_keys else 0
+            cult_sim_sel  = st.selectbox("Cultura", _pm_keys, index=_pm_idx, key="sim_cult")
             produt_real   = st.number_input("Produtividade esperada (sc/ha)", 0.0, 500.0, produt_sim, key="sim_prod")
             preco_custom  = st.number_input("Preço da saca (R$)", 0.0, 10000.0,
                                              preco_map.get(cult_sim_sel, soja_p), key="sim_preco")
