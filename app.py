@@ -4202,29 +4202,35 @@ if menu == "📦 Operacional":
                 if "nfe_itens_usb" not in st.session_state:
                     st.session_state.nfe_itens_usb = []
 
-                # Formulário com st.form para não perder estado ao digitar
-                with st.form("form_nfe_item", clear_on_submit=True):
-                    st.markdown("#### ➕ Adicionar produto da nota")
-                    col_n1, col_n2, col_n3 = st.columns([3,1,1])
-                    with col_n1:
-                        nome_item = st.text_input("Nome do produto", placeholder="Ex: HERB. CALARIS 20L", key="nfe_usb_nome")
-                        fab_item  = st.text_input("Fabricante", placeholder="Ex: LAR", key="nfe_usb_fab")
-                    with col_n2:
-                        qtd_item = st.number_input("Quantidade", min_value=0.0, value=1.0, key="nfe_usb_qtd")
-                        uni_item = st.selectbox("Unidade", ["unidades","kg","litros","sacos","galões"], key="nfe_usb_uni")
-                    with col_n3:
-                        vul_item = st.number_input("Valor unit. R$", min_value=0.0, value=0.0, key="nfe_usb_vul", format="%.2f")
-                    add_item = st.form_submit_button("➕ Adicionar item", use_container_width=True)
+                st.markdown("#### ➕ Adicionar produto da nota")
+                col_n1, col_n2, col_n3 = st.columns([3,1,1])
+                with col_n1:
+                    st.text_input("Nome do produto", placeholder="Ex: HERB. CALARIS 20L", key="nfe_usb_nome")
+                    st.text_input("Fabricante", placeholder="Ex: LAR", key="nfe_usb_fab")
+                with col_n2:
+                    st.number_input("Quantidade", min_value=0.0, value=1.0, step=0.5, key="nfe_usb_qtd")
+                    st.selectbox("Unidade", ["unidades","kg","litros","sacos","galões"], key="nfe_usb_uni")
+                with col_n3:
+                    st.number_input("Valor unit. R$", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="nfe_usb_vul")
 
-                if add_item and nome_item.strip():
-                    st.session_state.nfe_itens_usb.append({
-                        "nome": nome_item.strip(),
-                        "qtd":  qtd_item,
-                        "uni":  uni_item,
-                        "vul":  vul_item,
-                        "fab":  fab_item,
-                    })
-                    st.rerun()
+                def _add_nfe_item():
+                    nome = st.session_state.get("nfe_usb_nome","").strip()
+                    if nome:
+                        st.session_state.nfe_itens_usb.append({
+                            "nome": nome,
+                            "qtd":  st.session_state.get("nfe_usb_qtd", 1.0),
+                            "uni":  st.session_state.get("nfe_usb_uni", "unidades"),
+                            "vul":  st.session_state.get("nfe_usb_vul", 0.0),
+                            "fab":  st.session_state.get("nfe_usb_fab",""),
+                        })
+                        # Limpa campos após adicionar
+                        st.session_state["nfe_usb_nome"] = ""
+                        st.session_state["nfe_usb_qtd"]  = 1.0
+                        st.session_state["nfe_usb_vul"]  = 0.0
+                        st.session_state["nfe_usb_fab"]  = ""
+
+                st.button("➕ Adicionar item", key="btn_add_nfe_item",
+                          on_click=_add_nfe_item, use_container_width=True)
 
                 if st.session_state.nfe_itens_usb:
                     st.markdown("##### Itens adicionados:")
@@ -4241,32 +4247,40 @@ if menu == "📦 Operacional":
                     with col_imp1:
                         if st.button("📥 Importar para o Estoque", key="btn_importar_nfe_usb", use_container_width=True):
                             for it in st.session_state.nfe_itens_usb:
-                                st.session_state.estoque.append({
-                                    "Insumo":            it["nome"],
-                                    "Categoria":         "Outro",
-                                    "Quantidade":        it["qtd"],
-                                    "Unidade":           it["uni"],
-                                    "Valor Unitário R$": it["vul"],
-                                    "Valor Total R$":    round(it["qtd"] * it["vul"], 2),
-                                    "Estoque Mínimo":    0.0,
-                                    "Observação":        f"NF-e: {chave_atual[:20]}...",
-                                    "Cultura":           "Ambos",
-                                    "Dose ha":           0.0,
-                                    "Litros ha":         75.0,
-                                    "Tanque litros":     2000,
-                                    "Fabricante":        it["fab"],
-                                    "Ingrediente Ativo": "",
-                                })
+                                # Verifica se já existe no estoque — se sim soma
+                                existente = next((e for e in st.session_state.estoque
+                                    if e.get("Insumo","").lower() == it["nome"].lower()), None)
+                                if existente:
+                                    existente["Quantidade"]     += it["qtd"]
+                                    existente["Valor Total R$"]  = existente["Quantidade"] * existente.get("Valor Unitário R$", it["vul"])
+                                else:
+                                    st.session_state.estoque.append({
+                                        "Insumo":            it["nome"],
+                                        "Categoria":         "Outro",
+                                        "Quantidade":        it["qtd"],
+                                        "Unidade":           it["uni"],
+                                        "Valor Unitário R$": it["vul"],
+                                        "Valor Total R$":    round(it["qtd"] * it["vul"], 2),
+                                        "Estoque Mínimo":    0.0,
+                                        "Observação":        f"NF-e: {chave_atual[:20]}...",
+                                        "Cultura":           "Ambos",
+                                        "Dose ha":           0.0,
+                                        "Litros ha":         75.0,
+                                        "Tanque litros":     2000,
+                                        "Fabricante":        it["fab"],
+                                        "Ingrediente Ativo": "",
+                                    })
                             salvar_dados_iaagro()
-                            st.session_state.nfe_itens_usb  = []
-                            st.session_state.nfe_modo_manual = False
-                            st.success(f"✅ Produtos importados com sucesso!")
+                            qtd_imp = len(st.session_state.nfe_itens_usb)
+                            st.session_state.nfe_itens_usb   = []
+                            st.session_state.nfe_modo_manual  = False
+                            st.success(f"✅ {qtd_imp} produto(s) importado(s) para o estoque!")
                             st.balloons()
                             st.rerun()
                     with col_imp2:
                         if st.button("❌ Cancelar", key="btn_cancelar_nfe_usb", use_container_width=True):
-                            st.session_state.nfe_itens_usb  = []
-                            st.session_state.nfe_modo_manual = False
+                            st.session_state.nfe_itens_usb   = []
+                            st.session_state.nfe_modo_manual  = False
                             st.rerun()
         # MODO 2 — CÂMERA / FOTO
         # ════════════════════════════════════════════
