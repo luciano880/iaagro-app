@@ -4186,376 +4186,153 @@ if menu == "📦 Operacional":
     # TAB 2 — LEITOR DE CÓDIGO DE BARRAS
     # ════════════════════════════════════════════════════════════════════
     with tab_barcode:
-        st.subheader("📷 Leitura de Código de Barras")
+        st.subheader("📷 Leitor de Código de Barras")
 
-        # ── Modo de leitura ──────────────────────────────────────
-        modo_bc = st.radio(
-            "Modo de leitura",
-            ["⌨️ Leitor USB / Teclado", "📷 Câmera / Foto"],
-            horizontal=True,
-            key="modo_barcode"
-        )
+        aba_usb, aba_cam = st.tabs(["⌨️ Leitor USB / Teclado", "📷 Câmera / Foto"])
 
-        # ════════════════════════════════════════════
-        # MODO 1 — LEITOR USB
-        # ════════════════════════════════════════════
-        if modo_bc == "⌨️ Leitor USB / Teclado":
+        # ── ABA USB ──────────────────────────────────────────────
+        with aba_usb:
+            st.info("Passe o leitor USB no código ou digite manualmente. Preencha quantidade e valor antes de clicar em Adicionar.")
 
-            # Inicializa session_state
-            for _k, _v in [
-                ("bc_etapa", "leitura"),      # leitura | nfe_manual
-                ("bc_codigo_lido", ""),
-                ("bc_nome_produto", ""),
-                ("bc_fabricante", ""),
-                ("bc_eh_nfe", False),
-                ("nfe_chave_usb", ""),
-                ("nfe_itens_usb", []),
-            ]:
-                if _k not in st.session_state:
-                    st.session_state[_k] = _v
+            with st.form("form_usb_v3", clear_on_submit=True):
+                codigo  = st.text_input("Código de barras", placeholder="Passe o leitor aqui...", key="usb_cod")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    nome_manual = st.text_input("Nome (opcional)", placeholder="Deixe em branco para busca automática", key="usb_nome")
+                with col2:
+                    qtd = st.number_input("Quantidade", min_value=0.1, value=1.0, step=1.0, key="usb_qtd")
+                    uni = st.selectbox("Unidade", ["unidades","kg","litros","sacos","galões"], key="usb_uni")
+                with col3:
+                    vul = st.number_input("Valor R$/un", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="usb_vul")
+                    cat = st.selectbox("Categoria", ["Outro","Herbicida","Fungicida","Inseticida","Fertilizante","Semente"], key="usb_cat")
+                ok = st.form_submit_button("📥 Adicionar ao Estoque", use_container_width=True)
 
-            # ── ETAPA 1: Leitura do código ──────────────────────
-            if st.session_state.bc_etapa == "leitura":
-                st.info("🔌 Digite o código ou passe o leitor USB e clique **Adicionar ao Estoque**.")
-
-                with st.form("form_leitor_usb", clear_on_submit=True):
-                    cod_input = st.text_input(
-                        "Código de barras",
-                        placeholder="Passe o leitor aqui...",
-                        key="bc_input_form"
-                    )
-                    col_f1, col_f2, col_f3 = st.columns(3)
-                    with col_f1:
-                        qtd_input = st.number_input("Quantidade", min_value=0.1, value=1.0, step=0.5, key="bc_qtd_form")
-                    with col_f2:
-                        uni_input = st.selectbox("Unidade", ["unidades","kg","litros","sacos","galões"], key="bc_uni_form")
-                    with col_f3:
-                        vul_input = st.number_input("Valor R$/un", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="bc_vul_form")
-                    btn_submit = st.form_submit_button("📥 Adicionar ao Estoque", use_container_width=True)
-
-                if btn_submit and cod_input.strip():
-                    cod = cod_input.strip()
-
-                    if cod.isdigit() and len(cod) == 44:
-                        # Chave NF-e
-                        st.session_state.bc_etapa    = "nfe_manual"
-                        st.session_state.nfe_chave_usb = cod
-                        st.session_state.nfe_itens_usb = []
-                        st.rerun()
-                    else:
-                        # EAN normal — busca nome e adiciona
-                        nome = f"Produto {cod}"
-                        fab  = ""
-                        with st.spinner("🌐 Buscando produto..."):
+            if ok:
+                cod = codigo.strip() if codigo else ""
+                if not cod:
+                    st.error("Digite ou passe o leitor no código de barras.")
+                elif cod.isdigit() and len(cod) == 44:
+                    st.warning("Este é o código da DANFE (NF-e). Use a aba **📄 Importar Nota Fiscal (XML)** para importar os produtos.")
+                    st.code(cod)
+                else:
+                    nome = nome_manual.strip() if nome_manual.strip() else ""
+                    fab  = ""
+                    if not nome:
+                        with st.spinner("Buscando produto..."):
                             try:
-                                r = requests.get(
-                                    f"https://world.openfoodfacts.org/api/v0/product/{cod}.json",
-                                    timeout=4
-                                )
+                                r = requests.get(f"https://world.openfoodfacts.org/api/v0/product/{cod}.json", timeout=4)
                                 if r.status_code == 200:
                                     d = r.json()
                                     if d.get("status") == 1:
-                                        p = d.get("product", {})
-                                        nome = p.get("product_name_pt") or p.get("product_name") or nome
+                                        p    = d.get("product", {})
+                                        nome = p.get("product_name_pt") or p.get("product_name") or ""
                                         fab  = p.get("brands", "")
                             except Exception:
                                 pass
+                    if not nome:
+                        nome = f"Produto {cod}"
 
-                        existente = next((e for e in st.session_state.estoque
-                            if e.get("Insumo","").lower() == nome.lower()), None)
-                        if existente:
-                            existente["Quantidade"]     += qtd_input
-                            existente["Valor Total R$"]  = existente["Quantidade"] * existente.get("Valor Unitário R$", vul_input)
-                            if vul_input > 0:
-                                existente["Valor Unitário R$"] = vul_input
-                            salvar_dados_iaagro()
-                            st.success(f"✅ **{nome}** — estoque atualizado: {existente['Quantidade']:.1f} {uni_input}")
-                        else:
-                            st.session_state.estoque.append({
-                                "Insumo":            nome,
-                                "Categoria":         "Outro",
-                                "Quantidade":        qtd_input,
-                                "Unidade":           uni_input,
-                                "Valor Unitário R$": vul_input,
-                                "Valor Total R$":    round(qtd_input * vul_input, 2),
-                                "Estoque Mínimo":    0.0,
-                                "Observação":        f"Código: {cod} (USB)",
-                                "Cultura":           "Ambos",
-                                "Dose ha":           0.0,
-                                "Litros ha":         75.0,
-                                "Tanque litros":     2000,
-                                "Fabricante":        fab,
-                                "Ingrediente Ativo": "",
-                            })
-                            salvar_dados_iaagro()
-                            st.success(f"✅ **{nome}** adicionado ao estoque!")
-                        st.balloons()
-                        st.rerun()
-
-            # ── ETAPA 2: Formulário NF-e manual ─────────────────
-            elif st.session_state.bc_etapa == "nfe_manual":
-                chave = st.session_state.nfe_chave_usb
-                st.warning("⚠️ Consulta SEFAZ indisponível. Adicione os produtos manualmente.")
-                st.markdown(f"<div style='background:#0f3460;border-radius:8px;padding:10px 14px;border:1px solid #22c55e;margin-bottom:10px;'><b style='color:#22c55e;'>NF-e:</b> <span style='color:#94a3b8;font-size:11px;'>{chave}</span></div>", unsafe_allow_html=True)
-
-                with st.form("form_nfe_item_v2", clear_on_submit=True):
-                    c1, c2, c3 = st.columns([3,1,1])
-                    with c1:
-                        nfe_nome = st.text_input("Nome do produto", placeholder="Ex: HERB. CALARIS 20L", key="nfe_v2_nome")
-                        nfe_fab  = st.text_input("Fabricante", key="nfe_v2_fab")
-                    with c2:
-                        nfe_qtd = st.number_input("Qtd", min_value=0.1, value=1.0, step=0.5, key="nfe_v2_qtd")
-                        nfe_uni = st.selectbox("Und", ["unidades","kg","litros","sacos","galões"], key="nfe_v2_uni")
-                    with c3:
-                        nfe_vul = st.number_input("R$/un", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="nfe_v2_vul")
-                    btn_add = st.form_submit_button("➕ Adicionar item", use_container_width=True)
-
-                if btn_add and nfe_nome.strip():
-                    st.session_state.nfe_itens_usb.append({
-                        "nome": nfe_nome.strip(),
-                        "qtd":  nfe_qtd,
-                        "uni":  nfe_uni,
-                        "vul":  nfe_vul,
-                        "fab":  nfe_fab,
-                    })
+                    existente = next((e for e in st.session_state.estoque
+                        if e.get("Insumo","").lower() == nome.lower()), None)
+                    if existente:
+                        existente["Quantidade"]     += qtd
+                        if vul > 0: existente["Valor Unitário R$"] = vul
+                        existente["Valor Total R$"]  = existente["Quantidade"] * existente.get("Valor Unitário R$", 0)
+                        salvar_dados_iaagro()
+                        st.success(f"✅ Estoque de **{nome}** atualizado para {existente['Quantidade']:.1f} {uni}")
+                    else:
+                        st.session_state.estoque.append({
+                            "Insumo": nome, "Categoria": cat,
+                            "Quantidade": qtd, "Unidade": uni,
+                            "Valor Unitário R$": vul,
+                            "Valor Total R$": round(qtd * vul, 2),
+                            "Estoque Mínimo": 0.0,
+                            "Observação": f"Cód: {cod}",
+                            "Cultura": "Ambos", "Dose ha": 0.0,
+                            "Litros ha": 75.0, "Tanque litros": 2000,
+                            "Fabricante": fab, "Ingrediente Ativo": "",
+                        })
+                        salvar_dados_iaagro()
+                        st.success(f"✅ **{nome}** adicionado ao estoque!")
+                    st.balloons()
                     st.rerun()
 
-                if st.session_state.nfe_itens_usb:
-                    st.markdown("##### Itens:")
-                    for idx, it in enumerate(st.session_state.nfe_itens_usb):
-                        c_a, c_b = st.columns([5,1])
-                        c_a.markdown(f"✅ **{it['nome']}** — {it['qtd']} {it['uni']} × R$ {it['vul']:.2f}")
-                        if c_b.button("🗑️", key=f"nfe_del_{idx}"):
-                            st.session_state.nfe_itens_usb.pop(idx)
-                            st.rerun()
-
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("📥 Importar tudo para o Estoque", key="btn_imp_nfe_v2", use_container_width=True):
-                            for it in st.session_state.nfe_itens_usb:
-                                existente = next((e for e in st.session_state.estoque
-                                    if e.get("Insumo","").lower() == it["nome"].lower()), None)
-                                if existente:
-                                    existente["Quantidade"] += it["qtd"]
-                                    existente["Valor Total R$"] = existente["Quantidade"] * existente.get("Valor Unitário R$", it["vul"])
-                                else:
-                                    st.session_state.estoque.append({
-                                        "Insumo": it["nome"], "Categoria": "Outro",
-                                        "Quantidade": it["qtd"], "Unidade": it["uni"],
-                                        "Valor Unitário R$": it["vul"],
-                                        "Valor Total R$": round(it["qtd"]*it["vul"], 2),
-                                        "Estoque Mínimo": 0.0,
-                                        "Observação": f"NF-e: {chave[:20]}...",
-                                        "Cultura": "Ambos", "Dose ha": 0.0,
-                                        "Litros ha": 75.0, "Tanque litros": 2000,
-                                        "Fabricante": it["fab"], "Ingrediente Ativo": "",
-                                    })
-                            salvar_dados_iaagro()
-                            n = len(st.session_state.nfe_itens_usb)
-                            st.session_state.nfe_itens_usb = []
-                            st.session_state.bc_etapa = "leitura"
-                            st.success(f"✅ {n} produto(s) importado(s)!")
-                            st.balloons()
-                            st.rerun()
-                    with c2:
-                        if st.button("❌ Cancelar", key="btn_cancel_nfe_v2", use_container_width=True):
-                            st.session_state.nfe_itens_usb = []
-                            st.session_state.bc_etapa = "leitura"
-                            st.rerun()
-
-        # MODO 2 — CÂMERA / FOTO
-        # ════════════════════════════════════════════
-        else:
+        # ── ABA CÂMERA ───────────────────────────────────────────
+        with aba_cam:
             if not PYZBAR_OK:
-                st.error("❌ Biblioteca pyzbar não disponível.")
+                st.error("❌ pyzbar não disponível.")
             else:
-                st.info("📸 Envie a foto do código de barras — o produto entra no estoque automaticamente.")
-                img_barcode = st.file_uploader(
-                    "📸 Foto do código de barras",
-                    type=["jpg","jpeg","png","bmp","webp"],
-                    key="uploader_barcode"
-                )
-                if img_barcode:
-                    img_pil = PILImage.open(img_barcode).convert("RGB")
-                    st.image(img_pil, caption="Imagem enviada", use_container_width=True)
-    
-                    with st.spinner("🔍 Lendo código de barras..."):
-                        codigos = pyzbar_decode(img_pil)
-                        if not codigos:
-                            w, h = img_pil.size
-                            img_grande = img_pil.resize((w * 2, h * 2), PILImage.LANCZOS)
-                            codigos = pyzbar_decode(img_grande)
-    
+                st.info("Envie a foto do código de barras. Preencha quantidade e valor antes de enviar.")
+
+                with st.form("form_cam_v3", clear_on_submit=True):
+                    img_up = st.file_uploader("Foto do código", type=["jpg","jpeg","png","bmp","webp"], key="cam_img")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        cam_nome = st.text_input("Nome (opcional)", key="cam_nome")
+                    with col2:
+                        cam_qtd = st.number_input("Quantidade", min_value=0.1, value=1.0, step=1.0, key="cam_qtd")
+                        cam_uni = st.selectbox("Unidade", ["unidades","kg","litros","sacos","galões"], key="cam_uni")
+                    with col3:
+                        cam_vul = st.number_input("Valor R$/un", min_value=0.0, value=0.0, format="%.2f", key="cam_vul")
+                        cam_cat = st.selectbox("Categoria", ["Outro","Herbicida","Fungicida","Inseticida","Fertilizante","Semente"], key="cam_cat")
+                    ok_cam = st.form_submit_button("📷 Ler e Adicionar ao Estoque", use_container_width=True)
+
+                if ok_cam and img_up:
+                    img_pil = PILImage.open(img_up).convert("RGB")
+                    codigos = pyzbar_decode(img_pil)
                     if not codigos:
-                        st.warning("⚠️ Código não detectado. Tente com mais luz e o código bem centralizado na foto.")
+                        w, h = img_pil.size
+                        codigos = pyzbar_decode(img_pil.resize((w*2, h*2), PILImage.LANCZOS))
+                    if not codigos:
+                        st.error("❌ Código não detectado. Use boa iluminação e centralize o código.")
                     else:
-                        for cod in codigos:
-                            valor_cod = cod.data.decode("utf-8").strip()
-                            tipo_cod  = str(cod.type)
-    
-                            # Detecta chave de acesso NF-e (44 dígitos numéricos)
-                            if valor_cod.isdigit() and len(valor_cod) == 44:
-                                st.info(f"📋 Chave NF-e detectada: `{valor_cod[:10]}...` — buscando produtos automaticamente...")
-    
-                                itens_nfe = []
-                                emit_nome = ""
-                                n_nf      = valor_cod[25:34]  # nNF dentro da chave
-                                erro_api  = ""
-    
-                                # ── Tenta buscar XML via API pública da SEFAZ (nfe.fazenda.gov.br) ──
-                                with st.spinner("🌐 Consultando SEFAZ para obter os produtos da nota..."):
+                        for cod_obj in codigos:
+                            cod = cod_obj.data.decode("utf-8").strip()
+                            if cod.isdigit() and len(cod) == 44:
+                                st.warning("Código da DANFE detectado. Use a aba **📄 Importar Nota Fiscal (XML)**.")
+                                continue
+                            nome = cam_nome.strip() if cam_nome.strip() else ""
+                            fab  = ""
+                            if not nome:
+                                with st.spinner("Buscando produto..."):
                                     try:
-                                        api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-                                        if api_key:
-                                            prompt = (
-                                                f"Consulte a API pública da NF-e brasileira (nfe.fazenda.gov.br) "
-                                                f"para a chave de acesso {valor_cod}. "
-                                                f"Extraia os produtos/itens da nota fiscal. "
-                                                f"Responda APENAS com JSON válido sem markdown:\n"
-                                                f'{{"emitente":"nome","numero":"nNF","itens":['
-                                                f'{{"nome":"xProd","quantidade":0.0,"unidade":"uCom","valor_unitario":0.0}}]}}'
-                                                f"\nSe não conseguir acessar, retorne itens vazio."
-                                            )
-                                            resp_ai = requests.post(
-                                                "https://api.anthropic.com/v1/messages",
-                                                headers={
-                                                    "Content-Type":      "application/json",
-                                                    "x-api-key":         api_key,
-                                                    "anthropic-version": "2023-06-01",
-                                                },
-                                                json={
-                                                    "model":    "claude-sonnet-4-20250514",
-                                                    "max_tokens": 1000,
-                                                    "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
-                                                    "messages": [{"role": "user", "content": prompt}]
-                                                },
-                                                timeout=45
-                                            )
-                                            if resp_ai.status_code == 200:
-                                                blocos = resp_ai.json().get("content", [])
-                                                texto  = "".join(b.get("text","") for b in blocos if b.get("type")=="text")
-                                                texto  = texto.replace("```json","").replace("```","").strip()
-                                                idx_s  = texto.find("{")
-                                                idx_e  = texto.rfind("}") + 1
-                                                if idx_s >= 0 and idx_e > idx_s:
-                                                    dados_ai = json.loads(texto[idx_s:idx_e])
-                                                    emit_nome = dados_ai.get("emitente", "")
-                                                    n_nf      = dados_ai.get("numero", n_nf)
-                                                    itens_nfe = dados_ai.get("itens", [])
-                                    except Exception as ex:
-                                        erro_api = str(ex)
-    
-                                uni_map = {
-                                    "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
-                                    "L":"litros","LT":"litros","LTS":"litros",
-                                    "SC":"sacos","SAC":"sacos","UN":"unidades",
-                                    "UNI":"unidades","UND":"unidades","GAL":"galões",
-                                    "BL":"unidades","PT":"unidades","CX":"unidades",
-                                }
-    
-                                if itens_nfe:
-                                    adicionados = 0
-                                    for item in itens_nfe:
-                                        uni_raw  = str(item.get("unidade","UN")).upper()
-                                        uni_norm = uni_map.get(uni_raw, "unidades")
-                                        qtd      = float(item.get("quantidade", 1))
-                                        vul      = float(item.get("valor_unitario", 0))
-                                        nome_i   = str(item.get("nome","Produto"))
-                                        novo = {
-                                            "Insumo":            nome_i,
-                                            "Categoria":         "Outro",
-                                            "Quantidade":        qtd,
-                                            "Unidade":           uni_norm,
-                                            "Valor Unitário R$": vul,
-                                            "Valor Total R$":    round(qtd * vul, 2),
-                                            "Estoque Mínimo":    0.0,
-                                            "Observação":        f"NF-e {n_nf} — chave: {valor_cod[:20]}...",
-                                            "Cultura":           "Ambos",
-                                            "Dose ha":           0.0,
-                                            "Litros ha":         75.0,
-                                            "Tanque litros":     2000,
-                                            "Fabricante":        emit_nome,
-                                            "Ingrediente Ativo": "",
-                                        }
-                                        st.session_state.estoque.append(novo)
-                                        adicionados += 1
-                                    salvar_dados_iaagro()
-                                    st.success(f"✅ {adicionados} produto(s) importado(s) automaticamente da NF-e {n_nf}!")
-                                    st.balloons()
-                                    st.rerun()
-                                else:
-                                    # Fallback: orienta baixar XML manualmente
-                                    st.warning("⚠️ Não foi possível buscar os produtos automaticamente via SEFAZ.")
-                                    st.markdown(f"""
-                                    <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #f59e0b;margin-top:8px;'>
-                                    <b style='color:#f59e0b'>📥 Importe o XML manualmente:</b><br>
-                                    <span style='color:#f1f5f9;font-size:13px;'>
-                                    1. Acesse <b>nfe.fazenda.gov.br/portal</b><br>
-                                    2. Cole a chave abaixo e baixe o XML<br>
-                                    3. Use a aba <b>📄 Importar Nota Fiscal (XML)</b>
-                                    </span><br><br>
-                                    <span style='color:#94a3b8;font-size:11px;word-break:break-all;'>{valor_cod}</span>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                continue
-    
-                            # Evita duplicar
-                            ja_adicionado = any(
-                                str(valor_cod) in str(i.get("Observação",""))
-                                for i in st.session_state.estoque
-                            )
-                            if ja_adicionado:
-                                st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
-                                continue
-    
-                            # Busca nome na Open Food Facts
-                            nome_produto  = f"Produto {valor_cod}"
-                            fabricante    = ""
-                            with st.spinner(f"🌐 Buscando informações do produto {valor_cod}..."):
-                                try:
-                                    resp = requests.get(
-                                        f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
-                                        timeout=5
-                                    )
-                                    if resp.status_code == 200:
-                                        data = resp.json()
-                                        if data.get("status") == 1:
-                                            p = data.get("product", {})
-                                            nome_produto = (
-                                                p.get("product_name_pt")
-                                                or p.get("product_name")
-                                                or nome_produto
-                                            )
-                                            fabricante = p.get("brands", "")
-                                except Exception:
-                                    pass  # erro silenciado intencionalmente
-    
-                            # Adiciona no estoque
-                            novo = {
-                                "Insumo":            nome_produto,
-                                "Categoria":         "Outro",
-                                "Quantidade":        1.0,
-                                "Unidade":           "unidades",
-                                "Valor Unitário R$": 0.0,
-                                "Valor Total R$":    0.0,
-                                "Estoque Mínimo":    0.0,
-                                "Observação":        f"Código: {valor_cod} ({tipo_cod})",
-                                "Cultura":           "Ambos",
-                                "Dose ha":           0.0,
-                                "Litros ha":         75.0,
-                                "Tanque litros":     2000,
-                                "Fabricante":        fabricante,
-                                "Ingrediente Ativo": "",
-                            }
-                            st.session_state.estoque.append(novo)
-                            salvar_dados_iaagro()
-                            st.success(f"✅ **{nome_produto}** adicionado ao estoque!")
+                                        r = requests.get(f"https://world.openfoodfacts.org/api/v0/product/{cod}.json", timeout=4)
+                                        if r.status_code == 200:
+                                            d = r.json()
+                                            if d.get("status") == 1:
+                                                p    = d.get("product", {})
+                                                nome = p.get("product_name_pt") or p.get("product_name") or ""
+                                                fab  = p.get("brands", "")
+                                    except Exception:
+                                        pass
+                            if not nome:
+                                nome = f"Produto {cod}"
+
+                            existente = next((e for e in st.session_state.estoque
+                                if e.get("Insumo","").lower() == nome.lower()), None)
+                            if existente:
+                                existente["Quantidade"]    += cam_qtd
+                                if cam_vul > 0: existente["Valor Unitário R$"] = cam_vul
+                                existente["Valor Total R$"] = existente["Quantidade"] * existente.get("Valor Unitário R$", 0)
+                                salvar_dados_iaagro()
+                                st.success(f"✅ Estoque de **{nome}** atualizado!")
+                            else:
+                                st.session_state.estoque.append({
+                                    "Insumo": nome, "Categoria": cam_cat,
+                                    "Quantidade": cam_qtd, "Unidade": cam_uni,
+                                    "Valor Unitário R$": cam_vul,
+                                    "Valor Total R$": round(cam_qtd * cam_vul, 2),
+                                    "Estoque Mínimo": 0.0,
+                                    "Observação": f"Cód: {cod} (câmera)",
+                                    "Cultura": "Ambos", "Dose ha": 0.0,
+                                    "Litros ha": 75.0, "Tanque litros": 2000,
+                                    "Fabricante": fab, "Ingrediente Ativo": "",
+                                })
+                                salvar_dados_iaagro()
+                                st.success(f"✅ **{nome}** adicionado ao estoque!")
                             st.balloons()
                             st.rerun()
-    
-    # ════════════════════════════════════════════════════════════════════
-    # TAB 3 — IMPORTAR NOTA FISCAL XML (NF-e)
-    # ════════════════════════════════════════════════════════════════════
+
     with tab_nfe:
         st.subheader("📄 Importar Nota Fiscal Eletrônica (XML)")
         st.info("📎 Faça upload do XML da NF-e — todos os produtos entram no estoque automaticamente.")
