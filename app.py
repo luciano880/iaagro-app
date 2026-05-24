@@ -4029,126 +4029,38 @@ if menu == "📦 Operacional":
         # MODO 1 — LEITOR USB (digita o código direto)
         # ════════════════════════════════════════════
         if modo_bc == "⌨️ Leitor USB / Teclado":
-            st.info("🔌 Clique no campo abaixo, passe o leitor USB no código — **não precisa clicar em nada**, o produto entra sozinho.")
+            st.info("🔌 Digite ou passe o leitor USB no campo abaixo e clique em **Adicionar**.")
 
-            # Inicializa estado
-            if "ultimo_cod_processado" not in st.session_state:
-                st.session_state.ultimo_cod_processado = ""
+            if "nfe_modo_manual" not in st.session_state:
+                st.session_state.nfe_modo_manual = False
+            if "nfe_itens_usb" not in st.session_state:
+                st.session_state.nfe_itens_usb = []
+            if "nfe_chave_usb" not in st.session_state:
+                st.session_state.nfe_chave_usb = ""
 
-            def _processar_barcode_usb():
-                cod = st.session_state.get("bc_usb_field","").strip()
-                if cod and cod != st.session_state.ultimo_cod_processado:
-                    st.session_state.ultimo_cod_processado = cod
-                    st.session_state["_bc_usb_pending"] = cod
-
-            st.text_input(
-                "📦 Código de barras — passe o leitor aqui",
-                key="bc_usb_field",
-                on_change=_processar_barcode_usb,
-                placeholder="Aguardando leitura...",
-            )
-
-            # Processa código pendente
-            valor_cod = st.session_state.pop("_bc_usb_pending", None)
-            if valor_cod:
-                valor_cod = valor_cod.strip()
-                ja_adicionado = any(
-                    str(valor_cod) in str(i.get("Observação",""))
-                    for i in st.session_state.estoque
+            # Campo + botão dentro de um form — captura Enter do leitor
+            with st.form("form_bc_usb", clear_on_submit=True):
+                codigo_digitado = st.text_input(
+                    "Código de barras",
+                    placeholder="Passe o leitor ou digite o código...",
+                    key="bc_usb_field"
                 )
-                if ja_adicionado:
-                    st.warning(f"⚠️ Código **{valor_cod}** já está no estoque.")
-                elif valor_cod.isdigit() and len(valor_cod) == 44:
-                    st.info("📋 Chave NF-e detectada — buscando produtos automaticamente...")
-                    itens_nfe_usb = []
-                    emit_usb = ""
-                    n_nf_usb = valor_cod[25:34]
+                btn_ler = st.form_submit_button("📥 Adicionar ao Estoque", use_container_width=True)
 
-                    with st.spinner("🌐 Consultando SEFAZ via IA..."):
-                        try:
-                            api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-                            if api_key:
-                                prompt = (
-                                    f"Consulte a NF-e com chave {valor_cod} no portal nfe.fazenda.gov.br "
-                                    f"e extraia os itens/produtos da nota. "
-                                    f"Retorne APENAS JSON válido sem markdown:\n"
-                                    f'{{"emitente":"nome","numero":"nNF","itens":['
-                                    f'{{"nome":"xProd","quantidade":0.0,"unidade":"uCom","valor_unitario":0.0}}]}}'
-                                    f"\nSe não encontrar, retorne itens vazio."
-                                )
-                                resp_ai = requests.post(
-                                    "https://api.anthropic.com/v1/messages",
-                                    headers={
-                                        "Content-Type":      "application/json",
-                                        "x-api-key":         api_key,
-                                        "anthropic-version": "2023-06-01",
-                                    },
-                                    json={
-                                        "model":    "claude-sonnet-4-20250514",
-                                        "max_tokens": 1000,
-                                        "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
-                                        "messages": [{"role": "user", "content": prompt}]
-                                    },
-                                    timeout=45
-                                )
-                                if resp_ai.status_code == 200:
-                                    blocos = resp_ai.json().get("content", [])
-                                    texto  = "".join(b.get("text","") for b in blocos if b.get("type")=="text")
-                                    texto  = texto.replace("```json","").replace("```","").strip()
-                                    idx_s  = texto.find("{")
-                                    idx_e  = texto.rfind("}") + 1
-                                    if idx_s >= 0 and idx_e > idx_s:
-                                        dados_ai = json.loads(texto[idx_s:idx_e])
-                                        emit_usb      = dados_ai.get("emitente", "")
-                                        n_nf_usb      = dados_ai.get("numero", n_nf_usb)
-                                        itens_nfe_usb = dados_ai.get("itens", [])
-                        except Exception:
-                            pass
+            if btn_ler and codigo_digitado.strip():
+                valor_cod = codigo_digitado.strip()
 
-                    uni_map_usb = {
-                        "KG":"kg","KGS":"kg","TON":"ton","T":"ton",
-                        "L":"litros","LT":"litros","LTS":"litros",
-                        "SC":"sacos","SAC":"sacos","UN":"unidades",
-                        "BL":"unidades","PT":"unidades","CX":"unidades",
-                    }
-
-                    if itens_nfe_usb:
-                        for item in itens_nfe_usb:
-                            uni_raw  = str(item.get("unidade","UN")).upper()
-                            uni_norm = uni_map_usb.get(uni_raw, "unidades")
-                            qtd      = float(item.get("quantidade", 1))
-                            vul      = float(item.get("valor_unitario", 0))
-                            st.session_state.estoque.append({
-                                "Insumo":            str(item.get("nome","Produto")),
-                                "Categoria":         "Outro",
-                                "Quantidade":        qtd,
-                                "Unidade":           uni_norm,
-                                "Valor Unitário R$": vul,
-                                "Valor Total R$":    round(qtd * vul, 2),
-                                "Estoque Mínimo":    0.0,
-                                "Observação":        f"NF-e {n_nf_usb} — chave: {valor_cod[:20]}...",
-                                "Cultura":           "Ambos",
-                                "Dose ha":           0.0,
-                                "Litros ha":         75.0,
-                                "Tanque litros":     2000,
-                                "Fabricante":        emit_usb,
-                                "Ingrediente Ativo": "",
-                            })
-                        salvar_dados_iaagro()
-                        st.success(f"✅ {len(itens_nfe_usb)} produto(s) da NF-e importados!")
-                        st.balloons()
-                        st.rerun()
-                    else:
-                        # Salva chave para o formulário manual
-                        st.session_state.nfe_chave_usb  = valor_cod
-                        st.session_state.nfe_modo_manual = True
-                        if "nfe_itens_usb" not in st.session_state:
-                            st.session_state.nfe_itens_usb = []
+                if valor_cod.isdigit() and len(valor_cod) == 44:
+                    # Chave NF-e — ativa modo manual
+                    st.session_state.nfe_chave_usb   = valor_cod
+                    st.session_state.nfe_modo_manual  = True
+                    st.session_state.nfe_itens_usb   = []
+                    st.info(f"📋 Chave NF-e detectada. Adicione os produtos abaixo.")
                 else:
-                    # EAN normal — adiciona direto
+                    # EAN normal — busca e adiciona direto
                     nome_produto = f"Produto {valor_cod}"
                     fabricante   = ""
-                    with st.spinner(f"🌐 Buscando produto {valor_cod}..."):
+                    with st.spinner(f"🌐 Buscando produto..."):
                         try:
                             resp = requests.get(
                                 f"https://world.openfoodfacts.org/api/v0/product/{valor_cod}.json",
@@ -4166,27 +4078,36 @@ if menu == "📦 Operacional":
                                     fabricante = p.get("brands", "")
                         except Exception:
                             pass
-                    st.session_state.estoque.append({
-                        "Insumo":            nome_produto,
-                        "Categoria":         "Outro",
-                        "Quantidade":        1.0,
-                        "Unidade":           "unidades",
-                        "Valor Unitário R$": 0.0,
-                        "Valor Total R$":    0.0,
-                        "Estoque Mínimo":    0.0,
-                        "Observação":        f"Código: {valor_cod} (USB)",
-                        "Cultura":           "Ambos",
-                        "Dose ha":           0.0,
-                        "Litros ha":         75.0,
-                        "Tanque litros":     2000,
-                        "Fabricante":        fabricante,
-                        "Ingrediente Ativo": "",
-                    })
-                    salvar_dados_iaagro()
-                    st.success(f"✅ **{nome_produto}** adicionado! (Código: {valor_cod})")
+
+                    # Verifica duplicata
+                    existente = next((e for e in st.session_state.estoque
+                        if e.get("Insumo","").lower() == nome_produto.lower()), None)
+                    if existente:
+                        existente["Quantidade"] = existente.get("Quantidade", 0) + 1
+                        existente["Valor Total R$"] = existente["Quantidade"] * existente.get("Valor Unitário R$", 0)
+                        salvar_dados_iaagro()
+                        st.success(f"✅ Quantidade de **{nome_produto}** atualizada no estoque!")
+                    else:
+                        st.session_state.estoque.append({
+                            "Insumo":            nome_produto,
+                            "Categoria":         "Outro",
+                            "Quantidade":        1.0,
+                            "Unidade":           "unidades",
+                            "Valor Unitário R$": 0.0,
+                            "Valor Total R$":    0.0,
+                            "Estoque Mínimo":    0.0,
+                            "Observação":        f"Código: {valor_cod} (USB)",
+                            "Cultura":           "Ambos",
+                            "Dose ha":           0.0,
+                            "Litros ha":         75.0,
+                            "Tanque litros":     2000,
+                            "Fabricante":        fabricante,
+                            "Ingrediente Ativo": "",
+                        })
+                        salvar_dados_iaagro()
+                        st.success(f"✅ **{nome_produto}** adicionado ao estoque!")
                     st.balloons()
                     st.rerun()
-
             # ── Formulário manual NF-e — persiste mesmo sem código pendente ──
             if st.session_state.get("nfe_modo_manual") and st.session_state.get("nfe_chave_usb"):
                 chave_atual = st.session_state.nfe_chave_usb
