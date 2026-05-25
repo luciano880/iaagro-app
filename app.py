@@ -35,6 +35,18 @@ from streamlit_js_eval import get_geolocation
 from streamlit_folium import st_folium
 from folium.plugins import Draw
 from io import BytesIO
+
+# ─────────────────────────────────────────────
+# SUPABASE — importa módulo de integração
+# ─────────────────────────────────────────────
+try:
+    from supabase_db import (
+        sb_login, sb_signup, sb_logout, sb_reset_senha,
+        sb_carregar, sb_salvar, sb_plano
+    )
+    _SB_DISPONIVEL = True
+except Exception:
+    _SB_DISPONIVEL = False
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
@@ -1052,20 +1064,29 @@ def carregar_dados_iaagro():
 
 def salvar_dados_iaagro():
     dados_salvos = {
-        "dados": st.session_state.dados,
-        "areas": st.session_state.areas,
-        "estoque": st.session_state.estoque,
-        "aplicacoes": st.session_state.aplicacoes,
+        "dados":                   st.session_state.dados,
+        "areas":                   st.session_state.areas,
+        "estoque":                 st.session_state.estoque,
+        "aplicacoes":              st.session_state.aplicacoes,
         "historico_produtividade": st.session_state.historico_produtividade,
-        "pluviometro": st.session_state.pluviometro,
-        "carencia_registros": st.session_state.get("carencia_registros", []),
-        "dre_registros":      st.session_state.get("dre_registros", []),
-        "calendario_eventos": st.session_state.get("calendario_eventos", []),
-        "harvest_historico":   st.session_state.get("harvest_historico", []),
-        "receituarios":        st.session_state.get("receituarios", []),
-        "segmento":            st.session_state.get("segmento", None),
-        "safrinha_registros":  st.session_state.get("safrinha_registros", []),
+        "pluviometro":             st.session_state.pluviometro,
+        "carencia_registros":      st.session_state.get("carencia_registros", []),
+        "dre_registros":           st.session_state.get("dre_registros", []),
+        "calendario_eventos":      st.session_state.get("calendario_eventos", []),
+        "harvest_historico":       st.session_state.get("harvest_historico", []),
+        "receituarios":            st.session_state.get("receituarios", []),
+        "segmento":                st.session_state.get("segmento", None),
+        "safrinha_registros":      st.session_state.get("safrinha_registros", []),
     }
+    # Salva no Supabase (multi-usuário) se disponível
+    if _SUPABASE_ATIVO and st.session_state.get("sb_token") and st.session_state.get("sb_user_id"):
+        try:
+            sb_salvar(_SB_URL, _SB_KEY, st.session_state.sb_token,
+                      st.session_state.sb_user_id, dados_salvos)
+            return
+        except Exception:
+            pass  # falha no Supabase — usa arquivo local como fallback
+    # Fallback: arquivo local
     with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
         json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
 
@@ -1127,8 +1148,19 @@ def salvar_usuarios(usuarios):
         pass  # falha silenciada — não crítico
 
 # ─────────────────────────────────────────────
+# SUPABASE — configuração
+# ─────────────────────────────────────────────
+_SB_URL = st.secrets.get("SUPABASE_URL", "")
+_SB_KEY = st.secrets.get("SUPABASE_ANON_KEY", "")
+_SUPABASE_ATIVO = bool(_SB_URL and _SB_KEY and _SB_DISPONIVEL)
+
+# ─────────────────────────────────────────────
 # SESSION STATE – LOGIN
 # ─────────────────────────────────────────────
+if "sb_token"   not in st.session_state: st.session_state.sb_token   = ""
+if "sb_user_id" not in st.session_state: st.session_state.sb_user_id = ""
+if "sb_plano"   not in st.session_state: st.session_state.sb_plano   = "free"
+
 if "usuarios" not in st.session_state:
     st.session_state.usuarios = carregar_usuarios()
 
@@ -1142,225 +1174,143 @@ if "usuario_atual" not in st.session_state:
 # TELA DE LOGIN
 # ─────────────────────────────────────────────
 def tela_login():
-    # Logo centralizada na tela de login
+    """Tela de login — usa Supabase se disponível, senão sistema local."""
+
+    # Logo
     if os.path.exists("IAAgrologo.jpeg"):
         import base64 as _b64
         with open("IAAgrologo.jpeg", "rb") as _f:
-            _logo = _b64.b64encode(_f.read()).decode()
-        st.markdown(f"""
-        <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:10px;">
-            <img src="data:image/jpeg;base64,{_logo}"
-                 style="width:180px;border-radius:20px;
-                        box-shadow:0 4px 24px rgba(0,200,83,0.35);
-                        margin-bottom:14px;" />
-            <h1 style="color:#6ee7b7;font-size:2.2rem;font-weight:900;
-                       letter-spacing:2px;margin:0;">IAAgro Pro</h1>
-            <p style="color:#93c5fd;font-size:1rem;font-weight:600;
-                      margin:4px 0 0 0;letter-spacing:1px;">
-                Gestão agrícola inteligente
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="text-align:center;margin-bottom:16px;">
-            <h1 style="color:#6ee7b7;font-size:2.2rem;font-weight:900;">🌱 IAAgro Pro</h1>
-            <p style="color:#93c5fd;font-size:1rem;font-weight:600;">Gestão agrícola inteligente</p>
-        </div>
-        """, unsafe_allow_html=True)
+            _logo_b64 = _b64.b64encode(_f.read()).decode()
+        st.markdown(f"""<div style='text-align:center;padding:20px 0 10px;'>
+        <img src='data:image/jpeg;base64,{_logo_b64}' style='max-height:120px;border-radius:12px;'/>
+        </div>""", unsafe_allow_html=True)
 
-    st.markdown("<h3 style='color:#f1f5f9;text-align:center;margin-bottom:18px;'>Acesse sua conta</h3>",
-                unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center;color:#22c55e;'>🌾 IAAGRO</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center;color:#94a3b8;'>Inteligência Agrícola de Precisão</p>", unsafe_allow_html=True)
 
-    aba_login, aba_cadastro, aba_recuperar = st.tabs(
-        ["Entrar", "Criar conta", "Recuperar senha"]
-    )
+    if _SUPABASE_ATIVO:
+        # ── LOGIN VIA SUPABASE ───────────────────────────
+        aba_login, aba_cadastro, aba_recuperar = st.tabs(["🔓 Entrar","➕ Criar Conta","🔑 Recuperar Senha"])
 
-    with aba_login:
-        with st.form("form_login", clear_on_submit=False):
-            usuario = st.text_input("Usuário", key="login_usuario")
-            senha   = st.text_input("Senha", type="password", key="login_senha")
-            entrar  = st.form_submit_button("Entrar", use_container_width=True)
-
-        if entrar:
-            _usuarios = st.session_state.usuarios if isinstance(st.session_state.usuarios, dict) else {}
-            u = _usuarios.get(usuario)
-            if u and verificar_senha(senha, u["senha"]):
-                st.session_state.logado = True
-                st.session_state.usuario_atual = usuario
-                st.success("Login realizado com sucesso.")
-                st.rerun()
-            else:
-                st.error("Usuário ou senha incorretos.")
-
-    with aba_cadastro:
-        novo_nome       = st.text_input("Nome completo",       key="cad_nome")
-        novo_email      = st.text_input("Email de recuperação", key="cad_email")
-        novo_usuario    = st.text_input("Criar usuário",        key="cad_usuario")
-        nova_senha      = st.text_input("Criar senha",          type="password", key="cad_senha")
-        confirmar_senha = st.text_input("Confirmar senha",      type="password", key="cad_confirmar")
-
-        if st.button("Cadastrar", use_container_width=True, key="btn_cadastrar"):
-            if novo_nome.strip() == "":
-                st.error("Digite seu nome.")
-            elif novo_email.strip() == "" or "@" not in novo_email or "." not in novo_email:
-                st.error("Digite um email válido.")
-            elif novo_usuario.strip() == "":
-                st.error("Digite um usuário.")
-            elif len(nova_senha) < 6:
-                st.error("A senha precisa ter pelo menos 6 caracteres.")
-            elif nova_senha != confirmar_senha:
-                st.error("As senhas não conferem.")
-            elif novo_usuario in st.session_state.usuarios:
-                st.error("Esse usuário já existe.")
-            else:
-                st.session_state.usuarios[novo_usuario] = {
-                    "nome":  novo_nome,
-                    "email": novo_email,
-                    "senha": hash_senha(nova_senha)
-                }
-                salvar_usuarios(st.session_state.usuarios)
-                st.success("✅ Conta criada com sucesso!")
-                st.info("👆 Clique na aba **Entrar** para fazer login com sua nova conta.")
-                if st.button("🔓 Ir para Login", key="btn_pos_cadastro"):
-                    st.rerun()
-
-    with aba_recuperar:
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
-        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 14px 0;font-size:13px;">
-        🔐 Informe seu usuário e e-mail cadastrado. Enviaremos um código de 6 dígitos para redefinir sua senha.
-        </div>''', unsafe_allow_html=True)
-
-        # Session state do fluxo de recuperação
-        if "rec_etapa"      not in st.session_state: st.session_state.rec_etapa      = 1
-        if "rec_token"      not in st.session_state: st.session_state.rec_token      = ""
-        if "rec_token_exp"  not in st.session_state: st.session_state.rec_token_exp  = None
-        if "rec_usuario_ok" not in st.session_state: st.session_state.rec_usuario_ok = ""
-
-        # ── ETAPA 1: Solicitar código ──────────────────────────────────
-        if st.session_state.rec_etapa == 1:
-            st.markdown("#### 📧 Etapa 1 — Solicitar código por e-mail")
-            rec_user  = st.text_input("👤 Usuário cadastrado", key="rec_u1")
-            rec_email = st.text_input("📧 E-mail cadastrado",  key="rec_e1",
-                                       placeholder="email@exemplo.com")
-
-            cfg_email = st.session_state.get("email_config", {})
-            if not cfg_email.get("ativo") or not cfg_email.get("remetente"):
-                st.markdown('''<div style="background:#78350f;color:#fff;padding:10px 14px;
-                border-radius:8px;border-left:4px solid #f59e0b;font-size:12px;font-weight:600;">
-                ⚠️ Email SMTP não configurado. Configure em <b>⚙️ Configurações → Email SMTP</b>
-                para usar a recuperação por email.
-                </div>''', unsafe_allow_html=True)
-
-            if st.button("📨 Enviar código por e-mail", key="btn_enviar_token",
-                         use_container_width=True):
-                if not rec_user.strip():
-                    st.error("❌ Digite seu usuário.")
-                elif rec_user not in st.session_state.usuarios:
-                    st.error("❌ Usuário ou e-mail incorretos.")
-                elif not rec_email.strip() or "@" not in rec_email:
-                    st.error("❌ Digite um e-mail válido.")
-                elif st.session_state.usuarios[rec_user].get("email","").strip().lower() \
-                        != rec_email.strip().lower():
-                    st.error("❌ Usuário ou e-mail incorretos.")
+        with aba_login:
+            with st.form("form_login_sb", clear_on_submit=False):
+                email_l = st.text_input("E-mail", placeholder="seu@email.com", key="sb_email_login")
+                senha_l = st.text_input("Senha", type="password", key="sb_senha_login")
+                btn_l   = st.form_submit_button("Entrar", use_container_width=True)
+            if btn_l:
+                if not email_l or not senha_l:
+                    st.error("Preencha e-mail e senha.")
                 else:
-                    # Gerar token de 6 dígitos
-                    token = str(random.randint(100000, 999999))
-                    exp   = datetime.now() + timedelta(minutes=15)
-                    ok, msg_err = enviar_email_recuperacao(rec_email.strip(), rec_user, token)
+                    with st.spinner("Autenticando..."):
+                        res = sb_login(_SB_URL, _SB_KEY, email_l.strip(), senha_l)
+                    if res["ok"]:
+                        st.session_state.logado        = True
+                        st.session_state.usuario_atual = res["nome"] or res["email"]
+                        st.session_state.sb_token      = res["token"]
+                        st.session_state.sb_user_id    = res["user_id"]
+                        st.session_state.sb_plano      = sb_plano(_SB_URL, _SB_KEY, res["token"], res["user_id"])
+                        # Carrega dados do usuário do Supabase
+                        dados_sb = sb_carregar(_SB_URL, _SB_KEY, res["token"], res["user_id"])
+                        if dados_sb:
+                            for k, v in dados_sb.items():
+                                setattr(st.session_state, k, v)
+                        st.success(f"✅ Bem-vindo, {st.session_state.usuario_atual}!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {res['erro']}")
+
+        with aba_cadastro:
+            with st.form("form_cadastro_sb", clear_on_submit=True):
+                nome_c  = st.text_input("Nome completo", key="sb_nome_cad")
+                email_c = st.text_input("E-mail", key="sb_email_cad")
+                senha_c = st.text_input("Senha (mín. 6 caracteres)", type="password", key="sb_senha_cad")
+                conf_c  = st.text_input("Confirmar senha", type="password", key="sb_conf_cad")
+                btn_c   = st.form_submit_button("Criar Conta", use_container_width=True)
+            if btn_c:
+                if not nome_c or not email_c or not senha_c:
+                    st.error("Preencha todos os campos.")
+                elif len(senha_c) < 6:
+                    st.error("Senha deve ter pelo menos 6 caracteres.")
+                elif senha_c != conf_c:
+                    st.error("Senhas não conferem.")
+                else:
+                    with st.spinner("Criando conta..."):
+                        res = sb_signup(_SB_URL, _SB_KEY, email_c.strip(), senha_c, nome_c.strip())
+                    if res.get("id") or res.get("user"):
+                        st.success("✅ Conta criada! Verifique seu e-mail e faça login.")
+                    else:
+                        st.error(f"❌ {res.get('msg', res.get('error_description', 'Erro ao criar conta'))}")
+
+        with aba_recuperar:
+            with st.form("form_recup_sb", clear_on_submit=True):
+                email_r = st.text_input("E-mail cadastrado", key="sb_email_recup")
+                btn_r   = st.form_submit_button("Enviar link de recuperação", use_container_width=True)
+            if btn_r:
+                if not email_r:
+                    st.error("Digite seu e-mail.")
+                else:
+                    ok = sb_reset_senha(_SB_URL, _SB_KEY, email_r.strip())
                     if ok:
-                        st.session_state.rec_token      = token
-                        st.session_state.rec_token_exp  = exp
-                        st.session_state.rec_usuario_ok = rec_user
-                        st.session_state.rec_etapa      = 2
-                        st.rerun()
+                        st.success("✅ Link de recuperação enviado para seu e-mail.")
                     else:
-                        if "não configurado" in msg_err.lower() or "não config" in msg_err.lower():
-                            st.error(f"❌ {msg_err}")
-                        else:
-                            st.error(f"❌ Falha ao enviar email: {msg_err}")
+                        st.error("❌ Não foi possível enviar o link. Verifique o e-mail.")
 
-        # ── ETAPA 2: Inserir código ────────────────────────────────────
-        elif st.session_state.rec_etapa == 2:
-            st.markdown("#### 🔢 Etapa 2 — Digite o código recebido")
-            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
-            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
-            ✅ Código enviado para o e-mail cadastrado do usuário <b>{st.session_state.rec_usuario_ok}</b>.<br>
-            ⏱️ Válido por 15 minutos.
-            </div>''', unsafe_allow_html=True)
+        st.markdown("---")
+        st.caption("🔒 Dados protegidos por Supabase | Cada usuário tem seus próprios dados")
 
-            token_digitado = st.text_input("🔢 Código de 6 dígitos",
-                                            placeholder="000000", key="rec_token_input",
-                                            max_chars=6)
+    else:
+        # ── LOGIN LOCAL (fallback sem Supabase) ─────────
+        aba_login, aba_cadastro, aba_recuperar = st.tabs(["🔓 Entrar","➕ Criar Conta","🔑 Recuperar Senha"])
 
-            col_et2a, col_et2b = st.columns(2)
-            with col_et2a:
-                if st.button("✅ Validar código", key="btn_validar_token",
-                             use_container_width=True):
-                    agora = datetime.now()
-                    if st.session_state.rec_token_exp and agora > st.session_state.rec_token_exp:
-                        st.error("❌ Código expirado. Solicite um novo.")
-                        st.session_state.rec_etapa = 1
-                        st.rerun()
-                    elif token_digitado.strip() == st.session_state.rec_token:
-                        st.session_state.rec_etapa = 3
-                        st.rerun()
-                    else:
-                        st.error("❌ Código incorreto. Verifique o email e tente novamente.")
-            with col_et2b:
-                if st.button("🔄 Reenviar código", key="btn_reenviar_token",
-                             use_container_width=True):
-                    st.session_state.rec_etapa = 1
+        with aba_login:
+            with st.form("form_login", clear_on_submit=False):
+                usuario = st.text_input("Usuário", key="login_usuario")
+                senha   = st.text_input("Senha", type="password", key="login_senha")
+                entrar  = st.form_submit_button("Entrar", use_container_width=True)
+            if entrar:
+                _usuarios = st.session_state.usuarios if isinstance(st.session_state.usuarios, dict) else {}
+                u = _usuarios.get(usuario)
+                if u and verificar_senha(senha, u["senha"]):
+                    st.session_state.logado        = True
+                    st.session_state.usuario_atual = usuario
+                    st.session_state.sb_plano      = "pro"  # local = sem limite
+                    st.success("Login realizado com sucesso.")
                     st.rerun()
-
-        # ── ETAPA 3: Nova senha ────────────────────────────────────────
-        elif st.session_state.rec_etapa == 3:
-            st.markdown("#### 🔑 Etapa 3 — Criar nova senha")
-            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
-            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
-            ✅ Código validado! Crie uma nova senha para <b>{st.session_state.rec_usuario_ok}</b>.
-            </div>''', unsafe_allow_html=True)
-
-            nova_senha1 = st.text_input("🔑 Nova senha (mín. 6 caracteres)",
-                                         type="password", key="rec_ns1")
-            nova_senha2 = st.text_input("🔑 Confirmar nova senha",
-                                         type="password", key="rec_ns2")
-
-            # Feedback em tempo real
-            if nova_senha1 and len(nova_senha1) < 6:
-                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Mínimo 6 caracteres.</div>', unsafe_allow_html=True)
-            if nova_senha1 and nova_senha2 and nova_senha1 != nova_senha2:
-                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Senhas não coincidem.</div>', unsafe_allow_html=True)
-            if nova_senha1 and nova_senha2 and nova_senha1 == nova_senha2 and len(nova_senha1) >= 6:
-                st.markdown('<div style="color:#86efac;font-size:12px;font-weight:600;">✅ Senhas coincidem.</div>', unsafe_allow_html=True)
-
-            if st.button("🔐 Salvar nova senha", key="btn_salvar_nova_senha",
-                         use_container_width=True):
-                if len(nova_senha1) < 6:
-                    st.error("❌ Senha precisa ter pelo menos 6 caracteres.")
-                elif nova_senha1 != nova_senha2:
-                    st.error("❌ As senhas não coincidem.")
                 else:
-                    usuario_rec = st.session_state.rec_usuario_ok
-                    st.session_state.usuarios[usuario_rec]["senha"] = hash_senha(nova_senha1)
-                    salvar_usuarios(st.session_state.usuarios)
-                    # Limpar fluxo
-                    st.session_state.rec_etapa      = 1
-                    st.session_state.rec_token      = ""
-                    st.session_state.rec_token_exp  = None
-                    st.session_state.rec_usuario_ok = ""
-                    st.session_state.senha_redefinida = True
-                    st.rerun()
+                    st.error("Usuário ou senha incorretos.")
 
-        # Mensagem de sucesso persistente
-        if st.session_state.get("senha_redefinida"):
-            st.markdown('''<div style="background:#14532d;color:#fff;padding:14px 18px;
-            border-radius:10px;border-left:5px solid #22c55e;font-weight:700;font-size:15px;margin:8px 0;">
-            ✅ Senha redefinida com sucesso! Vá para a aba <b>Entrar</b> e faça login com a nova senha.
-            </div>''', unsafe_allow_html=True)
-            if st.button("🔓 Ir para Login", key="btn_ir_login", use_container_width=True):
-                st.session_state.senha_redefinida = False
-                st.rerun()
+        with aba_cadastro:
+            novo_nome       = st.text_input("Nome completo",       key="cad_nome")
+            novo_email      = st.text_input("Email de recuperação", key="cad_email")
+            novo_usuario    = st.text_input("Criar usuário",        key="cad_usuario")
+            nova_senha      = st.text_input("Criar senha",          type="password", key="cad_senha")
+            confirmar_senha = st.text_input("Confirmar senha",      type="password", key="cad_confirmar")
+            if st.button("Cadastrar", use_container_width=True, key="btn_cadastrar"):
+                if not novo_nome.strip():
+                    st.error("Digite seu nome.")
+                elif not novo_email.strip() or "@" not in novo_email:
+                    st.error("Digite um email válido.")
+                elif not novo_usuario.strip():
+                    st.error("Digite um usuário.")
+                elif len(nova_senha) < 6:
+                    st.error("Senha deve ter pelo menos 6 caracteres.")
+                elif nova_senha != confirmar_senha:
+                    st.error("As senhas não conferem.")
+                elif novo_usuario in st.session_state.usuarios:
+                    st.error("Esse usuário já existe.")
+                else:
+                    st.session_state.usuarios[novo_usuario] = {
+                        "nome":  novo_nome,
+                        "email": novo_email,
+                        "senha": hash_senha(nova_senha)
+                    }
+                    salvar_usuarios(st.session_state.usuarios)
+                    st.success("✅ Conta criada! Faça login na aba Entrar.")
+
+        with aba_recuperar:
+            st.info("Sistema local — recuperação de senha não disponível sem e-mail configurado.")
+
+        st.caption("⚠️ Modo local — dados compartilhados. Configure Supabase para multi-usuário.")
 
 
 if not st.session_state.logado:
@@ -1397,9 +1347,29 @@ st.sidebar.markdown(
     f'font-weight:700;font-size:14px;margin-bottom:8px;">👤 {st.session_state.usuario_atual}</div>',
     unsafe_allow_html=True
 )
+
+# Badge do plano no sidebar
+_plano_atual = st.session_state.get("sb_plano", "free")
+_plano_cor   = {"free": "#78350f", "pro": "#14532d", "coop": "#1e3a5f"}.get(_plano_atual, "#78350f")
+_plano_label = {"free": "🆓 Plano Free", "pro": "💎 Plano Pro", "coop": "🏢 Cooperativa"}.get(_plano_atual, "🆓 Free")
+st.sidebar.markdown(
+    f"<div style='background:{_plano_cor};color:#fff;padding:5px 10px;border-radius:6px;"
+    f"font-size:11px;font-weight:700;margin-bottom:6px;text-align:center;'>{_plano_label}</div>",
+    unsafe_allow_html=True
+)
+
 if st.sidebar.button("Sair", key="botao_sair"):
-    st.session_state.logado = False
+    # Logout do Supabase se ativo
+    if _SUPABASE_ATIVO and st.session_state.get("sb_token"):
+        try:
+            sb_logout(_SB_URL, _SB_KEY, st.session_state.sb_token)
+        except Exception:
+            pass
+    st.session_state.logado        = False
     st.session_state.usuario_atual = ""
+    st.session_state.sb_token      = ""
+    st.session_state.sb_user_id    = ""
+    st.session_state.sb_plano      = "free"
     st.rerun()
 
 
