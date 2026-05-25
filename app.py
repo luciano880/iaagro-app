@@ -611,7 +611,16 @@ def gerar_backup():
 
 def restaurar_backup(arquivo):
     try:
-        dados = json.loads(arquivo.read().decode("utf-8"))
+        import io
+        if isinstance(arquivo, (bytes, bytearray)):
+            conteudo = arquivo
+        elif isinstance(arquivo, io.BytesIO):
+            conteudo = arquivo.read()
+        else:
+            conteudo = arquivo.read()
+        dados = json.loads(conteudo.decode("utf-8"))
+        if "dados" not in dados and "areas" not in dados:
+            return False, "Arquivo inválido — não parece ser um backup do IAAgro."
         st.session_state.usuarios = dados.get("usuarios", {})
         st.session_state.dados    = dados.get("dados", {})
         st.session_state.areas    = dados.get("areas", [])
@@ -624,11 +633,17 @@ def restaurar_backup(arquivo):
         st.session_state.calendario_eventos  = dados.get("calendario_eventos", [])
         st.session_state.harvest_historico   = dados.get("harvest_historico", [])
         st.session_state.receituarios        = dados.get("receituarios", [])
+        st.session_state.safrinha_registros  = dados.get("safrinha_registros", [])
+        st.session_state.segmento            = dados.get("segmento", None)
         if dados.get("email_config"):
-            st.session_state.email_config    = dados["email_config"]
+            st.session_state.email_config = dados["email_config"]
         salvar_dados_iaagro()
         salvar_usuarios(st.session_state.usuarios)
-        return True, f"Backup de {dados.get('backup_data','?')} restaurado com sucesso!"
+        n_areas   = len(st.session_state.areas)
+        n_estoque = len(st.session_state.estoque)
+        return True, f"Backup de {dados.get('backup_data','?')} restaurado! {n_areas} áreas, {n_estoque} itens de estoque."
+    except json.JSONDecodeError:
+        return False, "Arquivo corrompido — não é um JSON válido."
     except Exception as e:
         return False, f"Erro ao restaurar: {e}"
 
@@ -8954,19 +8969,28 @@ elif menu == "⚙️ Configurações":
         }
         </style>
         """, unsafe_allow_html=True)
-        arquivo_restore = st.file_uploader("Selecione o arquivo de backup (.json)", type=["json"], key="upl_selecione_o_arq_8773")
-        if arquivo_restore:
-            if st.button("🔄 Restaurar Backup Agora", key="btn_restore"):
-                ok, msg = restaurar_backup(arquivo_restore)
+        arquivo_restore = st.file_uploader(
+            "Selecione o arquivo de backup (.json)",
+            type=["json"],
+            key="upl_backup_restore"
+        )
+
+        if arquivo_restore is not None:
+            # Lê e armazena o conteúdo no session_state imediatamente
+            conteudo_backup = arquivo_restore.read()
+            st.session_state["_backup_conteudo"] = conteudo_backup
+            st.success(f"✅ Arquivo **{arquivo_restore.name}** carregado ({len(conteudo_backup)//1024} KB)")
+
+        if st.session_state.get("_backup_conteudo"):
+            if st.button("🔄 Restaurar Backup Agora", key="btn_restore", use_container_width=True, type="primary"):
+                import io
+                ok, msg = restaurar_backup(io.BytesIO(st.session_state["_backup_conteudo"]))
                 if ok:
-                    st.markdown(f'''<div style="background:#14532d;color:#fff;padding:13px 18px;
-                    border-radius:10px;border-left:5px solid #22c55e;font-weight:600;">
-                    ✅ {msg}</div>''', unsafe_allow_html=True)
+                    st.session_state["_backup_conteudo"] = None
+                    st.success(f"✅ {msg}")
                     st.rerun()
                 else:
-                    st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:13px 18px;
-                    border-radius:10px;border-left:5px solid #ef4444;font-weight:600;">
-                    ❌ {msg}</div>''', unsafe_allow_html=True)
+                    st.error(f"❌ {msg}")
 
         # Passo a passo
         st.divider()
