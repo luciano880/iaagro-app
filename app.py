@@ -5788,17 +5788,25 @@ if menu == "🌍 Inteligência":
     # Detectar se veio de API real ou fallback
     fonte_soja   = (precos.get("soja_sc") or {}).get("fonte", "")
     ult_at_preco = precos.get("_atualizado_em", "")
-    is_realtime = "CBOT" in fonte_soja or "ICE" in fonte_soja or "BrapiDev" in fonte_soja
+
+    # Detecta fonte real
+    is_cepea    = "CEPEA" in fonte_soja or "ESALQ" in fonte_soja
+    is_cbot     = "CBOT" in fonte_soja or "ICE" in fonte_soja
+    is_realtime = is_cepea or is_cbot
+
+    if is_cepea:    fonte_label = f"🟢 CEPEA/ESALQ — tempo real"
+    elif is_cbot:   fonte_label = f"🟢 CBOT/ICE convertido — tempo real"
+    else:           fonte_label = f"🟡 Referências offline — clique em 🔄 Atualizar"
 
     col_st1, col_st2 = st.columns(2)
     with col_st1:
         cor_st = "#14532d" if is_realtime else "#78350f"
-        icone_st = "🟢" if is_realtime else "🟡"
         st.markdown(
             f'<div style="background:{cor_st};color:#fff;padding:8px 14px;border-radius:8px;'
             f'font-size:12px;font-weight:700;">'
-            f'{icone_st} {"Cotações em tempo real — CBOT/ICE convertido para R$" if is_realtime else "⚠️ Usando referências offline — clique em Atualizar"}'
-            f'</div>', unsafe_allow_html=True
+            f'{fonte_label}'
+            + (f' | Atualizado: {ult_at_preco}' if ult_at_preco else '')
+            + '</div>', unsafe_allow_html=True
         )
     with col_st2:
         dolar_fonte = (precos.get("dolar") or {}).get("fonte", "")
