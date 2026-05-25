@@ -489,16 +489,19 @@ def error_box(msg):
 
 # ─────────────────────────────────────────────
 # ARQUIVOS DE PERSISTÊNCIA
-# Usa pasta /tmp no Streamlit Cloud (persiste entre reruns da sessão)
-# Para persistência total entre deploys, usar backup manual via Configurações
+# usuarios.json fica no repositório (persistente entre deploys)
+# dados operacionais ficam em /tmp (sessão)
 # ─────────────────────────────────────────────
 import pathlib
 
-# Detecta se está no Streamlit Cloud ou local
 _BASE_DIR = pathlib.Path("/tmp/iaagro_data")
 _BASE_DIR.mkdir(parents=True, exist_ok=True)
 
-ARQUIVO_USUARIOS     = str(_BASE_DIR / "usuarios.json")
+# Usuários: salva no diretório do app (persistente no Git/repositório)
+_REPO_DIR = pathlib.Path(__file__).parent if "__file__" in dir() else pathlib.Path(".")
+ARQUIVO_USUARIOS     = str(_REPO_DIR / "usuarios.json")
+
+# Dados operacionais em /tmp (rápido, mas reseta no redeploy)
 ARQUIVO_ESTOQUE      = str(_BASE_DIR / "estoque.json")
 ARQUIVO_AREAS        = str(_BASE_DIR / "areas.json")
 ARQUIVO_DADOS_IAAGRO = str(_BASE_DIR / "dados_iaagro.json")
@@ -1082,14 +1085,31 @@ def salvar_estoque(estoque):
         json.dump(estoque, arquivo, indent=4, ensure_ascii=False)
 
 def carregar_usuarios():
-    if os.path.exists(ARQUIVO_USUARIOS):
-        with open(ARQUIVO_USUARIOS, "r", encoding="utf-8") as arquivo:
-            return json.load(arquivo)
+    # Tenta carregar do repositório primeiro
+    for caminho in [ARQUIVO_USUARIOS, str(_BASE_DIR / "usuarios.json")]:
+        if os.path.exists(caminho):
+            try:
+                with open(caminho, "r", encoding="utf-8") as arquivo:
+                    dados = json.load(arquivo)
+                    if isinstance(dados, dict) and dados:
+                        return dados
+            except Exception:
+                pass
     return {}
 
 def salvar_usuarios(usuarios):
-    with open(ARQUIVO_USUARIOS, "w", encoding="utf-8") as arquivo:
-        json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
+    # Salva no repositório (persistente)
+    try:
+        with open(ARQUIVO_USUARIOS, "w", encoding="utf-8") as arquivo:
+            json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
+    except Exception:
+        pass
+    # Backup em /tmp também
+    try:
+        with open(str(_BASE_DIR / "usuarios.json"), "w", encoding="utf-8") as arquivo:
+            json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
+    except Exception:
+        pass
 
 # ─────────────────────────────────────────────
 # SESSION STATE – LOGIN
