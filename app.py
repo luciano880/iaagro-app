@@ -1109,7 +1109,7 @@ def carregar_usuarios():
                     if isinstance(dados, dict) and dados:
                         return dados
             except Exception:
-                pass
+                pass  # falha silenciada — não crítico
     return {}
 
 def salvar_usuarios(usuarios):
@@ -1118,13 +1118,13 @@ def salvar_usuarios(usuarios):
         with open(ARQUIVO_USUARIOS, "w", encoding="utf-8") as arquivo:
             json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
     except Exception:
-        pass
+        pass  # falha silenciada — não crítico
     # Backup em /tmp também
     try:
         with open(str(_BASE_DIR / "usuarios.json"), "w", encoding="utf-8") as arquivo:
             json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
     except Exception:
-        pass
+        pass  # falha silenciada — não crítico
 
 # ─────────────────────────────────────────────
 # SESSION STATE – LOGIN
