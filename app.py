@@ -888,7 +888,7 @@ def buscar_precos_cepea_ia():
                 "anthropic-version": "2023-06-01",
             },
             json={
-                "model":      "claude-sonnet-4-20250514",
+                "model":      "claude-sonnet-4-5",
                 "max_tokens": 500,
                 "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages":   [{"role": "user", "content": prompt}]
@@ -7661,7 +7661,7 @@ Seja objetivo, técnico e prático para o produtor rural brasileiro. Máximo 400
                         resp_ia = requests.post(
                             "https://api.anthropic.com/v1/messages",
                             headers={"Content-Type":"application/json"},
-                            json={"model":"claude-sonnet-4-20250514","max_tokens":900,
+                            json={"model":"claude-sonnet-4-5","max_tokens":900,
                                   "messages":[{"role":"user","content":prompt_comp}]},
                             timeout=35
                         )
@@ -7884,7 +7884,7 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
             resp = requests.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"Content-Type":"application/json"},
-                json={"model":"claude-sonnet-4-20250514","max_tokens":900,
+                json={"model":"claude-sonnet-4-5","max_tokens":900,
                       "messages":[{"role":"user","content":prompt}]},
                 timeout=35
             )
