@@ -1423,7 +1423,7 @@ PLANOS = {
     },
 }
 
-WPP_NUMERO  = "5549999999999"  # ← coloque seu WhatsApp aqui
+WPP_NUMERO  = "5549998159224"  # ← coloque seu WhatsApp aqui
 MP_LINK_PRO_MES     = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=68376880ac884906be23814262c595f7"
 MP_LINK_PREMIUM_MES = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=ad8dd2ef6aaa444eb2b8189751506028"
 MP_LINK_PRO_ANO     = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=d77348e5eee84d658ee3c3023c6f6ad0"
