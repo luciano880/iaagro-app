@@ -9143,25 +9143,27 @@ elif menu == "⚙️ Configurações":
         cols = st.columns(3)
         for idx, (key, plano) in enumerate(PLANOS.items()):
             with cols[idx]:
-                is_atual = key == _plano_atual
-                borda_style = f"border:3px solid {plano['borda']};" if is_atual else f"border:1px solid {plano['borda']};"
-                st.markdown(f"""
-                <div style='background:{plano["cor"]};border-radius:14px;
-                padding:18px 14px;{borda_style}text-align:center;min-height:380px;'>
-                <div style='font-size:24px;font-weight:900;color:{plano["borda"]};'>
-                {plano["nome"]}
-                {"&nbsp;✅ ATUAL" if is_atual else ""}
-                </div>
-                <div style='font-size:28px;font-weight:800;color:#fff;margin:10px 0;'>
-                {"Grátis" if plano["preco"]==0 else f"R$ {plano['preco']:.2f}<span style='font-size:13px;'>/mês</span>"}
-                </div>
-                <hr style='border-color:{plano["borda"]};margin:10px 0;'>
-                <div style='text-align:left;font-size:12px;color:#d1fae5;line-height:1.8;'>
-                {"".join(f"✅ {r}<br>" for r in plano["recursos"])}
-                {"".join(f"🔒 {r}<br>" for r in plano["bloqueados"])}
-                </div>
-                </div>
-                """, unsafe_allow_html=True)
+                is_atual   = key == _plano_atual
+                cor        = plano["cor"]
+                borda      = plano["borda"]
+                nome       = plano["nome"]
+                preco      = plano["preco"]
+                borda_css  = f"border:3px solid {borda};" if is_atual else f"border:1px solid {borda};"
+                atual_txt  = "&nbsp;✅ ATUAL" if is_atual else ""
+                preco_txt  = "Grátis" if preco == 0 else f"R$ {preco:.2f}/mês"
+                rec_html   = "".join(f"✅ {r}<br>" for r in plano["recursos"])
+                bloq_html  = "".join(f"🔒 {r}<br>" for r in plano["bloqueados"])
+
+                card_html = (
+                    f"<div style='background:{cor};border-radius:14px;"
+                    f"padding:18px 14px;{borda_css}text-align:center;min-height:380px;'>"
+                    f"<div style='font-size:22px;font-weight:900;color:{borda};'>{nome}{atual_txt}</div>"
+                    f"<div style='font-size:26px;font-weight:800;color:#fff;margin:10px 0;'>{preco_txt}</div>"
+                    f"<hr style='border-color:{borda};margin:10px 0;'>"
+                    f"<div style='text-align:left;font-size:12px;color:#d1fae5;line-height:1.8;'>"
+                    f"{rec_html}{bloq_html}</div></div>"
+                )
+                st.markdown(card_html, unsafe_allow_html=True)
 
                 if not is_atual and plano["preco"] > 0:
                     _lmes = MP_LINK_PREMIUM_MES if key == "premium" else MP_LINK_PRO_MES
