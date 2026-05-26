@@ -851,11 +851,20 @@ def buscar_dolar_awesomeapi():
 def buscar_precos_cepea_ia():
     """
     Usa Claude API com web_search para buscar preços CEPEA em tempo real.
-    Requer ANTHROPIC_API_KEY nos Secrets do Streamlit Cloud.
     """
     try:
-        api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
+        # Tenta acessar a chave de diferentes formas
+        api_key = ""
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except Exception:
+            try:
+                api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            except Exception:
+                pass
+
+        if not api_key or len(api_key) < 20:
+            st.session_state["_cepea_erro"] = "API key não encontrada ou inválida"
             return None
 
         hoje_str = datetime.now().strftime("%d/%m/%Y")
@@ -893,12 +902,16 @@ def buscar_precos_cepea_ia():
                 dados = json.loads(texto[inicio:fim])
                 campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
                 if all(isinstance(dados.get(c, 0), (int, float)) and float(dados.get(c, 0)) > 0 for c in campos):
+                    st.session_state["_cepea_erro"] = ""
                     return dados
+                else:
+                    st.session_state["_cepea_erro"] = f"Dados incompletos: {texto[:80]}"
+            else:
+                st.session_state["_cepea_erro"] = f"JSON não encontrado: {texto[:80]}"
         else:
-            # Salva erro no session_state para debug
-            st.session_state["_cepea_erro"] = f"Status {resp.status_code}: {resp.text[:100]}"
+            st.session_state["_cepea_erro"] = f"HTTP {resp.status_code}: {resp.text[:80]}"
     except Exception as e:
-        st.session_state["_cepea_erro"] = str(e)[:100]
+        st.session_state["_cepea_erro"] = f"Exceção: {str(e)[:80]}"
     return None
     return None
 
