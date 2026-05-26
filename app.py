@@ -1423,7 +1423,11 @@ PLANOS = {
     },
 }
 
-WPP_NUMERO = "5549999999999"  # ← coloque seu WhatsApp aqui
+WPP_NUMERO  = "5549999999999"  # ← coloque seu WhatsApp aqui
+MP_LINK_PRO_MES     = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=68376880ac884906be23814262c595f7"
+MP_LINK_PREMIUM_MES = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=ad8dd2ef6aaa444eb2b8189751506028"
+MP_LINK_PRO_ANO     = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=d77348e5eee84d658ee3c3023c6f6ad0"
+MP_LINK_PREMIUM_ANO = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=3a1d4344b989498a9fe7d8afd972625e"
 _plano_info  = PLANOS.get(_plano_atual, PLANOS["free"])
 st.sidebar.markdown(
     f"<div style='background:{_plano_info['cor']};color:{_plano_info['borda']};"
@@ -3053,21 +3057,33 @@ def bloco_upgrade(recurso: str, usado: int, limite: int):
     """, unsafe_allow_html=True)
 
     msg = f"Quero+assinar+o+IAAGRO+{prox_nome.replace(' ','+')}+-+R$+{prox_preco:.2f}/mes"
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button(f"💳 Fazer Upgrade → {prox_nome}",
-                     key=f"btn_upgrade_{recurso}_{plano_key}",
-                     use_container_width=True, type="primary"):
-            st.info(f"📱 Envie mensagem no WhatsApp abaixo para ativar o {prox_nome}!")
-    with col2:
-        st.markdown(f"""
-        <div style='background:#0f3460;border-radius:8px;padding:10px;text-align:center;'>
-        <a href='https://wa.me/{WPP_NUMERO}?text={msg}' target='_blank'
-           style='color:#22c55e;font-weight:700;text-decoration:none;'>
-        📱 WhatsApp — Clique aqui
-        </a>
-        </div>
-        """, unsafe_allow_html=True)
+    # Links direto do Mercado Pago — mensal e anual
+    if prox_key == "premium":
+        link_mes = MP_LINK_PREMIUM_MES
+        link_ano = MP_LINK_PREMIUM_ANO
+        preco_ano = 149.90 * 12 * 0.85  # 15% desconto anual
+    else:
+        link_mes = MP_LINK_PRO_MES
+        link_ano = MP_LINK_PRO_ANO
+        preco_ano = 59.90 * 12 * 0.85
+
+    st.markdown(f"""
+    <div style='display:flex;gap:10px;margin-top:8px;'>
+    <a href='{link_mes}' target='_blank'
+       style='flex:1;display:block;background:#009ee3;color:#fff;text-align:center;
+       padding:10px;border-radius:8px;font-weight:700;text-decoration:none;font-size:13px;'>
+    💳 Mensal<br>R$ {prox_preco:.2f}/mês
+    </a>
+    <a href='{link_ano}' target='_blank'
+       style='flex:1;display:block;background:#00a650;color:#fff;text-align:center;
+       padding:10px;border-radius:8px;font-weight:700;text-decoration:none;font-size:13px;'>
+    🏆 Anual<br>R$ {preco_ano:.0f}/ano<br><span style='font-size:10px;'>(-15% desconto)</span>
+    </a>
+    </div>
+    <div style='text-align:center;margin-top:4px;'>
+    <span style='color:#94a3b8;font-size:11px;'>PIX • Cartão • Boleto — Mercado Pago</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 def get_culturas():
     """Retorna lista de culturas filtrada pelo segmento ativo."""
@@ -3165,11 +3181,23 @@ if menu == "🏠 Início":
 
         if _plano_key != "premium":
             _prox      = PLANOS["pro"] if _plano_key == "free" else PLANOS["premium"]
-            _msg_wpp   = f"Quero+assinar+IAAGRO+{_prox['nome'].replace(' ','+')}+-+R$+{_prox['preco']:.2f}/mes"
-            if st.button(f"🚀 Upgrade → {_prox['nome']} R$ {_prox['preco']:.2f}/mês",
-                         key="btn_upgrade_dash", use_container_width=True):
-                st.markdown(f"<a href='https://wa.me/{WPP_NUMERO}?text={_msg_wpp}' target='_blank'>📱 Clique aqui para abrir o WhatsApp</a>",
-                             unsafe_allow_html=True)
+            _lmes = MP_LINK_PREMIUM_MES if _plano_key == "pro" else MP_LINK_PRO_MES
+            _lano = MP_LINK_PREMIUM_ANO if _plano_key == "pro" else MP_LINK_PRO_ANO
+            _pano = _prox['preco'] * 12 * 0.85
+            st.markdown(f"""
+            <div style='display:flex;gap:8px;'>
+            <a href='{_lmes}' target='_blank'
+            style='flex:1;display:block;background:#009ee3;color:#fff;text-align:center;
+            padding:8px;border-radius:8px;font-weight:700;text-decoration:none;font-size:12px;'>
+            💳 Mensal R$ {_prox['preco']:.2f}
+            </a>
+            <a href='{_lano}' target='_blank'
+            style='flex:1;display:block;background:#00a650;color:#fff;text-align:center;
+            padding:8px;border-radius:8px;font-weight:700;text-decoration:none;font-size:12px;'>
+            🏆 Anual R$ {_pano:.0f}
+            </a>
+            </div>
+            """, unsafe_allow_html=True)
 
         total_areas      = len(st.session_state.areas)
         total_estoque    = len(st.session_state.estoque)
@@ -9070,13 +9098,23 @@ elif menu == "⚙️ Configurações":
                 """, unsafe_allow_html=True)
 
                 if not is_atual and plano["preco"] > 0:
-                    msg = f"Quero+assinar+IAAGRO+{plano['nome'].replace(' ','+')}+-+R$+{plano['preco']:.2f}/mes"
+                    _lmes = MP_LINK_PREMIUM_MES if key == "premium" else MP_LINK_PRO_MES
+                    _lano = MP_LINK_PREMIUM_ANO if key == "premium" else MP_LINK_PRO_ANO
+                    _pano = plano["preco"] * 12 * 0.85
                     st.markdown(f"""
-                    <a href='https://wa.me/{WPP_NUMERO}?text={msg}' target='_blank'
-                    style='display:block;background:{plano["borda"]};color:#fff;text-align:center;
-                    padding:10px;border-radius:8px;font-weight:700;text-decoration:none;margin-top:8px;'>
-                    📱 Assinar via WhatsApp
+                    <a href='{_lmes}' target='_blank'
+                    style='display:block;background:#009ee3;color:#fff;text-align:center;
+                    padding:8px;border-radius:8px;font-weight:700;text-decoration:none;margin-top:8px;font-size:13px;'>
+                    💳 Mensal — R$ {plano['preco']:.2f}
                     </a>
+                    <a href='{_lano}' target='_blank'
+                    style='display:block;background:#00a650;color:#fff;text-align:center;
+                    padding:8px;border-radius:8px;font-weight:700;text-decoration:none;margin-top:4px;font-size:13px;'>
+                    🏆 Anual — R$ {_pano:.0f} <small>(-15%)</small>
+                    </a>
+                    <div style='text-align:center;font-size:10px;color:#94a3b8;margin-top:4px;'>
+                    PIX • Cartão • Boleto
+                    </div>
                     """, unsafe_allow_html=True)
                 elif is_atual:
                     st.markdown(f"""
