@@ -1376,7 +1376,7 @@ PLANOS = {
     },
     "pro": {
         "nome":    "💎 Pro",
-        "preco":   59.90,
+        "preco":   49.90,
         "areas":   10,
         "estoque": 100,
         "cor":     "#1e3a5f",
@@ -1403,7 +1403,7 @@ PLANOS = {
     },
     "premium": {
         "nome":    "🚀 Premium",
-        "preco":   149.90,
+        "preco":   119.90,
         "areas":   -1,   # ilimitado
         "estoque": -1,   # ilimitado
         "cor":     "#14532d",
