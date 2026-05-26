@@ -860,35 +860,33 @@ def buscar_precos_cepea_ia():
 
         hoje_str = datetime.now().strftime("%d/%m/%Y")
         prompt = (
-            f"Hoje é {hoje_str}. Pesquise AGORA os preços mais recentes das commodities "
-            "agrícolas brasileiras (CEPEA/ESALQ ou indicador de mercado). "
-            "Responda SOMENTE com JSON válido, sem markdown, sem texto extra:\n"
+            f"Hoje é {hoje_str}. Busque os preços do indicador CEPEA/ESALQ "
+            "para soja, milho, trigo, café, algodão, boi gordo e arroz no Brasil. "
+            "Retorne SOMENTE JSON sem markdown:\n"
             '{"soja":0.0,"milho":0.0,"trigo":0.0,"cafe":0.0,"algodao":0.0,"boi":0.0,"arroz":0.0,'
             '"fonte":"CEPEA/ESALQ","data":"DD/MM/AAAA"}\n'
-            "Unidades obrigatórias: soja/milho/trigo em R$/sc 60kg (Paraná), "
-            "cafe em R$/sc 60kg (SP), algodao e boi em R$/arroba, arroz R$/sc 50kg (RS). "
-            "Retorne apenas o JSON, nada mais."
+            "Unidades: soja/milho/trigo R$/sc 60kg Paraná, "
+            "cafe R$/sc 60kg SP, algodao/boi R$/arroba, arroz R$/sc 50kg RS."
         )
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={
-                "Content-Type":    "application/json",
-                "x-api-key":       api_key,
+                "Content-Type":      "application/json",
+                "x-api-key":         api_key,
                 "anthropic-version": "2023-06-01",
             },
             json={
                 "model":      "claude-sonnet-4-20250514",
-                "max_tokens": 400,
+                "max_tokens": 500,
                 "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages":   [{"role": "user", "content": prompt}]
             },
-            timeout=50
+            timeout=60
         )
         if resp.status_code == 200:
             blocos = resp.json().get("content", [])
             texto  = "".join(b.get("text", "") for b in blocos if b.get("type") == "text")
-            # Remove possíveis blocos de markdown
-            texto = texto.replace("```json", "").replace("```", "").strip()
+            texto  = texto.replace("```json", "").replace("```", "").strip()
             inicio = texto.find("{")
             fim    = texto.rfind("}") + 1
             if inicio >= 0 and fim > inicio:
@@ -896,8 +894,12 @@ def buscar_precos_cepea_ia():
                 campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
                 if all(isinstance(dados.get(c, 0), (int, float)) and float(dados.get(c, 0)) > 0 for c in campos):
                     return dados
-    except Exception:
-        pass  # erro silenciado intencionalmente
+        else:
+            # Salva erro no session_state para debug
+            st.session_state["_cepea_erro"] = f"Status {resp.status_code}: {resp.text[:100]}"
+    except Exception as e:
+        st.session_state["_cepea_erro"] = str(e)[:100]
+    return None
     return None
 
 
@@ -5940,6 +5942,9 @@ if menu == "🌍 Inteligência":
                         f'font-size:12px;font-weight:700;">✅ Última atualização: {fonte_exib}'
                         f'{" | Dólar: " + horario_dolar if horario_dolar else ""}</div>',
                         unsafe_allow_html=True)
+        # Mostra erro CEPEA se houver
+        if st.session_state.get("_cepea_erro"):
+            st.caption(f"⚠️ CEPEA: {st.session_state['_cepea_erro']}")
 
     if atualizar:
         with st.spinner("🌐 Buscando cotações em tempo real via CEPEA + AwesomeAPI..."):
