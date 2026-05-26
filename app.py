@@ -1350,6 +1350,80 @@ st.sidebar.markdown(
 
 # Badge do plano no sidebar
 _plano_atual = st.session_state.get("sb_plano", "free")
+PLANOS = {
+    "free": {
+        "nome":    "🆓 Free",
+        "preco":   0,
+        "areas":   2,
+        "estoque": 20,
+        "cor":     "#78350f",
+        "borda":   "#f59e0b",
+        "recursos": [
+            "2 áreas cadastradas",
+            "20 itens de estoque",
+            "Análise de solo básica",
+            "Calendário agrícola",
+            "Preços offline",
+        ],
+        "bloqueados": [
+            "Relatório PDF",
+            "Importação NF-e XML",
+            "Preços CEPEA tempo real",
+            "Mapa de Colheita IA",
+            "IR Rural",
+            "Segunda Safra",
+        ]
+    },
+    "pro": {
+        "nome":    "💎 Pro",
+        "preco":   59.90,
+        "areas":   10,
+        "estoque": 100,
+        "cor":     "#1e3a5f",
+        "borda":   "#3b82f6",
+        "recursos": [
+            "10 áreas cadastradas",
+            "100 itens de estoque",
+            "Diagnóstico completo EMBRAPA",
+            "Relatório PDF premium",
+            "Importação NF-e XML",
+            "Preços CEPEA tempo real",
+            "Segunda Safra / Safrinha",
+            "IR Rural automatizado",
+            "Receituário Agronômico",
+            "Suporte via WhatsApp",
+        ],
+        "bloqueados": [
+            "Áreas ilimitadas",
+            "Estoque ilimitado",
+            "Mapa de Colheita IA avançado",
+            "API de integração",
+            "Multi-usuário",
+        ]
+    },
+    "premium": {
+        "nome":    "🚀 Premium",
+        "preco":   149.90,
+        "areas":   -1,   # ilimitado
+        "estoque": -1,   # ilimitado
+        "cor":     "#14532d",
+        "borda":   "#22c55e",
+        "recursos": [
+            "Áreas ILIMITADAS",
+            "Estoque ILIMITADO",
+            "Tudo do Plano Pro",
+            "Mapa de Colheita IA avançado",
+            "Relatórios agrupados",
+            "API de integração",
+            "Suporte prioritário 24h",
+            "Treinamento online",
+            "White-label disponível",
+        ],
+        "bloqueados": []
+    },
+}
+
+WPP_NUMERO = "5549999999999"  # ← coloque seu WhatsApp aqui
 _plano_info  = PLANOS.get(_plano_atual, PLANOS["free"])
 st.sidebar.markdown(
     f"<div style='background:{_plano_info['cor']};color:{_plano_info['borda']};"
@@ -2929,80 +3003,6 @@ CULTURAS_POR_SEGMENTO = {
 # ─────────────────────────────────────────────
 # CONTROLE DE PLANOS — Free / Pro / Premium
 # ─────────────────────────────────────────────
-PLANOS = {
-    "free": {
-        "nome":    "🆓 Free",
-        "preco":   0,
-        "areas":   2,
-        "estoque": 20,
-        "cor":     "#78350f",
-        "borda":   "#f59e0b",
-        "recursos": [
-            "2 áreas cadastradas",
-            "20 itens de estoque",
-            "Análise de solo básica",
-            "Calendário agrícola",
-            "Preços offline",
-        ],
-        "bloqueados": [
-            "Relatório PDF",
-            "Importação NF-e XML",
-            "Preços CEPEA tempo real",
-            "Mapa de Colheita IA",
-            "IR Rural",
-            "Segunda Safra",
-        ]
-    },
-    "pro": {
-        "nome":    "💎 Pro",
-        "preco":   59.90,
-        "areas":   10,
-        "estoque": 100,
-        "cor":     "#1e3a5f",
-        "borda":   "#3b82f6",
-        "recursos": [
-            "10 áreas cadastradas",
-            "100 itens de estoque",
-            "Diagnóstico completo EMBRAPA",
-            "Relatório PDF premium",
-            "Importação NF-e XML",
-            "Preços CEPEA tempo real",
-            "Segunda Safra / Safrinha",
-            "IR Rural automatizado",
-            "Receituário Agronômico",
-            "Suporte via WhatsApp",
-        ],
-        "bloqueados": [
-            "Áreas ilimitadas",
-            "Estoque ilimitado",
-            "Mapa de Colheita IA avançado",
-            "API de integração",
-            "Multi-usuário",
-        ]
-    },
-    "premium": {
-        "nome":    "🚀 Premium",
-        "preco":   149.90,
-        "areas":   -1,   # ilimitado
-        "estoque": -1,   # ilimitado
-        "cor":     "#14532d",
-        "borda":   "#22c55e",
-        "recursos": [
-            "Áreas ILIMITADAS",
-            "Estoque ILIMITADO",
-            "Tudo do Plano Pro",
-            "Mapa de Colheita IA avançado",
-            "Relatórios agrupados",
-            "API de integração",
-            "Suporte prioritário 24h",
-            "Treinamento online",
-            "White-label disponível",
-        ],
-        "bloqueados": []
-    },
-}
-
-WPP_NUMERO = "5549999999999"  # ← coloque seu WhatsApp aqui
 
 def verificar_limite(recurso: str) -> tuple:
     """Retorna (pode: bool, usado: int, limite: int)"""
