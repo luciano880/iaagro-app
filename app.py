@@ -9166,7 +9166,7 @@ elif menu == "⚙️ Configurações":
                 st.markdown(card_html, unsafe_allow_html=True)
 
                 if not is_atual and plano["preco"] > 0:
-                    # Free → mostra Pro | Pro → mostra Premium
+                    # Free → mostra Pro | Pro → mostra Premium  (fix v2)
                     if key == "pro":
                         _lmes = MP_LINK_PRO_MES
                         _lano = MP_LINK_PRO_ANO
