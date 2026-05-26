@@ -807,7 +807,28 @@ def buscar_dolar_awesomeapi():
                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json",
     }
-    # 1. Banco Central do Brasil — PTAX
+    # 1. ExchangeRate-API (mais permissiva no Streamlit Cloud)
+    try:
+        r3 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=6, headers=headers)
+        if r3.status_code == 200:
+            brl = r3.json().get("rates", {}).get("BRL", 0)
+            if brl > 0:
+                return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
+    except Exception:
+        pass
+    # 2. AwesomeAPI
+    try:
+        r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
+                         timeout=6, headers=headers)
+        if r.status_code == 200:
+            d = r.json()
+            bid = float(d["USDBRL"]["bid"])
+            if bid > 0:
+                return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
+                        "horario": d["USDBRL"].get("create_date", "")}
+    except Exception:
+        pass
+    # 3. Banco Central do Brasil — PTAX
     try:
         from datetime import datetime as _dt2, timedelta as _td
         for delta in [0, 1, 2]:
@@ -823,28 +844,7 @@ def buscar_dolar_awesomeapi():
                             "fonte": "Banco Central do Brasil PTAX (tempo real)",
                             "horario": data}
     except Exception:
-        pass  # erro silenciado intencionalmente
-    # 2. AwesomeAPI
-    try:
-        r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
-                         timeout=6, headers=headers)
-        if r.status_code == 200:
-            d = r.json()
-            bid = float(d["USDBRL"]["bid"])
-            if bid > 0:
-                return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
-                        "horario": d["USDBRL"].get("create_date", "")}
-    except Exception:
-        pass  # erro silenciado intencionalmente
-    # 3. ExchangeRate-API
-    try:
-        r3 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5, headers=headers)
-        if r3.status_code == 200:
-            brl = r3.json().get("rates", {}).get("BRL", 0)
-            if brl > 0:
-                return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
-    except Exception:
-        pass  # erro silenciado intencionalmente
+        pass
     return {"preco": 5.80, "fonte": "Offline"}
 
 
@@ -862,6 +862,9 @@ def buscar_precos_cepea_ia():
                 api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
             except Exception:
                 pass
+        if not api_key:
+            import os
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
         if not api_key or len(api_key) < 20:
             st.session_state["_cepea_erro"] = "API key não encontrada ou inválida"
