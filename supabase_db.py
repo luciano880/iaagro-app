@@ -135,20 +135,32 @@ def sb_salvar(url, api_key, token, user_id, session):
 
 
 def sb_plano(url, api_key, token, user_id):
-    """Retorna plano do usuário (free/pro/coop)."""
-    r = requests.get(
-        f"{url}/rest/v1/iaagro_planos?user_id=eq.{user_id}&select=plano,valido_ate",
-        headers=_headers(api_key, token),
-        timeout=8
-    )
-    rows = r.json()
-    if rows and isinstance(rows, list):
-        row = rows[0]
-        valido_ate = row.get("valido_ate", "")
-        if valido_ate:
-            try:
-                if datetime.fromisoformat(valido_ate) > datetime.now():
-                    return row.get("plano", "free")
-            except Exception:
-                pass
+    """Retorna plano do usuário usando token JWT."""
+    # Usa o token do usuário (JWT) para passar pelo RLS
+    headers = {
+        "apikey":        api_key,
+        "Authorization": f"Bearer {token}",  # token JWT do usuário logado
+        "Content-Type":  "application/json",
+    }
+    try:
+        r = requests.get(
+            f"{url}/rest/v1/iaagro_planos?user_id=eq.{user_id}&select=plano,valido_ate",
+            headers=headers,
+            timeout=8
+        )
+        if r.status_code == 200:
+            rows = r.json()
+            if rows and isinstance(rows, list):
+                row = rows[0]
+                valido_ate = row.get("valido_ate", "")
+                if valido_ate:
+                    try:
+                        # Remove timezone info para comparar
+                        vat = valido_ate.replace("Z","").replace("+00:00","")
+                        if datetime.fromisoformat(vat) > datetime.now():
+                            return row.get("plano", "free")
+                    except Exception:
+                        return row.get("plano", "free")
+    except Exception:
+        pass
     return "free"

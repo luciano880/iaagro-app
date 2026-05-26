@@ -1350,11 +1350,12 @@ st.sidebar.markdown(
 
 # Badge do plano no sidebar
 _plano_atual = st.session_state.get("sb_plano", "free")
-_plano_cor   = {"free": "#78350f", "pro": "#14532d", "coop": "#1e3a5f"}.get(_plano_atual, "#78350f")
-_plano_label = {"free": "🆓 Plano Free", "pro": "💎 Plano Pro", "coop": "🏢 Cooperativa"}.get(_plano_atual, "🆓 Free")
+_plano_info  = PLANOS.get(_plano_atual, PLANOS["free"])
 st.sidebar.markdown(
-    f"<div style='background:{_plano_cor};color:#fff;padding:5px 10px;border-radius:6px;"
-    f"font-size:11px;font-weight:700;margin-bottom:6px;text-align:center;'>{_plano_label}</div>",
+    f"<div style='background:{_plano_info['cor']};color:{_plano_info['borda']};"
+    f"padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;"
+    f"margin-bottom:6px;text-align:center;border:1px solid {_plano_info['borda']};'>"
+    f"{_plano_info['nome']}</div>",
     unsafe_allow_html=True
 )
 
@@ -2925,6 +2926,149 @@ CULTURAS_POR_SEGMENTO = {
     "🌲 Silvicultura": ["Eucalipto","Pinus","Teca","Paricá","Cedro"],
 }
 
+# ─────────────────────────────────────────────
+# CONTROLE DE PLANOS — Free / Pro / Premium
+# ─────────────────────────────────────────────
+PLANOS = {
+    "free": {
+        "nome":    "🆓 Free",
+        "preco":   0,
+        "areas":   2,
+        "estoque": 20,
+        "cor":     "#78350f",
+        "borda":   "#f59e0b",
+        "recursos": [
+            "2 áreas cadastradas",
+            "20 itens de estoque",
+            "Análise de solo básica",
+            "Calendário agrícola",
+            "Preços offline",
+        ],
+        "bloqueados": [
+            "Relatório PDF",
+            "Importação NF-e XML",
+            "Preços CEPEA tempo real",
+            "Mapa de Colheita IA",
+            "IR Rural",
+            "Segunda Safra",
+        ]
+    },
+    "pro": {
+        "nome":    "💎 Pro",
+        "preco":   59.90,
+        "areas":   10,
+        "estoque": 100,
+        "cor":     "#1e3a5f",
+        "borda":   "#3b82f6",
+        "recursos": [
+            "10 áreas cadastradas",
+            "100 itens de estoque",
+            "Diagnóstico completo EMBRAPA",
+            "Relatório PDF premium",
+            "Importação NF-e XML",
+            "Preços CEPEA tempo real",
+            "Segunda Safra / Safrinha",
+            "IR Rural automatizado",
+            "Receituário Agronômico",
+            "Suporte via WhatsApp",
+        ],
+        "bloqueados": [
+            "Áreas ilimitadas",
+            "Estoque ilimitado",
+            "Mapa de Colheita IA avançado",
+            "API de integração",
+            "Multi-usuário",
+        ]
+    },
+    "premium": {
+        "nome":    "🚀 Premium",
+        "preco":   149.90,
+        "areas":   -1,   # ilimitado
+        "estoque": -1,   # ilimitado
+        "cor":     "#14532d",
+        "borda":   "#22c55e",
+        "recursos": [
+            "Áreas ILIMITADAS",
+            "Estoque ILIMITADO",
+            "Tudo do Plano Pro",
+            "Mapa de Colheita IA avançado",
+            "Relatórios agrupados",
+            "API de integração",
+            "Suporte prioritário 24h",
+            "Treinamento online",
+            "White-label disponível",
+        ],
+        "bloqueados": []
+    },
+}
+
+WPP_NUMERO = "5549999999999"  # ← coloque seu WhatsApp aqui
+
+def verificar_limite(recurso: str) -> tuple:
+    """Retorna (pode: bool, usado: int, limite: int)"""
+    plano_key = st.session_state.get("sb_plano", "free")
+    plano     = PLANOS.get(plano_key, PLANOS["free"])
+    limite    = plano.get(recurso, 2)
+
+    if limite == -1:
+        return True, 0, -1  # ilimitado
+
+    if recurso == "areas":
+        usado = len(st.session_state.get("areas", []))
+    elif recurso == "estoque":
+        usado = len(st.session_state.get("estoque", []))
+    else:
+        return True, 0, -1
+
+    return usado < limite, usado, limite
+
+def bloco_upgrade(recurso: str, usado: int, limite: int):
+    """Banner de upgrade quando limite é atingido."""
+    plano_key = st.session_state.get("sb_plano", "free")
+    nomes     = {"areas": "áreas", "estoque": "itens de estoque"}
+    nome      = nomes.get(recurso, recurso)
+
+    # Próximo plano sugerido
+    if plano_key == "free":
+        prox_key   = "pro"
+        prox_preco = PLANOS["pro"]["preco"]
+        prox_nome  = PLANOS["pro"]["nome"]
+    else:
+        prox_key   = "premium"
+        prox_preco = PLANOS["premium"]["preco"]
+        prox_nome  = PLANOS["premium"]["nome"]
+
+    st.markdown(f"""
+    <div style='background:linear-gradient(135deg,#78350f,#92400e);
+    border-radius:12px;padding:18px 20px;border:2px solid #f59e0b;
+    margin:10px 0;text-align:center;'>
+    <b style='color:#fbbf24;font-size:16px;'>🔒 Limite atingido — {usado}/{limite} {nome}</b><br>
+    <span style='color:#fde68a;font-size:13px;'>
+    Faça upgrade para continuar usando o IAAGRO sem limites!
+    </span><br><br>
+    <span style='color:#fff;font-size:18px;font-weight:800;'>
+    {prox_nome} — R$ {prox_preco:.2f}/mês
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    msg = f"Quero+assinar+o+IAAGRO+{prox_nome.replace(' ','+')}+-+R$+{prox_preco:.2f}/mes"
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button(f"💳 Fazer Upgrade → {prox_nome}",
+                     key=f"btn_upgrade_{recurso}_{plano_key}",
+                     use_container_width=True, type="primary"):
+            st.info(f"📱 Envie mensagem no WhatsApp abaixo para ativar o {prox_nome}!")
+    with col2:
+        st.markdown(f"""
+        <div style='background:#0f3460;border-radius:8px;padding:10px;text-align:center;'>
+        <a href='https://wa.me/{WPP_NUMERO}?text={msg}' target='_blank'
+           style='color:#22c55e;font-weight:700;text-decoration:none;'>
+        📱 WhatsApp — Clique aqui
+        </a>
+        </div>
+        """, unsafe_allow_html=True)
+
 def get_culturas():
     """Retorna lista de culturas filtrada pelo segmento ativo."""
     seg = st.session_state.get("segmento")
@@ -2996,6 +3140,36 @@ if menu == "🏠 Início":
                 st.session_state.segmento = None
                 salvar_dados_iaagro()
                 st.rerun()
+
+        # Card do plano atual
+        _plano_key  = st.session_state.get("sb_plano", "free")
+        _plano_info = PLANOS.get(_plano_key, PLANOS["free"])
+        _areas_us   = len(st.session_state.get("areas", []))
+        _est_us     = len(st.session_state.get("estoque", []))
+        _lim_ar     = _plano_info["areas"]
+        _lim_est    = _plano_info["estoque"]
+        _bar_ar     = f"{_areas_us}/{_lim_ar}" if _lim_ar != -1 else f"{_areas_us}/∞"
+        _bar_est    = f"{_est_us}/{_lim_est}"  if _lim_est != -1 else f"{_est_us}/∞"
+
+        st.markdown(f"""
+        <div style='background:linear-gradient(135deg,{_plano_info["cor"]},{_plano_info["cor"]}cc);
+        border-radius:12px;padding:12px 18px;border:1px solid {_plano_info["borda"]};margin-bottom:12px;'>
+        <span style='color:{_plano_info["borda"]};font-weight:800;font-size:15px;'>{_plano_info["nome"]}</span>
+        <span style='color:#94a3b8;font-size:12px;float:right;'>
+        📍 {_bar_ar} áreas &nbsp;|&nbsp; 📦 {_bar_est} insumos
+        </span><br>
+        {"<span style='color:#d1fae5;font-size:12px;'>✅ Acesso completo ativo</span>" if _plano_key == "premium" else
+         f"<span style='color:#fde68a;font-size:12px;'>Upgrade para mais recursos — <b>R$ {PLANOS['pro' if _plano_key=='free' else 'premium']['preco']:.2f}/mês</b></span>"}
+        </div>
+        """, unsafe_allow_html=True)
+
+        if _plano_key != "premium":
+            _prox      = PLANOS["pro"] if _plano_key == "free" else PLANOS["premium"]
+            _msg_wpp   = f"Quero+assinar+IAAGRO+{_prox['nome'].replace(' ','+')}+-+R$+{_prox['preco']:.2f}/mes"
+            if st.button(f"🚀 Upgrade → {_prox['nome']} R$ {_prox['preco']:.2f}/mês",
+                         key="btn_upgrade_dash", use_container_width=True):
+                st.markdown(f"<a href='https://wa.me/{WPP_NUMERO}?text={_msg_wpp}' target='_blank'>📱 Clique aqui para abrir o WhatsApp</a>",
+                             unsafe_allow_html=True)
 
         total_areas      = len(st.session_state.areas)
         total_estoque    = len(st.session_state.estoque)
@@ -3222,7 +3396,10 @@ if menu == "🌾 Lavoura":
                     'Dica: use Google Maps para obter as coordenadas da área.</div>',
                     unsafe_allow_html=True)
 
-    if st.button("Salvar Nova Área"):
+    pode, usado, limite = verificar_limite("areas")
+    if not pode:
+        bloco_upgrade("areas", usado, limite)
+    elif st.button("Salvar Nova Área"):
         id_area  = f"AREA-{st.session_state.contador_area:03d}"
         nova_area = {
             "ID": id_area,
@@ -4720,7 +4897,10 @@ if menu == "📦 Operacional":
     
         observacao = st.text_area("Observação", key="txa_observa__o_4617")
     
-        if st.button("Adicionar Produto ao Estoque"):
+        _pode_est, _usado_est, _limite_est = verificar_limite("estoque")
+        if not _pode_est:
+            bloco_upgrade("estoque", _usado_est, _limite_est)
+        elif st.button("Adicionar Produto ao Estoque"):
             nome_usar = nome_final.strip() if nome_final.strip() else nome_insumo.strip()
             if not nome_usar:
                 error_box("Digite ou selecione o nome do produto.")
@@ -8853,13 +9033,71 @@ if menu == "💰 Financeiro":
 elif menu == "⚙️ Configurações":
     st.header("⚙️ Configurações do Sistema")
 
-    tab0, tab1, tab2, tab3, tab4 = st.tabs([
+    tab0, tab_planos, tab1, tab2, tab3, tab4 = st.tabs([
         "🌾 Meu Segmento",
+        "💳 Planos & Preços",
         "💾 Backup & Restore",
         "📧 Email & Alertas",
         "📊 Histórico do Solo",
         "📤 Exportar Excel"
     ])
+
+    with tab_planos:
+        st.subheader("💳 Planos & Preços")
+        _plano_atual = st.session_state.get("sb_plano", "free")
+
+        cols = st.columns(3)
+        for idx, (key, plano) in enumerate(PLANOS.items()):
+            with cols[idx]:
+                is_atual = key == _plano_atual
+                borda_style = f"border:3px solid {plano['borda']};" if is_atual else f"border:1px solid {plano['borda']};"
+                st.markdown(f"""
+                <div style='background:{plano["cor"]};border-radius:14px;
+                padding:18px 14px;{borda_style}text-align:center;min-height:380px;'>
+                <div style='font-size:24px;font-weight:900;color:{plano["borda"]};'>
+                {plano["nome"]}
+                {"&nbsp;✅ ATUAL" if is_atual else ""}
+                </div>
+                <div style='font-size:28px;font-weight:800;color:#fff;margin:10px 0;'>
+                {"Grátis" if plano["preco"]==0 else f"R$ {plano['preco']:.2f}<span style='font-size:13px;'>/mês</span>"}
+                </div>
+                <hr style='border-color:{plano["borda"]};margin:10px 0;'>
+                <div style='text-align:left;font-size:12px;color:#d1fae5;line-height:1.8;'>
+                {"".join(f"✅ {r}<br>" for r in plano["recursos"])}
+                {"".join(f"🔒 {r}<br>" for r in plano["bloqueados"])}
+                </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if not is_atual and plano["preco"] > 0:
+                    msg = f"Quero+assinar+IAAGRO+{plano['nome'].replace(' ','+')}+-+R$+{plano['preco']:.2f}/mes"
+                    st.markdown(f"""
+                    <a href='https://wa.me/{WPP_NUMERO}?text={msg}' target='_blank'
+                    style='display:block;background:{plano["borda"]};color:#fff;text-align:center;
+                    padding:10px;border-radius:8px;font-weight:700;text-decoration:none;margin-top:8px;'>
+                    📱 Assinar via WhatsApp
+                    </a>
+                    """, unsafe_allow_html=True)
+                elif is_atual:
+                    st.markdown(f"""
+                    <div style='background:{plano["borda"]}33;border-radius:8px;padding:10px;
+                    text-align:center;margin-top:8px;color:{plano["borda"]};font-weight:700;'>
+                    ✅ Plano Ativo
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #3b82f6;'>
+        <b style='color:#3b82f6;'>📞 Como ativar o Plano Pro ou Premium?</b><br>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        1. Clique em <b>Assinar via WhatsApp</b> no plano desejado<br>
+        2. Efetue o pagamento via PIX ou cartão<br>
+        3. Seu plano será ativado em até 1 hora após confirmação<br>
+        4. Faça logout e login novamente para ver o novo plano
+        </span>
+        </div>
+        """, unsafe_allow_html=True)
 
     with tab0:
         st.subheader("🌾 Alterar Segmento de Atuação")
@@ -9104,3 +9342,26 @@ elif menu == "⚙️ Configurações":
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
+
+# ── PWA — Progressive Web App (instalável no Android/iOS) ──
+st.markdown("""
+<link rel="manifest" href="https://raw.githubusercontent.com/luciano880/iaagro-app/main/manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IAAGRO">
+<meta name="theme-color" content="#22c55e">
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+}
+// Banner de instalação PWA
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  deferredPrompt = e;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'block';
+});
+</script>
+""", unsafe_allow_html=True)
+
