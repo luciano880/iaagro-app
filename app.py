@@ -9166,8 +9166,13 @@ elif menu == "⚙️ Configurações":
                 st.markdown(card_html, unsafe_allow_html=True)
 
                 if not is_atual and plano["preco"] > 0:
-                    _lmes = MP_LINK_PREMIUM_MES if key == "premium" else MP_LINK_PRO_MES
-                    _lano = MP_LINK_PREMIUM_ANO if key == "premium" else MP_LINK_PRO_ANO
+                    # Free → mostra Pro | Pro → mostra Premium
+                    if key == "pro":
+                        _lmes = MP_LINK_PRO_MES
+                        _lano = MP_LINK_PRO_ANO
+                    else:  # premium
+                        _lmes = MP_LINK_PREMIUM_MES
+                        _lano = MP_LINK_PREMIUM_ANO
                     _pano = plano["preco"] * 12 * 0.85
                     st.link_button(
                         f"💳 Mensal — R$ {plano['preco']:.2f}/mês",
