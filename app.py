@@ -872,13 +872,17 @@ def buscar_precos_cepea_ia():
 
         hoje_str = datetime.now().strftime("%d/%m/%Y")
         prompt = (
-            f"Hoje é {hoje_str}. Busque os preços do indicador CEPEA/ESALQ "
-            "para soja, milho, trigo, café, algodão, boi gordo e arroz no Brasil. "
-            "Retorne SOMENTE JSON sem markdown:\n"
-            '{"soja":0.0,"milho":0.0,"trigo":0.0,"cafe":0.0,"algodao":0.0,"boi":0.0,"arroz":0.0,'
+            f"Hoje é {hoje_str}. Busque os preços mais recentes do indicador CEPEA/ESALQ "
+            "para commodities agrícolas brasileiras. Use o último dia útil disponível se hoje for fim de semana. "
+            "Pesquise em cepea.esalq.usp.br ou notícias recentes de preços agrícolas BR. "
+            "Retorne SOMENTE este JSON preenchido com valores reais, sem markdown:\n"
+            '{"soja":115.0,"milho":55.0,"trigo":70.0,"cafe":1800.0,"algodao":120.0,"boi":320.0,"arroz":74.0,'
             '"fonte":"CEPEA/ESALQ","data":"DD/MM/AAAA"}\n'
-            "Unidades: soja/milho/trigo R$/sc 60kg Paraná, "
-            "cafe R$/sc 60kg SP, algodao/boi R$/arroba, arroz R$/sc 50kg RS."
+            "IMPORTANTE: soja/milho/trigo em R$/sc 60kg Paraná (soja ~110-130), "
+            "cafe R$/sc 60kg SP (~1700-2000), algodao R$/arroba (~100-140), "
+            "boi R$/arroba SP (~290-340), arroz R$/sc 50kg RS (~70-80). "
+            "Substitua os valores do exemplo pelos valores reais encontrados. "
+            "Retorne APENAS o JSON, sem nenhum texto adicional."
         )
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -899,20 +903,61 @@ def buscar_precos_cepea_ia():
             blocos = resp.json().get("content", [])
             texto  = "".join(b.get("text", "") for b in blocos if b.get("type") == "text")
             texto  = texto.replace("```json", "").replace("```", "").strip()
-            inicio = texto.find("{")
-            fim    = texto.rfind("}") + 1
-            if inicio >= 0 and fim > inicio:
-                dados = json.loads(texto[inicio:fim])
-                campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
-                if all(isinstance(dados.get(c, 0), (int, float)) and float(dados.get(c, 0)) > 0 for c in campos):
-                    st.session_state["_cepea_erro"] = ""
-                    return dados
-                else:
-                    st.session_state["_cepea_erro"] = f"Dados incompletos: {texto[:80]}"
+
+            # Tenta encontrar JSON em qualquer parte do texto
+            dados = None
+            # Procura por todos os { } no texto
+            idx = 0
+            while idx < len(texto):
+                inicio = texto.find("{", idx)
+                if inicio < 0:
+                    break
+                fim = texto.rfind("}", inicio) + 1
+                if fim <= inicio:
+                    break
+                try:
+                    candidato = json.loads(texto[inicio:fim])
+                    campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
+                    if all(isinstance(candidato.get(c, 0), (int, float)) and float(candidato.get(c, 0)) > 10 for c in campos):
+                        dados = candidato
+                        break
+                except Exception:
+                    pass
+                idx = inicio + 1
+
+            if dados:
+                st.session_state["_cepea_erro"] = ""
+                return dados
             else:
-                st.session_state["_cepea_erro"] = f"JSON não encontrado: {texto[:80]}"
+                # Tenta extrair valores individualmente se modelo respondeu em texto
+                import re
+                valores = {}
+                mapa = {
+                    "soja":    r"soja[^0-9]*(\d+[.,]\d+)",
+                    "milho":   r"milho[^0-9]*(\d+[.,]\d+)",
+                    "trigo":   r"trigo[^0-9]*(\d+[.,]\d+)",
+                    "cafe":    r"caf[eé][^0-9]*(\d+[.,]\d+)",
+                    "algodao": r"algod[aã]o[^0-9]*(\d+[.,]\d+)",
+                    "boi":     r"boi[^0-9]*(\d+[.,]\d+)",
+                    "arroz":   r"arroz[^0-9]*(\d+[.,]\d+)",
+                }
+                for campo, pat in mapa.items():
+                    m = re.search(pat, texto.lower())
+                    if m:
+                        valores[campo] = float(m.group(1).replace(",", "."))
+
+                if len(valores) >= 5:
+                    for campo in ["soja","milho","trigo","cafe","algodao","boi","arroz"]:
+                        if campo not in valores:
+                            valores[campo] = 0.0
+                    valores["fonte"] = "CEPEA/ESALQ"
+                    valores["data"]  = datetime.now().strftime("%d/%m/%Y")
+                    st.session_state["_cepea_erro"] = ""
+                    return valores
+
+                st.session_state["_cepea_erro"] = f"JSON não encontrado: {texto[:60]}"
         else:
-            st.session_state["_cepea_erro"] = f"HTTP {resp.status_code}: {resp.text[:80]}"
+            st.session_state["_cepea_erro"] = f"HTTP {resp.status_code}: {resp.text[:60]}"
     except Exception as e:
         st.session_state["_cepea_erro"] = f"Exceção: {str(e)[:80]}"
     return None
