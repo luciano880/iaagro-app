@@ -9167,21 +9167,21 @@ elif menu == "⚙️ Configurações":
                     _lmes = MP_LINK_PREMIUM_MES if key == "premium" else MP_LINK_PRO_MES
                     _lano = MP_LINK_PREMIUM_ANO if key == "premium" else MP_LINK_PRO_ANO
                     _pano = plano["preco"] * 12 * 0.85
-                    st.markdown(f"""
-                    <a href='{_lmes}' target='_blank'
-                    style='display:block;background:#009ee3;color:#fff;text-align:center;
-                    padding:8px;border-radius:8px;font-weight:700;text-decoration:none;margin-top:8px;font-size:13px;'>
-                    💳 Mensal — R$ {plano['preco']:.2f}
-                    </a>
-                    <a href='{_lano}' target='_blank'
-                    style='display:block;background:#00a650;color:#fff;text-align:center;
-                    padding:8px;border-radius:8px;font-weight:700;text-decoration:none;margin-top:4px;font-size:13px;'>
-                    🏆 Anual — R$ {_pano:.0f} <small>(-15%)</small>
-                    </a>
-                    <div style='text-align:center;font-size:10px;color:#94a3b8;margin-top:4px;'>
-                    PIX • Cartão • Boleto
-                    </div>
-                    """, unsafe_allow_html=True)
+                    _preco_mes = f"R$ {plano['preco']:.2f}"
+                    _preco_ano = f"R$ {_pano:.0f}"
+                    _html_btn = (
+                        f"<a href='{_lmes}' target='_blank' style='display:block;background:#009ee3;"
+                        f"color:#fff;text-align:center;padding:8px;border-radius:8px;font-weight:700;"
+                        f"text-decoration:none;margin-top:8px;font-size:13px;'>"
+                        f"💳 Mensal — {_preco_mes}</a>"
+                        f"<a href='{_lano}' target='_blank' style='display:block;background:#00a650;"
+                        f"color:#fff;text-align:center;padding:8px;border-radius:8px;font-weight:700;"
+                        f"text-decoration:none;margin-top:4px;font-size:13px;'>"
+                        f"🏆 Anual — {_preco_ano} (-15%)</a>"
+                        f"<div style='text-align:center;font-size:10px;color:#94a3b8;margin-top:4px;'>"
+                        f"PIX • Cartão • Boleto</div>"
+                    )
+                    st.markdown(_html_btn, unsafe_allow_html=True)
                 elif is_atual:
                     st.markdown(f"""
                     <div style='background:{plano["borda"]}33;border-radius:8px;padding:10px;
