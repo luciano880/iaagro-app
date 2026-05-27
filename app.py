@@ -815,7 +815,7 @@ def buscar_dolar_awesomeapi():
             if brl > 0:
                 return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
     except Exception:
-        pass
+        pass  # falha silenciada — não crítico
     # 2. AwesomeAPI
     try:
         r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
@@ -827,7 +827,7 @@ def buscar_dolar_awesomeapi():
                 return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
                         "horario": d["USDBRL"].get("create_date", "")}
     except Exception:
-        pass
+        pass  # falha silenciada — não crítico
     # 3. Banco Central do Brasil — PTAX
     try:
         from datetime import datetime as _dt2, timedelta as _td
@@ -844,7 +844,7 @@ def buscar_dolar_awesomeapi():
                             "fonte": "Banco Central do Brasil PTAX (tempo real)",
                             "horario": data}
     except Exception:
-        pass
+        pass  # falha silenciada — não crítico
     return {"preco": 5.80, "fonte": "Offline"}
 
 
@@ -861,7 +861,7 @@ def buscar_precos_cepea_ia():
             try:
                 api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
             except Exception:
-                pass
+                pass  # falha silenciada — não crítico
         if not api_key:
             import os
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -922,7 +922,7 @@ def buscar_precos_cepea_ia():
                         dados = candidato
                         break
                 except Exception:
-                    pass
+                    pass  # falha silenciada — não crítico
                 idx = inicio + 1
 
             if dados:
@@ -1506,7 +1506,7 @@ if st.sidebar.button("Sair", key="botao_sair"):
         try:
             sb_logout(_SB_URL, _SB_KEY, st.session_state.sb_token)
         except Exception:
-            pass
+            pass  # falha silenciada — não crítico
     st.session_state.logado        = False
     st.session_state.usuario_atual = ""
     st.session_state.sb_token      = ""
