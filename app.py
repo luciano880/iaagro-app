@@ -3030,7 +3030,7 @@ menu = st.sidebar.radio(
         "💰 Financeiro",
         "📦 Operacional",
         "🌍 Inteligência",
-        "🌱 Segunda Safra / Safrinha",
+        "🌱 Safrinha",
         "📄 Relatório Final",
         "⚙️ Configurações"
     ]
@@ -3244,8 +3244,8 @@ if menu == "🏠 Início":
 
         if _plano_key != "premium":
             _prox      = PLANOS["pro"] if _plano_key == "free" else PLANOS["premium"]
-            _lmes = MP_LINK_PREMIUM_MES if _plano_key == "pro" else MP_LINK_PRO_MES
-            _lano = MP_LINK_PREMIUM_ANO if _plano_key == "pro" else MP_LINK_PRO_ANO
+            _lmes = MP_LINK_PRO_MES if _plano_key == "free" else MP_LINK_PREMIUM_MES
+            _lano = MP_LINK_PRO_ANO if _plano_key == "free" else MP_LINK_PREMIUM_ANO
             _pano = _prox['preco'] * 12 * 0.85
             st.markdown(f"""
             <div style='display:flex;gap:8px;'>
@@ -6003,9 +6003,8 @@ if menu == "🌍 Inteligência":
                         f'font-size:12px;font-weight:700;">✅ Última atualização: {fonte_exib}'
                         f'{" | Dólar: " + horario_dolar if horario_dolar else ""}</div>',
                         unsafe_allow_html=True)
-        # Mostra erro CEPEA se houver
-        if st.session_state.get("_cepea_erro"):
-            st.caption(f"⚠️ CEPEA: {st.session_state['_cepea_erro']}")
+        # Debug CEPEA apenas em desenvolvimento
+        pass
 
     if atualizar:
         with st.spinner("🌐 Buscando cotações em tempo real via CEPEA + AwesomeAPI..."):
@@ -8329,16 +8328,16 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
 # ─────────────────────────────────────────────
 # MENU: SEGUNDA SAFRA / SAFRINHA
 # ─────────────────────────────────────────────
-elif menu == "🌱 Segunda Safra / Safrinha":
-    st.header("🌱 Segunda Safra / Safrinha")
+elif menu == "🌱 Safrinha":
+    st.header("🌱 Safrinha")
 
     st.markdown("""
     <div style='background:#0f3460;border-radius:12px;padding:14px 18px;
     border-left:5px solid #22c55e;margin-bottom:16px;'>
-    <b style='color:#22c55e;font-size:15px;'>🔄 Sistema de Rotação de Culturas</b><br>
+    <b style='color:#22c55e;font-size:15px;'>🌱 Planejamento de Safrinha</b><br>
     <span style='color:#f1f5f9;font-size:13px;'>
-    Planeje a segunda safra após a colheita da primeira. Ex: Soja precoce → Feijão, 
-    Milho → Feijão, Trigo → Soja. Gerencie área, custo e rentabilidade de cada ciclo.
+    Planeje a safrinha após a colheita da safra principal. Escolha a área cadastrada,
+    defina a cultura, custos e acompanhe a rentabilidade do ciclo.
     </span>
     </div>
     """, unsafe_allow_html=True)
@@ -8348,7 +8347,7 @@ elif menu == "🌱 Segunda Safra / Safrinha":
         st.session_state.safrinha_registros = []
 
     tab_s1, tab_s2, tab_s3 = st.tabs([
-        "➕ Planejar Rotação",
+        "➕ Planejar Safrinha",
         "📋 Registros",
         "📊 Análise de Rentabilidade"
     ])
@@ -8370,7 +8369,7 @@ elif menu == "🌱 Segunda Safra / Safrinha":
     # TAB 1 — PLANEJAR ROTAÇÃO
     # ════════════════════════════════════════════════════
     with tab_s1:
-        st.subheader("➕ Novo Planejamento de Rotação")
+        st.subheader("➕ Novo Planejamento de Safrinha")
 
         # ── Seleção de área cadastrada ──────────────────────────────
         areas_cadastradas = st.session_state.get("areas", [])
@@ -8407,31 +8406,30 @@ elif menu == "🌱 Segunda Safra / Safrinha":
         if rot_info["janela"]:
             st.caption(f"📅 Janela de plantio: {rot_info['janela']}")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### 🌾 1ª Safra")
-            culturas_1a = CULTURAS_SAFRINHA
-            # Usa cultura da área cadastrada se disponível
-            idx_1a = culturas_1a.index(_cultura) if _cultura in culturas_1a else (
-                     culturas_1a.index(rot_info["1a"]) if rot_info["1a"] in culturas_1a else 0)
-            cultura_1a    = st.selectbox("Cultura 1ª safra", culturas_1a, index=idx_1a, key="sf_cult1")
-            area_1a       = st.number_input("Área (ha)", min_value=0.0, value=_area_ha, key="sf_area1")
-            prod_1a       = st.number_input("Produtividade esperada (sc/ha)", min_value=0.0, value=_prod, key="sf_prod1")
-            preco_1a      = st.number_input("Preço da saca R$", min_value=0.0, value=115.0, key="sf_preco1")
-            custo_1a      = st.number_input("Custo total R$/ha", min_value=0.0, value=3200.0, key="sf_custo1")
-            plantio_1a    = st.text_input("Data de plantio", placeholder="Ex: 15/10/2025", key="sf_plant1")
-            colheita_1a   = st.text_input("Previsão de colheita", placeholder="Ex: 20/02/2026", key="sf_colh1")
+        # ── Dados da Safrinha ───────────────────────────────────────
+        st.markdown("#### 🌱 Dados da Safrinha")
+        culturas_1a = CULTURAS_SAFRINHA
+        cultura_1a  = _cultura  # cultura da área selecionada (safra principal)
+        area_1a     = _area_ha
+        prod_1a     = _prod
+        preco_1a    = 115.0
+        custo_1a    = 3200.0
+        plantio_1a  = ""
+        colheita_1a = ""
+        luc_1a      = 0.0
+        rec_1a      = 0.0
 
-        with col2:
-            st.markdown("#### 🌱 2ª Safra / Safrinha")
+        col_sf1, col_sf2 = st.columns(2)
+        with col_sf1:
             idx_2a = culturas_1a.index(rot_info["2a"]) if rot_info["2a"] in culturas_1a else 0
-            cultura_2a    = st.selectbox("Cultura 2ª safra", culturas_1a, index=idx_2a, key="sf_cult2")
-            area_2a       = st.number_input("Área (ha)", min_value=0.0, value=area_1a, key="sf_area2")
-            prod_2a       = st.number_input("Produtividade esperada (sc/ha)", min_value=0.0, value=45.0, key="sf_prod2")
-            preco_2a      = st.number_input("Preço da saca R$", min_value=0.0, value=58.0, key="sf_preco2")
-            custo_2a      = st.number_input("Custo total R$/ha", min_value=0.0, value=2200.0, key="sf_custo2")
-            plantio_2a    = st.text_input("Data de plantio", placeholder="Ex: 25/02/2026", key="sf_plant2")
-            colheita_2a   = st.text_input("Previsão de colheita", placeholder="Ex: 30/05/2026", key="sf_colh2")
+            cultura_2a = st.selectbox("🌱 Cultura da safrinha", culturas_1a, index=idx_2a, key="sf_cult2")
+            area_2a    = st.number_input("Área (ha)", min_value=0.0, value=_area_ha, key="sf_area2")
+            prod_2a    = st.number_input("Produtividade esperada (sc/ha)", min_value=0.0, value=45.0, key="sf_prod2")
+        with col_sf2:
+            preco_2a   = st.number_input("Preço da saca R$", min_value=0.0, value=58.0, key="sf_preco2")
+            custo_2a   = st.number_input("Custo total R$/ha", min_value=0.0, value=2200.0, key="sf_custo2")
+            plantio_2a = st.text_input("Data de plantio", placeholder="Ex: 25/02/2026", key="sf_plant2")
+            colheita_2a = st.text_input("Previsão de colheita", placeholder="Ex: 30/05/2026", key="sf_colh2")
 
         st.divider()
         col_obs1, col_obs2 = st.columns(2)
