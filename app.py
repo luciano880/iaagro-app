@@ -1037,8 +1037,21 @@ def buscar_precos_commodities():
     resultado["dolar"] = dolar_data
     dolar_val  = dolar_data.get("preco", 5.80)
 
-    # Prioridade 1: IA com CEPEA
-    dados_cepea = buscar_precos_cepea_ia()
+    # Verifica cache — só chama IA se passou mais de 30 min
+    _cache = st.session_state.get("_cepea_cache", {})
+    _cache_ts = st.session_state.get("_cepea_cache_ts", 0)
+    _agora = datetime.now().timestamp()
+    _cache_valido = _cache and (_agora - _cache_ts) < 1800  # 30 minutos
+
+    dados_cepea = None
+    if _cache_valido:
+        dados_cepea = _cache
+    else:
+        dados_cepea = buscar_precos_cepea_ia()
+        if dados_cepea:
+            st.session_state["_cepea_cache"]    = dados_cepea
+            st.session_state["_cepea_cache_ts"] = _agora
+
     if dados_cepea:
         fc = f"{dados_cepea.get('fonte','CEPEA')} — {dados_cepea.get('data','')}"
         resultado["soja_sc"]    = {"preco":float(dados_cepea["soja"]),    "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
@@ -6098,7 +6111,10 @@ if menu == "🌍 Inteligência":
                (precos.get("algodao_at") or {}).get("praca","MT") + " @")
     cp3.metric("🐂 Boi Gordo",f"R$ {boi_p:.2f}",
                (precos.get("boi_at") or {}).get("praca","SP") + " @")
-    fonte_dolar_label = "Tempo real" if "AwesomeAPI" in fonte_dolar else "Offline"
+    fonte_dolar_label = (
+        "Tempo real" if any(x in fonte_dolar for x in ["AwesomeAPI","ExchangeRate","BCB","PTAX","Banco Central"])
+        else "Offline"
+    )
     cp4.metric("💵 Dólar",    f"R$ {dolar_p:.4f}", fonte_dolar_label)
 
     # Indicadores de fonte
@@ -9164,22 +9180,25 @@ elif menu == "⚙️ Configurações":
                 st.markdown(card_html, unsafe_allow_html=True)
 
                 if not is_atual and plano["preco"] > 0:
-                    # Free → mostra Pro | Pro → mostra Premium  (fix v2)
+                    # Cada plano tem seu próprio link
                     if key == "pro":
-                        _lmes = MP_LINK_PRO_MES
-                        _lano = MP_LINK_PRO_ANO
+                        btn_lmes = MP_LINK_PRO_MES
+                        btn_lano = MP_LINK_PRO_ANO
+                        btn_pano = round(49.90 * 12 * 0.85)
+                        btn_preco = 49.90
                     else:  # premium
-                        _lmes = MP_LINK_PREMIUM_MES
-                        _lano = MP_LINK_PREMIUM_ANO
-                    _pano = plano["preco"] * 12 * 0.85
+                        btn_lmes = MP_LINK_PREMIUM_MES
+                        btn_lano = MP_LINK_PREMIUM_ANO
+                        btn_pano = round(119.90 * 12 * 0.85)
+                        btn_preco = 119.90
                     st.link_button(
-                        f"💳 Mensal — R$ {plano['preco']:.2f}/mês",
-                        _lmes,
+                        f"💳 Mensal — R$ {btn_preco:.2f}/mês",
+                        btn_lmes,
                         use_container_width=True
                     )
                     st.link_button(
-                        f"🏆 Anual — R$ {_pano:.0f} (-15%)",
-                        _lano,
+                        f"🏆 Anual — R$ {btn_pano} (-15%)",
+                        btn_lano,
                         use_container_width=True
                     )
                     st.caption("PIX • Cartão • Boleto")
