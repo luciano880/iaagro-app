@@ -1447,7 +1447,7 @@ PLANOS = {
             "Preços CEPEA tempo real",
             "Mapa de Colheita IA",
             "IR Rural",
-            "Segunda Safra",
+            "Safrinha",
         ]
     },
     "pro": {
@@ -1464,7 +1464,7 @@ PLANOS = {
             "Relatório PDF premium",
             "Importação NF-e XML",
             "Preços CEPEA tempo real",
-            "Segunda Safra / Safrinha",
+            "Safrinha",
             "IR Rural automatizado",
             "Receituário Agronômico",
             "Suporte via WhatsApp",
@@ -8513,7 +8513,7 @@ elif menu == "🌱 Safrinha":
     # TAB 2 — REGISTROS
     # ════════════════════════════════════════════════════
     with tab_s2:
-        st.subheader("📋 Registros de Segunda Safra")
+        st.subheader("📋 Registros de Safrinha")
         if not st.session_state.safrinha_registros:
             st.info("Nenhum planejamento salvo ainda. Use a aba ➕ Planejar Rotação.")
         else:
@@ -8675,7 +8675,7 @@ if menu == "💰 Financeiro":
             st.markdown(f"""
             <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
             border:1px solid #22c55e;margin-bottom:12px;'>
-            <b style='color:#22c55e;'>📥 Dados da Segunda Safra disponíveis para importar</b><br>
+            <b style='color:#22c55e;'>📥 Dados da Safrinha disponíveis para importar</b><br>
             <span style='color:#f1f5f9;font-size:13px;'>
             {len(safrinha_regs)} rotação(ões) planejada(s) &nbsp;|&nbsp;
             Receita total: <b>R$ {receita_safrinha:,.2f}</b> &nbsp;|&nbsp;
@@ -8779,7 +8779,7 @@ if menu == "💰 Financeiro":
             st.markdown(f"""
             <div style='background:#1e3a5f;border-radius:10px;padding:12px 16px;
             border:1px solid #3b82f6;margin-bottom:12px;'>
-            <b style='color:#3b82f6;'>📊 Segunda Safra / Safrinha</b>
+            <b style='color:#3b82f6;'>📊 Safrinha</b>
             {"&nbsp;<span style='color:#22c55e;font-size:12px;'>✅ Dados importados</span>" if importado else "&nbsp;<span style='color:#f59e0b;font-size:12px;'>⚠️ Use o botão Importar na aba anterior</span>"}<br>
             <span style='color:#f1f5f9;font-size:13px;'>
             Receita total safras: <b>R$ {rec_sf:,.2f}</b> &nbsp;|&nbsp;
@@ -9213,12 +9213,13 @@ elif menu == "⚙️ Configurações":
         st.divider()
         st.markdown("""
         <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #3b82f6;'>
-        <b style='color:#3b82f6;'>📞 Como ativar o Plano Pro ou Premium?</b><br>
+        <b style='color:#3b82f6;'>💳 Como ativar o Plano Pro ou Premium?</b><br>
         <span style='color:#f1f5f9;font-size:13px;'>
-        1. Clique em <b>Assinar via WhatsApp</b> no plano desejado<br>
-        2. Efetue o pagamento via PIX ou cartão<br>
-        3. Seu plano será ativado em até 1 hora após confirmação<br>
-        4. Faça logout e login novamente para ver o novo plano
+        1. Clique em <b>Mensal</b> ou <b>Anual</b> no plano desejado<br>
+        2. Você será redirecionado para o <b>Mercado Pago</b><br>
+        3. Pague via PIX, cartão ou boleto<br>
+        4. Seu plano é ativado <b>automaticamente</b> após confirmação<br>
+        5. Faça logout e login novamente para ver o novo plano
         </span>
         </div>
         """, unsafe_allow_html=True)
