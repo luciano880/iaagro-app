@@ -872,17 +872,11 @@ def buscar_precos_cepea_ia():
 
         hoje_str = datetime.now().strftime("%d/%m/%Y")
         prompt = (
-            f"Hoje é {hoje_str}. Busque os preços mais recentes do indicador CEPEA/ESALQ "
-            "para commodities agrícolas brasileiras. Use o último dia útil disponível se hoje for fim de semana. "
-            "Pesquise em cepea.esalq.usp.br ou notícias recentes de preços agrícolas BR. "
-            "Retorne SOMENTE este JSON preenchido com valores reais, sem markdown:\n"
-            '{"soja":115.0,"milho":55.0,"trigo":70.0,"cafe":1800.0,"algodao":120.0,"boi":320.0,"arroz":74.0,'
-            '"fonte":"CEPEA/ESALQ","data":"DD/MM/AAAA"}\n'
-            "IMPORTANTE: soja/milho/trigo em R$/sc 60kg Paraná (soja ~110-130), "
-            "cafe R$/sc 60kg SP (~1700-2000), algodao R$/arroba (~100-140), "
-            "boi R$/arroba SP (~290-340), arroz R$/sc 50kg RS (~70-80). "
-            "Substitua os valores do exemplo pelos valores reais encontrados. "
-            "Retorne APENAS o JSON, sem nenhum texto adicional."
+            f"Data: {hoje_str}. "
+            "Pesquise o preço atual de commodities agrícolas no Brasil (CEPEA/ESALQ ou mercado físico). "
+            "Responda APENAS com este JSON (sem texto, sem markdown, sem explicação):\n"
+            '{"soja":118.0,"milho":50.0,"trigo":69.0,"cafe":1850.0,"algodao":122.0,"boi":325.0,"arroz":74.0,"fonte":"CEPEA","data":"'
+            + datetime.now().strftime("%d/%m/%Y") + '"}'
         )
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
