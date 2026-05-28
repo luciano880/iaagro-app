@@ -6044,24 +6044,24 @@ if menu == "🌍 Inteligência":
     is_cbot     = "CBOT" in fonte_soja or "ICE" in fonte_soja
     is_realtime = is_cepea or is_cbot
 
-    if is_cepea:    fonte_label = f"🟢 CEPEA/ESALQ — tempo real"
-    elif is_cbot:   fonte_label = f"🟢 CBOT/ICE convertido — tempo real"
-    else:           fonte_label = f"🟡 Referências offline — clique em 🔄 Atualizar"
+    if is_cepea:    fonte_label = "🟢 CEPEA/ESALQ — preço físico brasileiro"
+    elif is_cbot:   fonte_label = "🟡 Bolsa CBOT/ICE — preço internacional convertido"
+    else:           fonte_label = "🔴 Referências offline — clique em 🔄 Atualizar"
 
     col_st1, col_st2 = st.columns(2)
     with col_st1:
-        cor_st = "#14532d" if is_realtime else "#78350f"
+        cor_st = "#14532d" if is_cepea else ("#78350f" if is_cbot else "#7f1d1d")
         st.markdown(
             f'<div style="background:{cor_st};color:#fff;padding:8px 14px;border-radius:8px;'
             f'font-size:12px;font-weight:700;">'
             f'{fonte_label}'
-            + (f' | Atualizado: {ult_at_preco}' if ult_at_preco else '')
+            + (f' | {ult_at_preco}' if ult_at_preco else '')
             + '</div>', unsafe_allow_html=True
         )
     with col_st2:
         dolar_fonte = (precos.get("dolar") or {}).get("fonte", "")
         dolar_hor   = (precos.get("dolar") or {}).get("horario", "")
-        cor_d = "#14532d" if "tempo real" in dolar_fonte.lower() or "VatComply" in dolar_fonte else "#78350f"
+        cor_d = "#14532d" if any(x in dolar_fonte for x in ["tempo real","ExchangeRate","BCB","PTAX","AwesomeAPI"]) else "#78350f"
         st.markdown(
             f'<div style="background:{cor_d};color:#fff;padding:8px 14px;border-radius:8px;'
             f'font-size:12px;font-weight:700;">'
@@ -6069,6 +6069,22 @@ if menu == "🌍 Inteligência":
             f'{"  |  🕐 " + ult_at_preco if ult_at_preco else ""}'
             f'</div>', unsafe_allow_html=True
         )
+
+    # Aviso quando preços vierem do CBOT
+    if is_cbot:
+        st.markdown("""
+        <div style='background:#78350f;border:1px solid #f59e0b;border-radius:8px;
+        padding:10px 14px;margin:6px 0;'>
+        <b style='color:#fbbf24;'>⚠️ Atenção — Preços da Bolsa Internacional (CBOT/ICE)</b><br>
+        <span style='color:#fde68a;font-size:12px;'>
+        Os preços exibidos são cotações da bolsa americana convertidos para R$ e podem ser
+        <b>maiores que os preços praticados nas cooperativas locais</b>.<br>
+        O preço que você recebe na cooperativa tende a ser <b>10-15% menor</b> por descontos
+        de frete, umidade e classificação.<br>
+        Clique em <b>🔄 Atualizar Preços</b> para tentar buscar o preço físico CEPEA.
+        </span>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ── Extrai todos os valores ──────────────────────────────────────
     soja_p     = (precos.get("soja_sc") or {}).get("preco", 115.0)
