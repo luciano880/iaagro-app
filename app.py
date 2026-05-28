@@ -1525,7 +1525,24 @@ if st.sidebar.button("Sair", key="botao_sair"):
 # ─────────────────────────────────────────────
 # SESSION STATE – DADOS
 # ─────────────────────────────────────────────
-dados_carregados = carregar_dados_iaagro()
+
+# Se usuário está logado e tem token Supabase, carrega do Supabase
+_dados_supabase = {}
+if (_SUPABASE_ATIVO
+        and st.session_state.get("sb_token")
+        and st.session_state.get("sb_user_id")
+        and "areas" not in st.session_state):  # só carrega se ainda não carregou
+    try:
+        _dados_supabase = sb_carregar(
+            _SB_URL, _SB_KEY,
+            st.session_state.sb_token,
+            st.session_state.sb_user_id
+        ) or {}
+    except Exception:
+        pass  # falha silenciada — usa arquivo local como fallback
+
+# Fallback: arquivo local
+dados_carregados = _dados_supabase if _dados_supabase else carregar_dados_iaagro()
 
 if "dados"   not in st.session_state:
     _d = dados_carregados.get("dados", {})
