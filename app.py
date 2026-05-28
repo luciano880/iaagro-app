@@ -2730,11 +2730,25 @@ def atualizar_area_atual():
 
 
 def calcular_calcario_por_ph(ph, area):
-    if   ph < 4.8: dose = 4.0
-    elif ph < 5.2: dose = 3.0
-    elif ph < 5.5: dose = 2.0
-    elif ph < 5.8: dose = 1.0
-    else:          dose = 0.0
+    """
+    Calagem pelo método SMP (CQFS RS/SC 2016) ou pH em água.
+    PRNT médio adotado: 75% (calcário comercial típico da região Sul)
+    Fórmula: NC (t/ha) = dose_base / (PRNT/100)
+    """
+    PRNT = 0.75  # PRNT médio 75% — calcário comercial RS/SC/PR
+
+    if   ph < 4.8: dose_base = 4.0
+    elif ph < 5.0: dose_base = 3.5
+    elif ph < 5.2: dose_base = 3.0
+    elif ph < 5.4: dose_base = 2.5
+    elif ph < 5.5: dose_base = 2.0
+    elif ph < 5.6: dose_base = 1.5
+    elif ph < 5.8: dose_base = 1.0
+    elif ph < 6.0: dose_base = 0.5
+    else:          dose_base = 0.0
+
+    # Corrige pelo PRNT 75%
+    dose = round(dose_base / PRNT, 2) if dose_base > 0 else 0.0
     return dose, dose * area
 
 
@@ -2796,141 +2810,216 @@ def estimar_producao(meta, nota):
 def recomendacao_npk(cultura, produtividade, fosforo, potassio, materia_organica, argila=50, ph=5.5):
     """
     Recomendação NPK baseada em:
-    - EMBRAPA Soja (Circular Técnica 98/2023)
-    - EMBRAPA Milho e Sorgo (Circular Técnica 100/2023)
-    - Manual de Adubação e Calagem RS/SC (SBCS/CQFS 2016)
-    - IAC/MAPA para culturas complementares
+    - EMBRAPA Soja — Circular Técnica 98 + Tecnologias de Produção 2022
+    - EMBRAPA Milho e Sorgo — Circular Técnica 100/2023
+    - CQFS RS/SC 2016 (Manual de Calagem e Adubação)
+    - IAC Boletim 100 (2014) — culturas diversas
+    - EMBRAPA Trigo — Recomendações Técnicas 2021
+    - EMBRAPA Arroz e Feijão
+    - MAPA — Boas Práticas Agrícolas
     Unidades: kg/ha de N, P2O5, K2O
+    P = Mehlich-1 (mg/dm³) | K = mg/dm³ | MO = g/dm³ ou %
     """
     n = p2o5 = k2o = 0
 
     if cultura == "Soja":
-        # EMBRAPA: soja fixa N biologicamente — N = 0 se boa nodulação
+        # EMBRAPA Soja: N=0 com boa nodulação (BNF supre 200-300 kg N/ha)
         n = 0
-        # P2O5 — baseado em P (Mehlich-1), solo argiloso 40-60%
-        if   fosforo < 6:   p2o5 = 130
-        elif fosforo < 12:  p2o5 = 100
-        elif fosforo < 18:  p2o5 = 80
-        elif fosforo < 30:  p2o5 = 60
-        else:               p2o5 = 30
-        # K2O — baseado em K (cmolc/dm³ ou mg/dm³)
-        if   potassio < 60:  k2o = 120
-        elif potassio < 100: k2o = 90
-        elif potassio < 150: k2o = 70
-        elif potassio < 250: k2o = 50
-        else:                k2o = 30
-        # Ajuste produtividade alta (>60 sc/ha)
-        if produtividade > 60: p2o5 += 15; k2o += 20
-        if produtividade > 80: p2o5 += 10; k2o += 10
+        # P2O5 — CQFS RS/SC 2016 Tab. 4.3 — solo argiloso (argila 41-60%)
+        # Exportação: ~16 kg P2O5/sc (60 kg) → manutenção + reposição
+        if   fosforo < 4:   p2o5 = 140
+        elif fosforo < 7:   p2o5 = 110
+        elif fosforo < 11:  p2o5 = 90
+        elif fosforo < 16:  p2o5 = 70
+        elif fosforo < 22:  p2o5 = 55
+        elif fosforo < 30:  p2o5 = 40
+        else:               p2o5 = 25
+        # K2O — CQFS RS/SC 2016 Tab. 4.4 — exportação ~18 kg K2O/sc
+        if   potassio < 40:  k2o = 130
+        elif potassio < 60:  k2o = 105
+        elif potassio < 80:  k2o = 85
+        elif potassio < 120: k2o = 70
+        elif potassio < 180: k2o = 55
+        elif potassio < 240: k2o = 40
+        else:                k2o = 25
+        # Ajuste produtividade (EMBRAPA — base 50 sc/ha)
+        fator_prod = max(1.0, produtividade / 50)
+        p2o5 = round(p2o5 * fator_prod, 0)
+        k2o  = round(k2o  * fator_prod, 0)
 
     elif cultura == "Milho":
-        # EMBRAPA: N = 25-30 kg plantio + cobertura
-        n_base = min(produtividade * 1.5, 30)  # plantio
-        n_cob  = min(produtividade * 1.2, 120) # cobertura
-        n = round(n_base + n_cob, 1)
-        # P2O5
-        if   fosforo < 6:   p2o5 = 120
-        elif fosforo < 12:  p2o5 = 90
-        elif fosforo < 20:  p2o5 = 70
-        elif fosforo < 35:  p2o5 = 50
-        else:               p2o5 = 30
-        # K2O
-        if   potassio < 60:  k2o = 120
-        elif potassio < 100: k2o = 90
-        elif potassio < 150: k2o = 70
-        elif potassio < 250: k2o = 50
-        else:                k2o = 30
-        if produtividade > 120: p2o5 += 20; k2o += 25; n += 20
+        # EMBRAPA Milho — base 10 t/ha, N parcelado (plantio + cobertura)
+        # N plantio: 20-30 kg/ha | N cobertura: 30-50 kg/ha por 1000 kg grão
+        n_plantio = 25
+        n_cob     = min(produtividade * 1.5, 140)  # 1,5 kg N / sc 60kg
+        n = round(n_plantio + n_cob, 1)
+        # P2O5 — CQFS 2016 Tab. 5.3
+        if   fosforo < 4:   p2o5 = 130
+        elif fosforo < 7:   p2o5 = 105
+        elif fosforo < 11:  p2o5 = 85
+        elif fosforo < 16:  p2o5 = 65
+        elif fosforo < 22:  p2o5 = 50
+        elif fosforo < 30:  p2o5 = 35
+        else:               p2o5 = 20
+        # K2O — CQFS 2016 Tab. 5.4
+        if   potassio < 40:  k2o = 120
+        elif potassio < 60:  k2o = 95
+        elif potassio < 80:  k2o = 75
+        elif potassio < 120: k2o = 60
+        elif potassio < 180: k2o = 45
+        elif potassio < 240: k2o = 30
+        else:                k2o = 20
+        # Alta produtividade (>150 sc/ha = 9 t/ha)
+        if produtividade > 150: p2o5 += 25; k2o += 30; n = min(n + 25, 180)
 
     elif cultura == "Trigo":
-        # CQFS RS/SC 2016
-        n = 15 + produtividade * 0.8  # base + produtividade
-        n = min(n, 90)
-        if   fosforo < 6:   p2o5 = 100
-        elif fosforo < 12:  p2o5 = 75
-        elif fosforo < 20:  p2o5 = 55
-        else:               p2o5 = 30
-        if   potassio < 60:  k2o = 80
-        elif potassio < 100: k2o = 60
-        elif potassio < 150: k2o = 45
+        # EMBRAPA Trigo — Sistema Plantio Direto Sul Brasil 2021
+        # N = 30 plantio + cobertura conforme MO e produtividade
+        if   materia_organica < 2.5: n = 30 + produtividade * 1.0
+        elif materia_organica < 4.0: n = 20 + produtividade * 0.9
+        else:                        n = 15 + produtividade * 0.8
+        n = min(round(n, 1), 100)
+        # P2O5 — CQFS 2016
+        if   fosforo < 4:   p2o5 = 110
+        elif fosforo < 7:   p2o5 = 90
+        elif fosforo < 11:  p2o5 = 70
+        elif fosforo < 16:  p2o5 = 55
+        elif fosforo < 22:  p2o5 = 40
+        else:               p2o5 = 25
+        # K2O — CQFS 2016
+        if   potassio < 60:  k2o = 90
+        elif potassio < 80:  k2o = 70
+        elif potassio < 120: k2o = 55
+        elif potassio < 180: k2o = 40
         else:                k2o = 25
 
     elif cultura == "Feijão":
-        # IAC/EMBRAPA: feijão tem fixação parcial
-        n = 20  # starter
-        if   fosforo < 10:  p2o5 = 90
-        elif fosforo < 20:  p2o5 = 70
-        elif fosforo < 35:  p2o5 = 50
-        else:               p2o5 = 25
+        # EMBRAPA Feijão + CQFS 2016 — fixação parcial de N
+        # N starter 20 kg/ha + complemento se não inoculado
+        n = 20
+        if materia_organica < 2.5: n = 30
+        # P2O5
+        if   fosforo < 7:   p2o5 = 100
+        elif fosforo < 11:  p2o5 = 80
+        elif fosforo < 16:  p2o5 = 65
+        elif fosforo < 22:  p2o5 = 50
+        elif fosforo < 30:  p2o5 = 35
+        else:               p2o5 = 20
+        # K2O
         if   potassio < 60:  k2o = 80
-        elif potassio < 100: k2o = 60
-        elif potassio < 150: k2o = 40
+        elif potassio < 80:  k2o = 65
+        elif potassio < 120: k2o = 50
+        elif potassio < 180: k2o = 35
         else:                k2o = 20
 
     elif cultura == "Arroz":
-        # EMBRAPA Arroz e Feijão
-        n = 20 + produtividade * 1.8
-        n = min(n, 120)
-        if   fosforo < 10:  p2o5 = 80
-        elif fosforo < 20:  p2o5 = 60
-        else:               p2o5 = 40
-        if   potassio < 80:  k2o = 80
-        elif potassio < 150: k2o = 60
-        else:                k2o = 40
-
-    elif cultura == "Canola":
-        # MAPA/EMBRAPA Trigo (adaptado canola)
-        n = 20 + produtividade * 1.5
-        n = min(n, 100)
-        if   fosforo < 10:  p2o5 = 80
-        elif fosforo < 20:  p2o5 = 60
-        else:               p2o5 = 40
-        if   potassio < 80:  k2o = 70
-        elif potassio < 150: k2o = 50
-        else:                k2o = 30
-
-    elif cultura in ["Aveia","Cevada","Sorgo"]:
-        n = 15 + produtividade * 1.2
-        n = min(n, 80)
-        if   fosforo < 10:  p2o5 = 70
-        elif fosforo < 20:  p2o5 = 50
-        else:               p2o5 = 30
-        if   potassio < 80:  k2o = 60
-        elif potassio < 150: k2o = 45
+        # EMBRAPA Arroz e Feijão — irrigado e sequeiro
+        n = round(20 + produtividade * 2.0, 1)
+        n = min(n, 130)
+        if   fosforo < 7:   p2o5 = 90
+        elif fosforo < 11:  p2o5 = 70
+        elif fosforo < 16:  p2o5 = 55
+        elif fosforo < 22:  p2o5 = 40
+        else:               p2o5 = 25
+        if   potassio < 60:  k2o = 90
+        elif potassio < 80:  k2o = 70
+        elif potassio < 120: k2o = 55
+        elif potassio < 180: k2o = 40
         else:                k2o = 25
 
-    elif cultura in ["Café"]:
-        # EMBRAPA Café (produção por ha)
-        n  = 80 + produtividade * 1.2
-        p2o5 = 40 + (20 if fosforo < 15 else 0)
-        k2o  = 100 + (30 if potassio < 120 else 0)
+    elif cultura == "Canola":
+        # EMBRAPA Trigo adaptado + pesquisas Paraná/RS
+        # Canola extrai muito enxofre — recomenda gesso
+        n = round(30 + produtividade * 2.5, 1)
+        n = min(n, 120)
+        if   fosforo < 7:   p2o5 = 90
+        elif fosforo < 11:  p2o5 = 70
+        elif fosforo < 16:  p2o5 = 55
+        elif fosforo < 22:  p2o5 = 40
+        else:               p2o5 = 25
+        if   potassio < 60:  k2o = 80
+        elif potassio < 80:  k2o = 65
+        elif potassio < 120: k2o = 50
+        elif potassio < 180: k2o = 35
+        else:                k2o = 20
 
-    elif cultura in ["Tomate","Batata"]:
-        n  = 120 + produtividade * 0.5
-        p2o5 = 80 if fosforo < 20 else 50
-        k2o  = 150 if potassio < 150 else 100
+    elif cultura in ["Aveia", "Cevada"]:
+        # CQFS RS/SC 2016
+        n = round(15 + produtividade * 1.5, 1)
+        n = min(n, 90)
+        if   fosforo < 7:   p2o5 = 80
+        elif fosforo < 11:  p2o5 = 65
+        elif fosforo < 16:  p2o5 = 50
+        elif fosforo < 22:  p2o5 = 35
+        else:               p2o5 = 20
+        if   potassio < 60:  k2o = 70
+        elif potassio < 80:  k2o = 55
+        elif potassio < 120: k2o = 40
+        elif potassio < 180: k2o = 30
+        else:                k2o = 20
 
-    elif cultura in ["Eucalipto","Pinus"]:
-        # Silvicultura — EMBRAPA Florestas
-        n  = 30; p2o5 = 80; k2o = 40
+    elif cultura == "Sorgo":
+        # EMBRAPA Milho e Sorgo
+        n = round(20 + produtividade * 1.5, 1)
+        n = min(n, 100)
+        if   fosforo < 7:   p2o5 = 75
+        elif fosforo < 11:  p2o5 = 60
+        elif fosforo < 16:  p2o5 = 45
+        else:               p2o5 = 30
+        if   potassio < 60:  k2o = 70
+        elif potassio < 120: k2o = 50
+        else:                k2o = 30
+
+    elif cultura == "Café":
+        # EMBRAPA Café — Circular Técnica 132
+        # Produtividade em sc/ha beneficiado
+        n  = round(80 + produtividade * 1.5, 1)
+        n  = min(n, 300)
+        if   fosforo < 10:  p2o5 = 100
+        elif fosforo < 20:  p2o5 = 70
+        elif fosforo < 40:  p2o5 = 50
+        else:               p2o5 = 30
+        if   potassio < 60:  k2o = 180
+        elif potassio < 120: k2o = 140
+        elif potassio < 180: k2o = 100
+        else:                k2o = 70
+
+    elif cultura in ["Tomate", "Batata"]:
+        # IAC Boletim 100 — horticultura
+        n  = round(120 + produtividade * 0.8, 1)
+        p2o5 = 120 if fosforo < 30 else 80
+        k2o  = 200 if potassio < 150 else 150
+
+    elif cultura in ["Eucalipto", "Pinus"]:
+        # EMBRAPA Florestas
+        n = 30; p2o5 = 100; k2o = 50
+
+    elif cultura == "Pastagem":
+        # EMBRAPA Gado de Corte/Leite
+        n  = round(40 + produtividade * 0.5, 1)
+        n  = min(n, 120)
+        p2o5 = 60 if fosforo < 15 else 30
+        k2o  = 60 if potassio < 100 else 30
 
     else:
-        # Genérico
+        # Genérico — conservador
         n = 40; p2o5 = 60; k2o = 60
 
     # ── Ajustes gerais de solo ──────────────────────────────
-    # Textura: solos arenosos precisam mais K
-    if argila < 20:     k2o += 30
-    elif argila < 35:   k2o += 15
-    elif argila > 70:   k2o -= 10
+    # Textura: solos arenosos (<20% argila) têm menor CTC → mais K
+    if argila < 15:     k2o = round(k2o * 1.25, 0)
+    elif argila < 25:   k2o = round(k2o * 1.15, 0)
+    elif argila > 70:   k2o = round(k2o * 0.90, 0)
 
-    # MO alta reduz necessidade de N
-    if materia_organica >= 5.0: n  = round(n * 0.75, 1)
-    elif materia_organica >= 3.5: n = round(n * 0.85, 1)
+    # MO alta reduz necessidade de N (mineralização)
+    if materia_organica >= 5.5:   n = round(n * 0.70, 1)
+    elif materia_organica >= 4.0: n = round(n * 0.80, 1)
+    elif materia_organica >= 3.0: n = round(n * 0.90, 1)
 
-    # pH muito baixo dificulta absorção de P
-    if ph < 5.0: p2o5 = round(p2o5 * 1.25, 1)
-    elif ph < 5.5: p2o5 = round(p2o5 * 1.10, 1)
+    # pH baixo reduz disponibilidade de P (precipitação com Al e Fe)
+    if ph < 5.0:   p2o5 = round(p2o5 * 1.30, 0)
+    elif ph < 5.3: p2o5 = round(p2o5 * 1.15, 0)
+    elif ph < 5.5: p2o5 = round(p2o5 * 1.08, 0)
 
     return round(n, 1), round(p2o5, 1), round(k2o, 1)
 
