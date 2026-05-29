@@ -1681,33 +1681,53 @@ if (_SUPABASE_ATIVO
     except Exception:
         pass  # falha silenciada — usa arquivo local
 
-dados_carregados = _dados_supabase if _dados_supabase else carregar_dados_iaagro()
+dados_carregados = {}
 
-if "dados"   not in st.session_state:
+# Se autologin funcionou, dados já estão no session_state — não sobrescreve
+# Se não, tenta Supabase com token existente, senão arquivo local
+if not st.session_state.get("areas"):
+    if _dados_supabase:
+        dados_carregados = _dados_supabase
+    elif (_SUPABASE_ATIVO
+          and st.session_state.get("sb_token")
+          and st.session_state.get("sb_user_id")):
+        try:
+            dados_carregados = sb_carregar(
+                _SB_URL, _SB_KEY,
+                st.session_state.sb_token,
+                st.session_state.sb_user_id
+            ) or {}
+        except Exception:
+            dados_carregados = carregar_dados_iaagro()
+    else:
+        dados_carregados = carregar_dados_iaagro()
+
+if "dados" not in st.session_state:
     _d = dados_carregados.get("dados", {})
     st.session_state.dados   = _d if isinstance(_d, dict) else {}
-if "areas"   not in st.session_state:
+if "areas" not in st.session_state or (not st.session_state.areas and dados_carregados.get("areas")):
     st.session_state.areas   = dados_carregados.get("areas", [])
 if "contador_area" not in st.session_state:
+    _areas_dc = st.session_state.get("areas", dados_carregados.get("areas", []))
     st.session_state.contador_area = max(
-        (int(a["ID"].split("-")[-1]) for a in dados_carregados.get("areas", []) if "ID" in a),
+        (int(a["ID"].split("-")[-1]) for a in _areas_dc if "ID" in a),
         default=0
     ) + 1
 if "area_selecionada" not in st.session_state:
     st.session_state.area_selecionada = None
-if "segmento" not in st.session_state:
+if "segmento" not in st.session_state or (not st.session_state.segmento and dados_carregados.get("segmento")):
     st.session_state.segmento = dados_carregados.get("segmento", None)
-if "estoque" not in st.session_state:
+if "estoque" not in st.session_state or (not st.session_state.estoque and dados_carregados.get("estoque")):
     st.session_state.estoque = dados_carregados.get("estoque", [])
-if "aplicacoes" not in st.session_state:
+if "aplicacoes" not in st.session_state or (not st.session_state.aplicacoes and dados_carregados.get("aplicacoes")):
     st.session_state.aplicacoes = dados_carregados.get("aplicacoes", [])
-if "historico_produtividade" not in st.session_state:
+if "historico_produtividade" not in st.session_state or (not st.session_state.historico_produtividade and dados_carregados.get("historico_produtividade")):
     st.session_state.historico_produtividade = dados_carregados.get("historico_produtividade", [])
-if "pluviometro" not in st.session_state:
+if "pluviometro" not in st.session_state or (not st.session_state.pluviometro and dados_carregados.get("pluviometro")):
     st.session_state.pluviometro = dados_carregados.get("pluviometro", [])
-if "carencia_registros" not in st.session_state:
+if "carencia_registros" not in st.session_state or (not st.session_state.carencia_registros and dados_carregados.get("carencia_registros")):
     st.session_state.carencia_registros = dados_carregados.get("carencia_registros", [])
-if "dre_registros" not in st.session_state:
+if "dre_registros" not in st.session_state or (not st.session_state.dre_registros and dados_carregados.get("dre_registros")):
     st.session_state.dre_registros = dados_carregados.get("dre_registros", [])
 if "calendario_eventos" not in st.session_state:
     st.session_state.calendario_eventos = dados_carregados.get("calendario_eventos", [])
