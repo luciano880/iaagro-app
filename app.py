@@ -1233,7 +1233,11 @@ def _tentar_autologin():
     """Tenta restaurar sessão via query_params após reload."""
     try:
         params = st.query_params
-        _tk  = params.get("_t", "")
+        # Reconstrói token das partes
+        _t1  = params.get("_t1", "")
+        _t2  = params.get("_t2", "")
+        _t3  = params.get("_t3", "")
+        _tk  = _t1 + _t2 + _t3
         _uid = params.get("_u", "")
         _pl  = params.get("_p", "free")
         _nm  = params.get("_n", "")
@@ -1245,11 +1249,16 @@ def _tentar_autologin():
                 st.session_state.sb_token      = _tk
                 st.session_state.sb_user_id    = _uid
                 st.session_state.sb_plano      = _pl
-                st.session_state.usuario_atual = _nm or "Usuário"
-                # Carrega dados direto
+                st.session_state.usuario_atual = (_nm or "Usuário").replace("_", " ")
+                # Carrega todos os dados
                 for k, v in _dados.items():
                     if k not in st.session_state:
                         setattr(st.session_state, k, v)
+                # Atualiza plano
+                try:
+                    st.session_state.sb_plano = sb_plano(_SB_URL, _SB_KEY, _tk, _uid)
+                except Exception:
+                    pass
                 return True
     except Exception:
         pass
@@ -1319,15 +1328,19 @@ def tela_login():
                             for k, v in dados_sb.items():
                                 if k not in st.session_state:
                                     setattr(st.session_state, k, v)
-                        # Salva token nos query_params para auto-login após reload
+                        # Salva refresh info nos query_params para auto-login após reload
                         try:
+                            import hashlib as _hl
                             _nome_url = (res["nome"] or res["email"]).replace(" ", "_")[:20]
-                            st.query_params.update({
-                                "_t": res["token"][:60],
-                                "_u": res["user_id"],
-                                "_p": st.session_state.sb_plano,
-                                "_n": _nome_url,
-                            })
+                            # Salva token completo — query_params suporta strings longas
+                            _tk_full = res["token"]
+                            st.query_params["_u"] = res["user_id"]
+                            st.query_params["_p"] = st.session_state.sb_plano
+                            st.query_params["_n"] = _nome_url
+                            # Divide token em partes para query_params
+                            st.query_params["_t1"] = _tk_full[:200]
+                            st.query_params["_t2"] = _tk_full[200:400]
+                            st.query_params["_t3"] = _tk_full[400:]
                         except Exception:
                             pass
                         st.success(f"✅ Bem-vindo, {st.session_state.usuario_atual}!")
