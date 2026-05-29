@@ -1148,20 +1148,32 @@ def salvar_dados_iaagro():
         "segmento":                st.session_state.get("segmento", None),
         "safrinha_registros":      st.session_state.get("safrinha_registros", []),
     }
-    # Salva no Supabase (multi-usuário) se disponível
-    if _SUPABASE_ATIVO and st.session_state.get("sb_token") and st.session_state.get("sb_user_id"):
+    # Lê variáveis globais dinamicamente (podem não existir quando função é definida)
+    _sb_url    = st.secrets.get("SUPABASE_URL", "") if hasattr(st, 'secrets') else ""
+    _sb_key    = st.secrets.get("SUPABASE_ANON_KEY", "") if hasattr(st, 'secrets') else ""
+    _sb_token  = st.session_state.get("sb_token", "")
+    _sb_uid    = st.session_state.get("sb_user_id", "")
+    _sb_ok     = bool(_sb_url and _sb_key and _sb_token and _sb_uid and _SB_DISPONIVEL)
+
+    if _sb_ok:
         try:
-            ok = sb_salvar(_SB_URL, _SB_KEY, st.session_state.sb_token,
-                          st.session_state.sb_user_id, dados_salvos)
+            ok = sb_salvar(_sb_url, _sb_key, _sb_token, _sb_uid, dados_salvos)
             if ok:
                 st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')}"
                 return
             else:
-                st.session_state["_ultimo_save"] = f"❌ Supabase falhou"
+                st.session_state["_ultimo_save"] = f"❌ Supabase retornou erro"
         except Exception as e:
-            st.session_state["_ultimo_save"] = f"❌ Erro: {str(e)[:50]}"
+            st.session_state["_ultimo_save"] = f"❌ Erro: {str(e)[:40]}"
+    else:
+        motivo = []
+        if not _sb_url: motivo.append("sem URL")
+        if not _sb_key: motivo.append("sem KEY")
+        if not _sb_token: motivo.append("sem token")
+        if not _sb_uid: motivo.append("sem user_id")
+        if not _SB_DISPONIVEL: motivo.append("módulo não carregou")
+        st.session_state["_ultimo_save"] = f"⚠️ Local ({', '.join(motivo)})"
     # Fallback: arquivo local
-    st.session_state["_ultimo_save"] = "⚠️ Local (sem Supabase)"
     with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
         json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
 
