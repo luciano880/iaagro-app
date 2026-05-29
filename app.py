@@ -1457,6 +1457,9 @@ def tela_login():
 
 
 if not st.session_state.logado:
+    # Verifica se havia uma sessão anterior (usuário recarregou a página)
+    if st.session_state.get("usuario_atual"):
+        st.warning("⏳ Sua sessão expirou. Faça login novamente — seus dados estão salvos no servidor.")
     tela_login()
     st.stop()
 
@@ -1597,24 +1600,28 @@ if st.sidebar.button("Sair", key="botao_sair"):
 
 # ─────────────────────────────────────────────
 # SESSION STATE – DADOS
+# Carrega do Supabase se tem token, senão arquivo local
 # ─────────────────────────────────────────────
-
-# Se usuário está logado e tem token Supabase, carrega do Supabase
 _dados_supabase = {}
 if (_SUPABASE_ATIVO
         and st.session_state.get("sb_token")
         and st.session_state.get("sb_user_id")
-        and "areas" not in st.session_state):  # só carrega se ainda não carregou
+        and "areas" not in st.session_state):
     try:
         _dados_supabase = sb_carregar(
             _SB_URL, _SB_KEY,
             st.session_state.sb_token,
             st.session_state.sb_user_id
         ) or {}
+        if _dados_supabase:
+            st.session_state.sb_plano = sb_plano(
+                _SB_URL, _SB_KEY,
+                st.session_state.sb_token,
+                st.session_state.sb_user_id
+            )
     except Exception:
-        pass  # falha silenciada — usa arquivo local como fallback
+        pass  # falha silenciada — usa arquivo local
 
-# Fallback: arquivo local
 dados_carregados = _dados_supabase if _dados_supabase else carregar_dados_iaagro()
 
 if "dados"   not in st.session_state:
@@ -9669,7 +9676,6 @@ st.markdown("""
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(()=>{});
 }
-// Banner de instalação PWA
 let deferredPrompt;
 window.addEventListener('beforeinstallprompt', (e) => {
   deferredPrompt = e;
@@ -9678,4 +9684,21 @@ window.addEventListener('beforeinstallprompt', (e) => {
 });
 </script>
 """, unsafe_allow_html=True)
+
+# ── Persiste token no sessionStorage para sobreviver reload ──
+if st.session_state.get("sb_token") and st.session_state.get("sb_user_id"):
+    _tk  = st.session_state.sb_token
+    _uid = st.session_state.sb_user_id
+    _pl  = st.session_state.get("sb_plano","free")
+    _nm  = st.session_state.get("usuario_atual","")
+    st.markdown(f"""
+    <script>
+    try {{
+        sessionStorage.setItem('iaagro_token',   '{_tk}');
+        sessionStorage.setItem('iaagro_uid',     '{_uid}');
+        sessionStorage.setItem('iaagro_plano',   '{_pl}');
+        sessionStorage.setItem('iaagro_usuario', '{_nm}');
+    }} catch(e) {{}}
+    </script>
+    """, unsafe_allow_html=True)
 
