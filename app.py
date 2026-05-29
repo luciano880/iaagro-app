@@ -1312,18 +1312,91 @@ def tela_login():
                         st.error(f"❌ {res.get('msg', res.get('error_description', 'Erro ao criar conta'))}")
 
         with aba_recuperar:
-            with st.form("form_recup_sb", clear_on_submit=True):
-                email_r = st.text_input("E-mail cadastrado", key="sb_email_recup")
-                btn_r   = st.form_submit_button("Enviar link de recuperação", use_container_width=True)
-            if btn_r:
-                if not email_r:
-                    st.error("Digite seu e-mail.")
-                else:
-                    ok = sb_reset_senha(_SB_URL, _SB_KEY, email_r.strip())
-                    if ok:
-                        st.success("✅ Link de recuperação enviado para seu e-mail.")
+            st.markdown("#### 🔑 Recuperar Senha")
+
+            # Etapa 1 — solicita email e envia OTP
+            if not st.session_state.get("_recup_email"):
+                with st.form("form_recup_sb", clear_on_submit=True):
+                    email_r = st.text_input("E-mail cadastrado", key="sb_email_recup")
+                    btn_r   = st.form_submit_button("📨 Enviar código por e-mail", use_container_width=True)
+                if btn_r:
+                    if not email_r:
+                        st.error("Digite seu e-mail.")
                     else:
-                        st.error("❌ Não foi possível enviar o link. Verifique o e-mail.")
+                        # Envia OTP via Supabase (magic link como OTP)
+                        try:
+                            import requests as _req
+                            r = _req.post(
+                                f"{_SB_URL}/auth/v1/otp",
+                                headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
+                                json={"email": email_r.strip(), "create_user": False},
+                                timeout=10
+                            )
+                            if r.status_code == 200:
+                                st.session_state["_recup_email"] = email_r.strip()
+                                st.success(f"✅ Código enviado para **{email_r.strip()}**! Verifique seu e-mail.")
+                                st.rerun()
+                            else:
+                                st.error("❌ E-mail não encontrado. Verifique e tente novamente.")
+                        except Exception as e:
+                            st.error(f"❌ Erro ao enviar: {e}")
+
+            # Etapa 2 — digita o OTP e nova senha
+            else:
+                _email_recup = st.session_state["_recup_email"]
+                st.info(f"📧 Código enviado para **{_email_recup}**")
+
+                with st.form("form_otp_sb", clear_on_submit=False):
+                    otp_code  = st.text_input("Código recebido no e-mail (6 dígitos)", key="sb_otp_code",
+                                               placeholder="Ex: 123456", max_chars=6)
+                    nova_senha = st.text_input("Nova senha (mín. 6 caracteres)", type="password", key="sb_nova_senha")
+                    conf_nova  = st.text_input("Confirmar nova senha", type="password", key="sb_conf_nova")
+                    btn_otp    = st.form_submit_button("🔐 Redefinir Senha", use_container_width=True)
+
+                if btn_otp:
+                    if not otp_code or len(otp_code) < 6:
+                        st.error("Digite o código de 6 dígitos.")
+                    elif len(nova_senha) < 6:
+                        st.error("Senha deve ter pelo menos 6 caracteres.")
+                    elif nova_senha != conf_nova:
+                        st.error("Senhas não conferem.")
+                    else:
+                        try:
+                            import requests as _req
+                            # Verifica OTP e obtém token
+                            r = _req.post(
+                                f"{_SB_URL}/auth/v1/verify",
+                                headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
+                                json={"type": "email", "email": _email_recup, "token": otp_code.strip()},
+                                timeout=10
+                            )
+                            if r.status_code == 200 and "access_token" in r.json():
+                                _token_temp = r.json()["access_token"]
+                                # Atualiza a senha
+                                r2 = _req.put(
+                                    f"{_SB_URL}/auth/v1/user",
+                                    headers={
+                                        "apikey": _SB_KEY,
+                                        "Authorization": f"Bearer {_token_temp}",
+                                        "Content-Type": "application/json"
+                                    },
+                                    json={"password": nova_senha},
+                                    timeout=10
+                                )
+                                if r2.status_code == 200:
+                                    st.session_state.pop("_recup_email", None)
+                                    st.success("✅ Senha redefinida com sucesso! Faça login com a nova senha.")
+                                    st.balloons()
+                                else:
+                                    st.error("❌ Erro ao atualizar senha. Tente novamente.")
+                            else:
+                                st.error("❌ Código inválido ou expirado. Solicite um novo código.")
+                        except Exception as e:
+                            st.error(f"❌ Erro: {e}")
+
+                if st.button("↩️ Voltar", key="btn_recup_voltar"):
+                    st.session_state.pop("_recup_email", None)
+                    st.rerun()
 
         st.markdown("---")
         st.caption("🔒 Dados protegidos por Supabase | Cada usuário tem seus próprios dados")
