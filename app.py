@@ -1162,7 +1162,21 @@ def salvar_dados_iaagro():
                 st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')}"
                 return
             else:
-                st.session_state["_ultimo_save"] = f"❌ Supabase retornou erro"
+                # Tenta capturar erro detalhado
+                import requests as _rq
+                _payload = {"user_id": _sb_uid, "areas": "[]", "dados": "{}", "estoque": "[]",
+                            "aplicacoes": "[]", "historico_produtividade": "[]", "pluviometro": "[]",
+                            "carencia_registros": "[]", "dre_registros": "[]", "calendario_eventos": "[]",
+                            "harvest_historico": "[]", "receituarios": "[]", "safrinha_registros": "[]",
+                            "segmento": None, "atualizado_em": datetime.now().isoformat()}
+                _r = _rq.post(
+                    f"{_sb_url}/rest/v1/iaagro_dados",
+                    headers={"apikey": _sb_key, "Authorization": f"Bearer {_sb_token}",
+                             "Content-Type": "application/json",
+                             "Prefer": "resolution=merge-duplicates,return=minimal"},
+                    json=_payload, timeout=10
+                )
+                st.session_state["_ultimo_save"] = f"❌ {_r.status_code}: {_r.text[:60]}"
         except Exception as e:
             st.session_state["_ultimo_save"] = f"❌ Erro: {str(e)[:40]}"
     else:
