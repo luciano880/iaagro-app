@@ -1225,6 +1225,40 @@ _SB_KEY = st.secrets.get("SUPABASE_ANON_KEY", "")
 _SUPABASE_ATIVO = bool(_SB_URL and _SB_KEY and _SB_DISPONIVEL)
 
 # ─────────────────────────────────────────────
+# AUTO-LOGIN — restaura sessão via query_params
+# Quando usuário recarrega a página, o token
+# salvo nos query_params restaura a sessão
+# ─────────────────────────────────────────────
+def _tentar_autologin():
+    """Tenta restaurar sessão via query_params após reload."""
+    try:
+        params = st.query_params
+        _tk  = params.get("_t", "")
+        _uid = params.get("_u", "")
+        _pl  = params.get("_p", "free")
+        _nm  = params.get("_n", "")
+        if _tk and _uid and not st.session_state.get("logado"):
+            # Valida token buscando dados do Supabase
+            _dados = sb_carregar(_SB_URL, _SB_KEY, _tk, _uid) if _SUPABASE_ATIVO else None
+            if _dados is not None:
+                st.session_state.logado        = True
+                st.session_state.sb_token      = _tk
+                st.session_state.sb_user_id    = _uid
+                st.session_state.sb_plano      = _pl
+                st.session_state.usuario_atual = _nm or "Usuário"
+                # Carrega dados direto
+                for k, v in _dados.items():
+                    if k not in st.session_state:
+                        setattr(st.session_state, k, v)
+                return True
+    except Exception:
+        pass
+    return False
+
+if _SUPABASE_ATIVO and not st.session_state.get("logado"):
+    _tentar_autologin()
+
+# ─────────────────────────────────────────────
 # SESSION STATE – LOGIN
 # ─────────────────────────────────────────────
 if "sb_token"   not in st.session_state: st.session_state.sb_token   = ""
@@ -1283,7 +1317,19 @@ def tela_login():
                         dados_sb = sb_carregar(_SB_URL, _SB_KEY, res["token"], res["user_id"])
                         if dados_sb:
                             for k, v in dados_sb.items():
-                                setattr(st.session_state, k, v)
+                                if k not in st.session_state:
+                                    setattr(st.session_state, k, v)
+                        # Salva token nos query_params para auto-login após reload
+                        try:
+                            _nome_url = (res["nome"] or res["email"]).replace(" ", "_")[:20]
+                            st.query_params.update({
+                                "_t": res["token"][:60],
+                                "_u": res["user_id"],
+                                "_p": st.session_state.sb_plano,
+                                "_n": _nome_url,
+                            })
+                        except Exception:
+                            pass
                         st.success(f"✅ Bem-vindo, {st.session_state.usuario_atual}!")
                         st.rerun()
                     else:
