@@ -65,10 +65,11 @@ def sb_logout(url, api_key, token):
 
 
 def sb_reset_senha(url, api_key, email):
+    APP_URL = "https://iaagro-app-kvrwxtkugla8pqe7dgqeue.streamlit.app"
     r = requests.post(
         f"{url}/auth/v1/recover",
         headers={"apikey": api_key, "Content-Type": "application/json"},
-        json={"email": email},
+        json={"email": email, "redirect_to": APP_URL},
         timeout=10
     )
     return r.status_code == 200
