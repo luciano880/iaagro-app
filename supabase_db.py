@@ -108,7 +108,7 @@ def sb_carregar(url, api_key, token, user_id):
 
 
 def sb_salvar(url, api_key, token, user_id, session):
-    """Salva/atualiza todos os dados do usuário (upsert)."""
+    """Salva/atualiza todos os dados do usuário."""
     payload = {
         "user_id":                 user_id,
         "dados":                   json.dumps(session.get("dados", {}), ensure_ascii=False),
@@ -126,13 +126,41 @@ def sb_salvar(url, api_key, token, user_id, session):
         "segmento":                session.get("segmento", None),
         "atualizado_em":           datetime.now().isoformat(),
     }
-    r = requests.post(
+    headers_base = {
+        "apikey":        api_key,
+        "Authorization": f"Bearer {token}",
+        "Content-Type":  "application/json",
+    }
+    payload_update = {k: v for k, v in payload.items() if k != "user_id"}
+
+    # 1. Tenta PATCH (update)
+    r = requests.patch(
+        f"{url}/rest/v1/iaagro_dados?user_id=eq.{user_id}",
+        headers={**headers_base, "Prefer": "return=representation"},
+        json=payload_update,
+        timeout=15
+    )
+    if r.status_code == 200:
+        # Verifica se realmente atualizou algo
+        try:
+            if r.json():  # retornou rows = atualizou
+                return True
+        except Exception:
+            return True
+
+    # 2. Se não atualizou, faz DELETE + INSERT limpo
+    requests.delete(
+        f"{url}/rest/v1/iaagro_dados?user_id=eq.{user_id}",
+        headers=headers_base,
+        timeout=10
+    )
+    r2 = requests.post(
         f"{url}/rest/v1/iaagro_dados",
-        headers={**_headers(api_key, token), "Prefer": "resolution=merge-duplicates,return=minimal"},
+        headers={**headers_base, "Prefer": "return=minimal"},
         json=payload,
         timeout=15
     )
-    return r.status_code in (200, 201, 204)
+    return r2.status_code in (200, 201, 204)
 
 
 def sb_plano(url, api_key, token, user_id):
