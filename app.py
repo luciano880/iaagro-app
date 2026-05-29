@@ -1151,12 +1151,17 @@ def salvar_dados_iaagro():
     # Salva no Supabase (multi-usuário) se disponível
     if _SUPABASE_ATIVO and st.session_state.get("sb_token") and st.session_state.get("sb_user_id"):
         try:
-            sb_salvar(_SB_URL, _SB_KEY, st.session_state.sb_token,
-                      st.session_state.sb_user_id, dados_salvos)
-            return
-        except Exception:
-            pass  # falha no Supabase — usa arquivo local como fallback
+            ok = sb_salvar(_SB_URL, _SB_KEY, st.session_state.sb_token,
+                          st.session_state.sb_user_id, dados_salvos)
+            if ok:
+                st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')}"
+                return
+            else:
+                st.session_state["_ultimo_save"] = f"❌ Supabase falhou"
+        except Exception as e:
+            st.session_state["_ultimo_save"] = f"❌ Erro: {str(e)[:50]}"
     # Fallback: arquivo local
+    st.session_state["_ultimo_save"] = "⚠️ Local (sem Supabase)"
     with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
         json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
 
@@ -1643,18 +1648,31 @@ st.sidebar.markdown(
 )
 
 if st.sidebar.button("Sair", key="botao_sair"):
-    # Logout do Supabase se ativo
     if _SUPABASE_ATIVO and st.session_state.get("sb_token"):
         try:
             sb_logout(_SB_URL, _SB_KEY, st.session_state.sb_token)
         except Exception:
-            pass  # falha silenciada — não crítico
+            pass
     st.session_state.logado        = False
     st.session_state.usuario_atual = ""
     st.session_state.sb_token      = ""
     st.session_state.sb_user_id    = ""
     st.session_state.sb_plano      = "free"
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
     st.rerun()
+
+# Status do último salvamento (debug)
+if st.session_state.get("_ultimo_save"):
+    _cor_s = "#14532d" if "✅" in st.session_state["_ultimo_save"] else "#7f1d1d"
+    st.sidebar.markdown(
+        f"<div style='background:{_cor_s};color:#fff;padding:3px 8px;"
+        f"border-radius:4px;font-size:10px;margin-top:2px;'>"
+        f"{st.session_state['_ultimo_save']}</div>",
+        unsafe_allow_html=True
+    )
 
 
 # ─────────────────────────────────────────────
