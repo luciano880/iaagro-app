@@ -1419,7 +1419,7 @@ def tela_login():
                             r = _req.post(
                                 f"{_SB_URL}/auth/v1/otp",
                                 headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
-                                json={"email": email_r.strip(), "create_user": False},
+                                json={"email": email_r.strip(), "create_user": False, "type": "magiclink"},
                                 timeout=10
                             )
                             if r.status_code == 200:
@@ -1457,7 +1457,7 @@ def tela_login():
                             r = _req.post(
                                 f"{_SB_URL}/auth/v1/verify",
                                 headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
-                                json={"type": "email", "email": _email_recup, "token": otp_code.strip()},
+                                json={"type": "magiclink", "email": _email_recup, "token": otp_code.strip()},
                                 timeout=10
                             )
                             if r.status_code == 200 and "access_token" in r.json():
