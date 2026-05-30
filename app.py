@@ -1404,7 +1404,6 @@ def tela_login():
         with aba_recuperar:
             st.markdown("#### 🔑 Recuperar Senha")
 
-            # Etapa 1 — solicita email e envia OTP
             if not st.session_state.get("_recup_email"):
                 with st.form("form_recup_sb", clear_on_submit=True):
                     email_r = st.text_input("E-mail cadastrado", key="sb_email_recup")
@@ -1413,38 +1412,42 @@ def tela_login():
                     if not email_r:
                         st.error("Digite seu e-mail.")
                     else:
-                        # Envia OTP via Supabase (magic link como OTP)
                         try:
                             import requests as _req
+                            # Envia OTP numérico de 6 dígitos
                             r = _req.post(
                                 f"{_SB_URL}/auth/v1/otp",
                                 headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
-                                json={"email": email_r.strip(), "create_user": False, "type": "magiclink"},
+                                json={
+                                    "email": email_r.strip(),
+                                    "create_user": False,
+                                    "options": {"should_create_user": False}
+                                },
                                 timeout=10
                             )
                             if r.status_code == 200:
                                 st.session_state["_recup_email"] = email_r.strip()
-                                st.success(f"✅ Código enviado para **{email_r.strip()}**! Verifique seu e-mail.")
+                                st.success(f"✅ Código enviado para **{email_r.strip()}**!")
+                                st.info("📧 Verifique seu e-mail e copie o código de 6 dígitos.")
                                 st.rerun()
                             else:
-                                st.error("❌ E-mail não encontrado. Verifique e tente novamente.")
+                                st.error("❌ E-mail não encontrado.")
                         except Exception as e:
-                            st.error(f"❌ Erro ao enviar: {e}")
-
-            # Etapa 2 — digita o OTP e nova senha
+                            st.error(f"❌ Erro: {e}")
             else:
                 _email_recup = st.session_state["_recup_email"]
                 st.info(f"📧 Código enviado para **{_email_recup}**")
+                st.warning("⚠️ O e-mail enviado tem um código de 6 dígitos. **Não clique no link** — copie apenas o código numérico.")
 
                 with st.form("form_otp_sb", clear_on_submit=False):
-                    otp_code  = st.text_input("Código recebido no e-mail (6 dígitos)", key="sb_otp_code",
-                                               placeholder="Ex: 12345678", max_chars=8)
+                    otp_code   = st.text_input("Código de 6 dígitos do e-mail", key="sb_otp_code",
+                                               placeholder="123456", max_chars=6)
                     nova_senha = st.text_input("Nova senha (mín. 6 caracteres)", type="password", key="sb_nova_senha")
                     conf_nova  = st.text_input("Confirmar nova senha", type="password", key="sb_conf_nova")
                     btn_otp    = st.form_submit_button("🔐 Redefinir Senha", use_container_width=True)
 
                 if btn_otp:
-                    if not otp_code or len(otp_code) < 8:
+                    if not otp_code or len(otp_code.strip()) < 6:
                         st.error("Digite o código de 6 dígitos.")
                     elif len(nova_senha) < 6:
                         st.error("Senha deve ter pelo menos 6 caracteres.")
@@ -1453,38 +1456,42 @@ def tela_login():
                     else:
                         try:
                             import requests as _req
-                            # Verifica OTP e obtém token
                             r = _req.post(
                                 f"{_SB_URL}/auth/v1/verify",
                                 headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
                                 json={"type": "magiclink", "email": _email_recup, "token": otp_code.strip()},
                                 timeout=10
                             )
+                            if r.status_code != 200:
+                                # Tenta também com type "email"
+                                r = _req.post(
+                                    f"{_SB_URL}/auth/v1/verify",
+                                    headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
+                                    json={"type": "email", "email": _email_recup, "token": otp_code.strip()},
+                                    timeout=10
+                                )
                             if r.status_code == 200 and "access_token" in r.json():
                                 _token_temp = r.json()["access_token"]
-                                # Atualiza a senha
                                 r2 = _req.put(
                                     f"{_SB_URL}/auth/v1/user",
-                                    headers={
-                                        "apikey": _SB_KEY,
-                                        "Authorization": f"Bearer {_token_temp}",
-                                        "Content-Type": "application/json"
-                                    },
+                                    headers={"apikey": _SB_KEY,
+                                             "Authorization": f"Bearer {_token_temp}",
+                                             "Content-Type": "application/json"},
                                     json={"password": nova_senha},
                                     timeout=10
                                 )
                                 if r2.status_code == 200:
                                     st.session_state.pop("_recup_email", None)
-                                    st.success("✅ Senha redefinida com sucesso! Faça login com a nova senha.")
+                                    st.success("✅ Senha redefinida! Faça login com a nova senha.")
                                     st.balloons()
                                 else:
-                                    st.error("❌ Erro ao atualizar senha. Tente novamente.")
+                                    st.error(f"❌ Erro ao atualizar senha: {r2.text[:80]}")
                             else:
-                                st.error("❌ Código inválido ou expirado. Solicite um novo código.")
+                                st.error(f"❌ Código inválido ou expirado. Tente solicitar um novo código.")
                         except Exception as e:
                             st.error(f"❌ Erro: {e}")
 
-                if st.button("↩️ Voltar", key="btn_recup_voltar"):
+                if st.button("↩️ Solicitar novo código", key="btn_recup_voltar"):
                     st.session_state.pop("_recup_email", None)
                     st.rerun()
 
@@ -4247,19 +4254,44 @@ if menu == "🧪 Solo & Adubação":
     else:
         col1, col2, col3 = st.columns(3)
         with col1:
-            ph       = st.number_input("pH do solo", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)), key="num_ph_do_solo_3478")
-            fosforo  = st.number_input("Fósforo P", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)), key="num_f_sforo_p_3479")
-            potassio = st.number_input("Potássio K", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)), key="num_pot_ssio_k_3480")
+            ph       = st.number_input("pH do solo (H₂O 1:1)", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)), key="num_ph_do_solo_3478")
+            fosforo  = st.number_input("Fósforo P (mg/dm³ Mehlich-1)", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)), key="num_f_sforo_p_3479")
+            potassio = st.number_input("Potássio K (mg/dm³ Mehlich-1)", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)), key="num_pot_ssio_k_3480")
         with col2:
-            materia_organica = st.number_input("Matéria orgânica %", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)), key="num_mat_ria_org_nic_3482")
-            calcio   = st.number_input("Cálcio Ca", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)), key="num_c_lcio_ca_3483")
-            magnesio = st.number_input("Magnésio Mg", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)), key="num_magn_sio_mg_3484")
+            materia_organica = st.number_input("Matéria Orgânica MO (g/dm³)", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)), key="num_mat_ria_org_nic_3482", help="1% = 10 g/dm³")
+            calcio   = st.number_input("Cálcio Ca²⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)), key="num_c_lcio_ca_3483")
+            magnesio = st.number_input("Magnésio Mg²⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)), key="num_magn_sio_mg_3484")
         with col3:
-            aluminio = st.number_input("Alumínio Al", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)), key="num_alum_nio_al_3486")
-            enxofre  = st.number_input("Enxofre S", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)), key="num_enxofre_s_3487")
-            ctc      = st.number_input("CTC", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)), key="num_ctc_3488")
+            aluminio = st.number_input("Alumínio Al³⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)), key="num_alum_nio_al_3486")
+            enxofre  = st.number_input("Enxofre S (mg/dm³)", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)), key="num_enxofre_s_3487")
+            ctc      = st.number_input("CTC pH7 (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)), key="num_ctc_3488", help="Capacidade de Troca Catiônica")
 
-        st.subheader("Micronutrientes")
+        # ── Cálculo automático de V% e SB ──────────────────
+        sb_calc  = calcio + magnesio + (potassio / 391.0)  # K em cmolc
+        ctc_val  = ctc if ctc > 0 else (sb_calc + aluminio + 2.0)
+        v_calc   = round((sb_calc / ctc_val) * 100, 1) if ctc_val > 0 else 0.0
+        m_calc   = round((aluminio / (sb_calc + aluminio)) * 100, 1) if (sb_calc + aluminio) > 0 else 0.0
+
+        st.markdown(f"""
+        <div style='background:#0f3460;border-radius:8px;padding:10px 16px;border:1px solid #3b82f6;margin:8px 0;'>
+        <b style='color:#3b82f6;'>📊 Calculado automaticamente (CQFS RS/SC 2016)</b><br>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        SB = Ca + Mg + K = <b>{sb_calc:.2f} cmolc/dm³</b> &nbsp;|&nbsp;
+        <b>V% = {v_calc}%</b> {"🟢 Adequado" if v_calc >= 60 else "🟡 Médio" if v_calc >= 45 else "🔴 Baixo"} &nbsp;|&nbsp;
+        <b>m% = {m_calc}%</b> {"🟢 OK" if m_calc < 20 else "🔴 Alto"} &nbsp;|&nbsp;
+        Relação Ca/Mg = <b>{round(calcio/magnesio,1) if magnesio > 0 else '-'}</b>
+        {"✅" if 2<=round(calcio/magnesio,1)<=5 else "⚠️"  if magnesio > 0 else ""}
+        </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── V% manual (se vier do laudo) ──
+        v_laudo = st.number_input("V% do laudo (deixe 0 para usar o calculado)", min_value=0.0, max_value=100.0,
+                                   value=float(st.session_state.dados.get("v_percent", 0.0)), key="num_v_percent",
+                                   help="Saturação por bases — use se o laudo já fornecer o valor")
+        v_final = v_laudo if v_laudo > 0 else v_calc
+
+        st.subheader("🔬 Micronutrientes (mg/dm³ Mehlich-1)")
         col4, col5, col6 = st.columns(3)
         with col4:
             boro  = st.number_input("Boro B", min_value=0.0, value=float(st.session_state.dados.get("boro", 0.3)), key="num_boro_b_3493")
@@ -4268,7 +4300,45 @@ if menu == "🧪 Solo & Adubação":
             manganes = st.number_input("Manganês Mn", min_value=0.0, value=float(st.session_state.dados.get("manganes", 5.0)), key="num_mangan_s_mn_3496")
             cobre    = st.number_input("Cobre Cu", min_value=0.0, value=float(st.session_state.dados.get("cobre", 0.5)), key="num_cobre_cu_3497")
         with col6:
-            argila = st.number_input("Argila %", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)), key="num_argila___3499")
+            ferro    = st.number_input("Ferro Fe", min_value=0.0, value=float(st.session_state.dados.get("ferro", 30.0)), key="num_ferro_fe", help="Referência: >9 mg/dm³")
+            molibdenio = st.number_input("Molibdênio Mo", min_value=0.0, value=float(st.session_state.dados.get("molibdenio", 0.1)), key="num_molibdenio", help="Referência: >0.1 mg/dm³")
+
+        st.subheader("🪨 Análise Física do Solo")
+        col7, col8, col9 = st.columns(3)
+        with col7:
+            argila   = st.number_input("Argila (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)), key="num_argila___3499")
+            silte    = st.number_input("Silte (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("silte", 25.0)), key="num_silte")
+        with col8:
+            areia    = st.number_input("Areia total (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("areia", 40.0)), key="num_areia")
+            dens_solo= st.number_input("Densidade do solo (g/cm³)", min_value=0.5, max_value=2.0, value=float(st.session_state.dados.get("dens_solo", 1.2)), key="num_dens_solo", help="Referência: <1.3 g/cm³ para argilosos")
+        with col9:
+            dens_part= st.number_input("Densidade de partículas (g/cm³)", min_value=1.0, max_value=3.5, value=float(st.session_state.dados.get("dens_part", 2.65)), key="num_dens_part", help="Padrão: 2.65 g/cm³")
+            umidade  = st.number_input("Umidade atual (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("umidade", 0.0)), key="num_umidade")
+
+        # Calcula porosidade e textura automaticamente
+        _soma_granulo = argila + silte + areia
+        _porosidade = round((1 - dens_solo/dens_part)*100, 1) if dens_part > 0 else 0
+        if argila >= 60:    _textura = "Muito argiloso"
+        elif argila >= 35:  _textura = "Argiloso"
+        elif argila >= 25:  _textura = "Média argilosa"
+        elif argila >= 15:  _textura = "Franco-argiloso"
+        elif silte >= 50:   _textura = "Siltoso"
+        elif areia >= 70:   _textura = "Arenoso"
+        else:               _textura = "Franco"
+
+        if _soma_granulo > 0:
+            st.markdown(f"""
+            <div style='background:#0f3460;border-radius:8px;padding:10px 16px;border:1px solid #22c55e;margin:8px 0;'>
+            <b style='color:#22c55e;'>🪨 Física do Solo calculada</b><br>
+            <span style='color:#f1f5f9;font-size:13px;'>
+            Classe textural: <b>{_textura}</b> &nbsp;|&nbsp;
+            Porosidade total: <b>{_porosidade}%</b>
+            {"🟢 Boa" if _porosidade >= 50 else "🟡 Média" if _porosidade >= 40 else "🔴 Compactado"} &nbsp;|&nbsp;
+            Soma granulométrica: <b>{_soma_granulo:.0f}%</b>
+            {"✅" if 95<=_soma_granulo<=105 else "⚠️ Verificar soma"}
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
 
         # Validação de campos
         erros_val = []
@@ -4293,7 +4363,13 @@ if menu == "🧪 Solo & Adubação":
                     "ph": ph, "fosforo": fosforo, "potassio": potassio,
                     "materia_organica": materia_organica, "calcio": calcio, "magnesio": magnesio,
                     "aluminio": aluminio, "enxofre": enxofre, "ctc": ctc,
-                    "boro": boro, "zinco": zinco, "manganes": manganes, "cobre": cobre, "argila": argila
+                    "boro": boro, "zinco": zinco, "manganes": manganes, "cobre": cobre,
+                    "ferro": ferro, "molibdenio": molibdenio,
+                    "argila": argila, "silte": silte, "areia": areia,
+                    "dens_solo": dens_solo, "dens_part": dens_part, "umidade": umidade,
+                    "v_percent": v_final, "saturacao_bases": round(sb_calc, 2),
+                    "textura": _textura, "porosidade": _porosidade,
+                    "saturacao_al": m_calc,
                 })
                 atualizar_area_atual()
                 salvar_dados_iaagro()
