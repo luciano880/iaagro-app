@@ -1438,13 +1438,13 @@ def tela_login():
 
                 with st.form("form_otp_sb", clear_on_submit=False):
                     otp_code  = st.text_input("Código recebido no e-mail (6 dígitos)", key="sb_otp_code",
-                                               placeholder="Ex: 123456", max_chars=6)
+                                               placeholder="Ex: 12345678", max_chars=8)
                     nova_senha = st.text_input("Nova senha (mín. 6 caracteres)", type="password", key="sb_nova_senha")
                     conf_nova  = st.text_input("Confirmar nova senha", type="password", key="sb_conf_nova")
                     btn_otp    = st.form_submit_button("🔐 Redefinir Senha", use_container_width=True)
 
                 if btn_otp:
-                    if not otp_code or len(otp_code) < 6:
+                    if not otp_code or len(otp_code) < 8:
                         st.error("Digite o código de 6 dígitos.")
                     elif len(nova_senha) < 6:
                         st.error("Senha deve ter pelo menos 6 caracteres.")
