@@ -1265,7 +1265,6 @@ def _tentar_autologin():
     """Tenta restaurar sessão via query_params após reload."""
     try:
         params = st.query_params
-        # Reconstrói token das partes
         _t1  = params.get("_t1", "")
         _t2  = params.get("_t2", "")
         _t3  = params.get("_t3", "")
@@ -1274,7 +1273,6 @@ def _tentar_autologin():
         _pl  = params.get("_p", "free")
         _nm  = params.get("_n", "")
         if _tk and _uid and not st.session_state.get("logado"):
-            # Valida token buscando dados do Supabase
             _dados = sb_carregar(_SB_URL, _SB_KEY, _tk, _uid) if _SUPABASE_ATIVO else None
             if _dados is not None:
                 st.session_state.logado        = True
@@ -1282,11 +1280,13 @@ def _tentar_autologin():
                 st.session_state.sb_user_id    = _uid
                 st.session_state.sb_plano      = _pl
                 st.session_state.usuario_atual = (_nm or "Usuário").replace("_", " ")
-                # Carrega todos os dados
-                for k, v in _dados.items():
-                    if k not in st.session_state:
-                        setattr(st.session_state, k, v)
-                # Atualiza plano
+                # Carrega TODOS os campos do Supabase
+                _campos = ["dados","areas","estoque","aplicacoes","historico_produtividade",
+                           "pluviometro","carencia_registros","dre_registros","calendario_eventos",
+                           "harvest_historico","receituarios","safrinha_registros","fluxo_caixa","segmento"]
+                for k in _campos:
+                    if k in _dados and _dados[k] not in (None, [], {}):
+                        setattr(st.session_state, k, _dados[k])
                 try:
                     st.session_state.sb_plano = sb_plano(_SB_URL, _SB_KEY, _tk, _uid)
                 except Exception:
@@ -1796,6 +1796,18 @@ if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinid
 if "safrinha_registros" not in st.session_state: st.session_state.safrinha_registros = dados_carregados.get("safrinha_registros", [])
 if "fluxo_caixa" not in st.session_state or (not st.session_state.get("fluxo_caixa") and dados_carregados.get("fluxo_caixa")):
     st.session_state.fluxo_caixa = dados_carregados.get("fluxo_caixa", [])
+if "harvest_historico" not in st.session_state or (not st.session_state.get("harvest_historico") and dados_carregados.get("harvest_historico")):
+    st.session_state.harvest_historico = dados_carregados.get("harvest_historico", [])
+if "receituarios" not in st.session_state or (not st.session_state.get("receituarios") and dados_carregados.get("receituarios")):
+    st.session_state.receituarios = dados_carregados.get("receituarios", [])
+if "carencia_registros" not in st.session_state or (not st.session_state.get("carencia_registros") and dados_carregados.get("carencia_registros")):
+    st.session_state.carencia_registros = dados_carregados.get("carencia_registros", [])
+if "pluviometro" not in st.session_state or (not st.session_state.get("pluviometro") and dados_carregados.get("pluviometro")):
+    st.session_state.pluviometro = dados_carregados.get("pluviometro", [])
+if "calendario_eventos" not in st.session_state or (not st.session_state.get("calendario_eventos") and dados_carregados.get("calendario_eventos")):
+    st.session_state.calendario_eventos = dados_carregados.get("calendario_eventos", [])
+if "dre_registros" not in st.session_state or (not st.session_state.get("dre_registros") and dados_carregados.get("dre_registros")):
+    st.session_state.dre_registros = dados_carregados.get("dre_registros", [])
 
 # ── GPS session_states — inicialização segura ───────────────────
 if "_gps_lat"       not in st.session_state: st.session_state._gps_lat       = None
