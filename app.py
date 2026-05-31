@@ -1794,6 +1794,8 @@ if "precos_data"       not in st.session_state: st.session_state.precos_data    
 if "receituarios"      not in st.session_state: st.session_state.receituarios      = dados_carregados.get("receituarios", [])
 if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinida  = False
 if "safrinha_registros" not in st.session_state: st.session_state.safrinha_registros = dados_carregados.get("safrinha_registros", [])
+if "fluxo_caixa" not in st.session_state or (not st.session_state.get("fluxo_caixa") and dados_carregados.get("fluxo_caixa")):
+    st.session_state.fluxo_caixa = dados_carregados.get("fluxo_caixa", [])
 
 # ── GPS session_states — inicialização segura ───────────────────
 if "_gps_lat"       not in st.session_state: st.session_state._gps_lat       = None

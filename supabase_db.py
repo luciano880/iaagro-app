@@ -102,6 +102,7 @@ def sb_carregar(url, api_key, token, user_id):
             "harvest_historico":       json.loads(row.get("harvest_historico", "[]")),
             "receituarios":            json.loads(row.get("receituarios", "[]")),
             "safrinha_registros":      json.loads(row.get("safrinha_registros", "[]")),
+            "fluxo_caixa":             json.loads(row.get("fluxo_caixa", "[]")),
             "segmento":                row.get("segmento", None),
         }
     return None
@@ -123,6 +124,7 @@ def sb_salvar(url, api_key, token, user_id, session):
         "harvest_historico":       json.dumps(session.get("harvest_historico", []), ensure_ascii=False),
         "receituarios":            json.dumps(session.get("receituarios", []), ensure_ascii=False),
         "safrinha_registros":      json.dumps(session.get("safrinha_registros", []), ensure_ascii=False),
+        "fluxo_caixa":             json.dumps(session.get("fluxo_caixa", []), ensure_ascii=False),
         "segmento":                session.get("segmento", None),
         "atualizado_em":           datetime.now().isoformat(),
     }
