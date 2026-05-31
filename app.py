@@ -4163,9 +4163,30 @@ if menu == "🌾 Lavoura":
             elif score >= 70: cor = "🟡 Amarelo"
             elif score >= 50: cor = "🟠 Laranja"
             else:             cor = "🔴 Vermelho"
-            registros_area = [r for r in st.session_state.pluviometro if r["Área"] == area.get("ID","")]
+            registros_area = [r for r in st.session_state.pluviometro
+                              if isinstance(r, dict) and
+                              (r.get("area_id") == area.get("ID","") or
+                               r.get("Área") == area.get("ID",""))]
             if len(registros_area) > 0:
-                perda_media_clima = sum(r["Perda Estimada"] for r in registros_area) / len(registros_area)
+                # Suporta formato novo (mm) e antigo (Perda Estimada)
+                if "Perda Estimada" in registros_area[0]:
+                    perda_media_clima = sum(r.get("Perda Estimada", 0) for r in registros_area) / len(registros_area)
+                else:
+                    # Novo formato — calcula perda por déficit/excesso
+                    _ideal = 120.0
+                    _meses = {}
+                    for r in registros_area:
+                        _k = f"{r.get('ano',0)}-{r.get('mes',0)}"
+                        _meses[_k] = _meses.get(_k, 0) + r.get("mm", 0)
+                    _perdas = []
+                    for _mm in _meses.values():
+                        if _mm < _ideal * 0.7:
+                            _perdas.append((_ideal - _mm) * 0.15)
+                        elif _mm > _ideal * 1.3:
+                            _perdas.append((_mm - _ideal) * 0.08)
+                        else:
+                            _perdas.append(0)
+                    perda_media_clima = sum(_perdas) / len(_perdas) if _perdas else 0
                 if   perda_media_clima <= 5:  clima_cor = "🟢 Ideal"
                 elif perda_media_clima <= 12: clima_cor = "🟡 Atenção"
                 else:                         clima_cor = "🔴 Crítico"
