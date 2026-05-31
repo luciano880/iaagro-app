@@ -1147,6 +1147,7 @@ def salvar_dados_iaagro():
         "receituarios":            st.session_state.get("receituarios", []),
         "segmento":                st.session_state.get("segmento", None),
         "safrinha_registros":      st.session_state.get("safrinha_registros", []),
+        "fluxo_caixa":             st.session_state.get("fluxo_caixa", []),
     }
     # Lê variáveis globais dinamicamente (podem não existir quando função é definida)
     _sb_url    = st.secrets.get("SUPABASE_URL", "") if hasattr(st, 'secrets') else ""
@@ -3912,8 +3913,8 @@ if menu == "🌾 Lavoura":
     if len(st.session_state.areas) == 0:
         warning_box("Cadastre uma área primeiro.")
     else:
-        lista_areas  = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-        area_chuva   = st.selectbox("Selecione a Área", lista_areas, key="sel_selecione_a__re_3149")
+        lista_areas   = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
+        area_chuva    = st.selectbox("Selecione a Área", lista_areas, key="sel_area_chuva_pluvio")
         id_area_chuva = area_chuva.split(" - ")[0]
         area_obj      = next((a for a in st.session_state.areas if a["ID"] == id_area_chuva), {})
         cultura_chuva = area_obj.get("Cultura", "Soja")
@@ -3923,71 +3924,203 @@ if menu == "🌾 Lavoura":
             "Aveia":80.0,"Cana-de-açúcar":180.0,"Arroz":180.0,"Sorgo":90.0,
             "Girassol":90.0,"Cevada":80.0,"Pastagem":120.0,"Algodão":130.0,
             "Café":140.0,"Tabaco":110.0,"Mandioca":100.0,"Batata":100.0,
-            "Tomate":120.0,"Cebola":80.0,"Alho":70.0,"Uva":80.0,"Maçã":100.0,
-            "Laranja":130.0,"Banana":180.0,"Eucalipto":120.0,"Pinus":100.0
         }
-        chuva_ideal_auto = chuva_ideal_padrao.get(cultura_chuva, 120.0)
-        st.markdown(f'<div style="background:#0f3460;color:#ffffff;padding:12px 18px;border-radius:10px;font-weight:600;font-size:15px;border:1px solid #3b82f6;">🌱 <b>Cultura:</b> {cultura_chuva} &nbsp;|&nbsp; 🌧️ <b>Chuva ideal estimada:</b> {chuva_ideal_auto} mm</div>', unsafe_allow_html=True)
+        chuva_ideal_mes = chuva_ideal_padrao.get(cultura_chuva, 120.0)
 
-        mes        = st.selectbox("Mês", ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-                                          "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"])
-        chuva_real = st.number_input("Chuva acumulada (mm)", min_value=0.0, value=0.0, key="num_chuva_acumulada_3167")
-        chuva_ideal = st.number_input("Chuva ideal da cultura (mm)", min_value=0.0, value=chuva_ideal_auto, key="num_chuva_ideal_da__3168")
+        st.markdown(f"""
+        <div style='background:#0f3460;color:#fff;padding:10px 16px;border-radius:8px;
+        border:1px solid #3b82f6;margin-bottom:12px;'>
+        🌱 <b>Cultura:</b> {cultura_chuva} &nbsp;|&nbsp;
+        🌧️ <b>Chuva ideal/mês:</b> {chuva_ideal_mes} mm
+        </div>
+        """, unsafe_allow_html=True)
 
-        if chuva_real < chuva_ideal * 0.7:
-            perda  = round((chuva_ideal - chuva_real) * 0.15, 1)
-            status = "⚠️ Déficit hídrico"
-        elif chuva_real > chuva_ideal * 1.3:
-            perda  = round((chuva_real - chuva_ideal) * 0.08, 1)
-            status = "⚠️ Excesso de chuva"
-        else:
-            perda  = 0
-            status = "✅ Chuva adequada"
+        # ── Registro diário ──────────────────────────────────
+        st.subheader("➕ Registrar Chuva Diária")
+        col_d1, col_d2, col_d3 = st.columns(3)
+        with col_d1:
+            data_chuva = st.date_input("Data", value=datetime.now().date(), key="date_chuva_diaria")
+        with col_d2:
+            mm_dia = st.number_input("Precipitação (mm)", min_value=0.0, max_value=500.0,
+                                      value=0.0, step=0.1, key="num_mm_dia",
+                                      help="Leitura do pluviômetro de campo")
+        with col_d3:
+            obs_dia = st.text_input("Observação", placeholder="Ex: Chuva forte tarde",
+                                     key="txt_obs_chuva")
 
-        percentual = min(chuva_real / chuva_ideal, 1.0) if chuva_ideal > 0 else 0.0
-        st.subheader("🌧️ Nível de Chuva")
-        st.progress(percentual)
-        st.write(f"{round(percentual * 100)}% da chuva ideal atingida")
-        st.subheader("📊 Diagnóstico Climático")
-        st.metric("Perda estimada", f"{perda}%")
-        info_box(status)
-
-        if st.button("Salvar Registro de Chuva"):
-            st.session_state.pluviometro.append({
-                "Área": area_chuva, "Mês": mes,
-                "Chuva Real": chuva_real, "Chuva Ideal": chuva_ideal,
-                "Perda Estimada": perda, "Status": status
-            })
-            salvar_dados_iaagro()
-            success_box("Registro salvo com sucesso!")
-
-        if len(st.session_state.pluviometro) > 0:
-            df_chuva      = pd.DataFrame(st.session_state.pluviometro)
-            st.subheader("📋 Histórico de Chuvas")
-            st.dataframe(df_chuva, use_container_width=True)
-            st.subheader("📈 Chuva Real x Chuva Ideal")
-            df_chuva_area = df_chuva[df_chuva["Área"] == area_chuva]
-            grafico_chuva = df_chuva_area.set_index("Mês")[["Chuva Real","Chuva Ideal"]]
-            st.line_chart(grafico_chuva)
-            st.subheader("🤖 Previsão IAAgro de Quebra de Safra")
-            perda_media       = df_chuva_area["Perda Estimada"].mean()
-            chuva_total       = df_chuva_area["Chuva Real"].sum()
-            chuva_ideal_total = df_chuva_area["Chuva Ideal"].sum()
-            if perda_media >= 15:
-                risco_safra = "🔴 Alto risco de quebra produtiva"
-                recomendacao_ia = "Reavaliar meta produtiva, reforçar monitoramento da lavoura e ajustar investimento."
-            elif perda_media >= 7:
-                risco_safra = "🟡 Risco moderado de quebra produtiva"
-                recomendacao_ia = "Acompanhar fases críticas da cultura e observar estresse hídrico."
+        if st.button("💾 Registrar", key="btn_reg_chuva", use_container_width=True):
+            if mm_dia > 0 or obs_dia:
+                _reg = {
+                    "area_id":  id_area_chuva,
+                    "area":     area_chuva,
+                    "data":     str(data_chuva),
+                    "ano":      data_chuva.year,
+                    "mes":      data_chuva.month,
+                    "mes_nome": ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                                 "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"][data_chuva.month],
+                    "mm":       round(mm_dia, 1),
+                    "obs":      obs_dia,
+                }
+                st.session_state.pluviometro.append(_reg)
+                salvar_dados_iaagro()
+                success_box(f"✅ {mm_dia} mm registrado em {data_chuva.strftime('%d/%m/%Y')}")
             else:
-                risco_safra = "🟢 Baixo risco climático até o momento"
-                recomendacao_ia = "Condição hídrica dentro de faixa aceitável."
-            col1, col2, col3 = st.columns(3)
-            col1.metric("🌧️ Chuva Total",  f"{chuva_total:.1f} mm")
-            col2.metric("🎯 Ideal Total",  f"{chuva_ideal_total:.1f} mm")
-            col3.metric("📉 Perda Média",  f"{perda_media:.1f}%")
-            info_box(risco_safra)
-            warning_box(recomendacao_ia)
+                warning_box("Digite a quantidade de chuva.")
+
+        # ── Filtro e acumulado mensal ─────────────────────────
+        _regs = [r for r in st.session_state.pluviometro
+                 if isinstance(r, dict) and r.get("area_id") == id_area_chuva]
+
+        if _regs:
+            import pandas as pd
+            df_pluvio = pd.DataFrame(_regs)
+
+            # Garante colunas necessárias
+            for col in ["data","ano","mes","mes_nome","mm"]:
+                if col not in df_pluvio.columns:
+                    df_pluvio[col] = 0 if col in ["ano","mes","mm"] else ""
+
+            df_pluvio["mm"] = pd.to_numeric(df_pluvio["mm"], errors="coerce").fillna(0)
+            df_pluvio["data_dt"] = pd.to_datetime(df_pluvio["data"], errors="coerce")
+            df_pluvio = df_pluvio.sort_values("data_dt", ascending=False)
+
+            # ── Acumulado mensal automático ──────────────────
+            st.subheader("📊 Acumulado Mensal")
+            df_mensal = (df_pluvio.groupby(["ano","mes","mes_nome"])["mm"]
+                         .sum().reset_index()
+                         .sort_values(["ano","mes"]))
+            df_mensal["ideal"] = chuva_ideal_mes
+            df_mensal["%ideal"] = (df_mensal["mm"] / chuva_ideal_mes * 100).round(1)
+            df_mensal["status"] = df_mensal["%ideal"].apply(
+                lambda x: "✅ Adequado" if 70<=x<=130
+                else ("⚠️ Déficit" if x < 70 else "⚠️ Excesso")
+            )
+            df_mensal["Período"] = df_mensal["mes_nome"].astype(str) + "/" + df_mensal["ano"].astype(str)
+
+            # Cards dos últimos 3 meses
+            _ultimos = df_mensal.tail(3).to_dict("records")
+            cols_m = st.columns(len(_ultimos))
+            for idx_m, row in enumerate(_ultimos):
+                _cor = "#14532d" if "Adequado" in row["status"] else "#78350f"
+                cols_m[idx_m].markdown(f"""
+                <div style='background:{_cor};border-radius:10px;padding:12px;text-align:center;'>
+                <b style='color:#fff;font-size:13px;'>{row['Período']}</b><br>
+                <span style='color:#fff;font-size:22px;font-weight:800;'>{row['mm']:.1f} mm</span><br>
+                <span style='color:#d1fae5;font-size:11px;'>{row['%ideal']}% do ideal</span><br>
+                <span style='color:#fde68a;font-size:11px;'>{row['status']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Gráfico acumulado mensal
+            if len(df_mensal) > 0:
+                st.markdown("**Chuva acumulada vs ideal por mês:**")
+                _chart_data = df_mensal.set_index("Período")[["mm","ideal"]]
+                _chart_data.columns = ["Chuva Real (mm)","Ideal (mm)"]
+                st.bar_chart(_chart_data)
+
+            # ── Registros diários ────────────────────────────
+            st.subheader("📋 Registros Diários")
+
+            # Filtro por mês/ano
+            _anos  = sorted(df_pluvio["ano"].dropna().unique().tolist(), reverse=True)
+            _meses_nomes = ["Todos","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                            "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+            col_f1, col_f2 = st.columns(2)
+            _ano_sel = col_f1.selectbox("Filtrar ano", ["Todos"] + [str(int(a)) for a in _anos], key="sel_ano_pluvio")
+            _mes_sel = col_f2.selectbox("Filtrar mês", _meses_nomes, key="sel_mes_pluvio")
+
+            df_filtrado = df_pluvio.copy()
+            if _ano_sel != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["ano"] == int(_ano_sel)]
+            if _mes_sel != "Todos":
+                _mes_num = _meses_nomes.index(_mes_sel)
+                df_filtrado = df_filtrado[df_filtrado["mes"] == _mes_num]
+
+            # Resumo do filtro
+            _total_filtro = df_filtrado["mm"].sum()
+            _dias_chuva   = (df_filtrado["mm"] > 0).sum()
+            _media_dia    = df_filtrado[df_filtrado["mm"]>0]["mm"].mean() if _dias_chuva > 0 else 0
+
+            col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+            col_r1.metric("🌧️ Total", f"{_total_filtro:.1f} mm")
+            col_r2.metric("📅 Dias c/ chuva", f"{_dias_chuva}")
+            col_r3.metric("📊 Média/dia", f"{_media_dia:.1f} mm")
+            col_r4.metric("🎯 % do ideal", f"{_total_filtro/chuva_ideal_mes*100:.0f}%" if _mes_sel != "Todos" else "-")
+
+            # Tabela diária
+            _cols_exib = ["data","mm","obs"] if "obs" in df_filtrado.columns else ["data","mm"]
+            _df_show = df_filtrado[_cols_exib].copy()
+            _df_show.columns = ["Data","mm","Obs"] if len(_cols_exib) == 3 else ["Data","mm"]
+            st.dataframe(_df_show.head(60), use_container_width=True)
+
+            # Excluir registro
+            with st.expander("🗑️ Excluir registro"):
+                _datas_disp = df_pluvio["data"].tolist()
+                if _datas_disp:
+                    _data_del = st.selectbox("Selecione a data para excluir",
+                                              _datas_disp, key="sel_del_chuva")
+                    if st.button("🗑️ Excluir", key="btn_del_chuva"):
+                        st.session_state.pluviometro = [
+                            r for r in st.session_state.pluviometro
+                            if not (isinstance(r, dict) and
+                                    r.get("data") == _data_del and
+                                    r.get("area_id") == id_area_chuva)
+                        ]
+                        salvar_dados_iaagro()
+                        success_box("Registro excluído!")
+                        st.rerun()
+
+            # ── Análise de risco ─────────────────────────────
+            st.subheader("🤖 Análise de Risco Hídrico")
+            _mensal_recente = df_mensal.tail(3)["mm"].tolist()
+            _media_3m = sum(_mensal_recente)/len(_mensal_recente) if _mensal_recente else 0
+            _desvio   = abs(_media_3m - chuva_ideal_mes) / chuva_ideal_mes * 100 if chuva_ideal_mes > 0 else 0
+
+            # Estimativa de perda por déficit ou excesso (igual ao modelo anterior)
+            if _media_3m < chuva_ideal_mes * 0.7:
+                _perda_est = round((_chuva_ideal_mes - _media_3m) * 0.15, 1) if hasattr(locals(), '_chuva_ideal_mes') else round((chuva_ideal_mes - _media_3m) * 0.15, 1)
+                _perda_est = round((chuva_ideal_mes - _media_3m) * 0.15, 1)
+                _status_h  = "⚠️ Déficit hídrico"
+                _risco     = "🔴 Alto risco hídrico — avaliar seguro agrícola"
+                _rec       = f"Déficit médio de {chuva_ideal_mes - _media_3m:.0f} mm/mês. Perda estimada: {_perda_est}%. Reavaliar meta produtiva."
+            elif _media_3m > chuva_ideal_mes * 1.3:
+                _perda_est = round((_media_3m - chuva_ideal_mes) * 0.08, 1)
+                _status_h  = "⚠️ Excesso de chuva"
+                _risco     = "🟡 Risco por excesso hídrico"
+                _rec       = f"Excesso médio de {_media_3m - chuva_ideal_mes:.0f} mm/mês. Perda estimada: {_perda_est}%. Monitorar doenças fúngicas e erosão."
+            else:
+                _perda_est = 0
+                _status_h  = "✅ Chuva adequada"
+                _risco     = "🟢 Condição hídrica adequada"
+                _rec       = "Precipitação dentro da faixa ideal para a cultura."
+
+            # Métricas de risco
+            _col_r1, _col_r2, _col_r3 = st.columns(3)
+            _col_r1.metric("🌧️ Média 3 meses", f"{_media_3m:.1f} mm")
+            _col_r2.metric("🎯 Ideal/mês", f"{chuva_ideal_mes} mm")
+            _col_r3.metric("📉 Perda estimada", f"{_perda_est}%",
+                           help="Estimativa de impacto na produtividade por déficit ou excesso hídrico")
+
+            info_box(_risco)
+            st.caption(_rec)
+
+            # Progresso do mês atual
+            _hoje = datetime.now()
+            _regs_mes_atual = [r for r in _regs
+                               if isinstance(r, dict)
+                               and r.get("mes") == _hoje.month
+                               and r.get("ano") == _hoje.year]
+            _total_mes_atual = sum(r.get("mm", 0) for r in _regs_mes_atual)
+            _pct_mes = min(_total_mes_atual / chuva_ideal_mes, 1.0) if chuva_ideal_mes > 0 else 0
+
+            st.subheader(f"📅 {['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][_hoje.month]}/{_hoje.year} — Progresso")
+            st.progress(_pct_mes)
+            st.caption(f"{_total_mes_atual:.1f} mm acumulados de {chuva_ideal_mes} mm ideais ({_pct_mes*100:.0f}%)")
+
+        else:
+            st.info("📝 Nenhum registro de chuva para esta área ainda. Registre a primeira leitura acima!")
+
+
 
 
 # ─────────────────────────────────────────────
@@ -4777,7 +4910,7 @@ if menu == "🧪 Solo & Adubação":
 # MENU: CUSTOS
 # ─────────────────────────────────────────────
 elif menu == "💰 Financeiro":
-    _sub_fin = st.tabs(["💸 Custos","💹 Dashboard Financeiro","📊 Comparativo de Safras","🧾 Imposto de Renda Rural"])
+    _sub_fin = st.tabs(["💸 Custos","💹 Dashboard Financeiro","📊 Comparativo de Safras","💵 Fluxo de Caixa","🧾 Imposto de Renda Rural"])
 
 if menu == "💰 Financeiro":
   with _sub_fin[0]:
@@ -5984,7 +6117,7 @@ elif menu == "📄 Relatório Final":
 # MENU: CLIMA & ALERTAS
 # ─────────────────────────────────────────────
 elif menu == "🌍 Inteligência":
-    _sub_int = st.tabs(["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","📅 Calendário Agrícola"])
+    _sub_int = st.tabs(["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","📅 Calendário Agrícola","🤖 Assistente IA"])
 
 if menu == "🌍 Inteligência":
   with _sub_int[0]:
@@ -8734,8 +8867,81 @@ Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 pal
                 yaxis_title="Média sc/ha", height=300
             )
             st.plotly_chart(fig_ev, use_container_width=True)
-# ─────────────────────────────────────────────
-# MENU: IMPOSTO DE RENDA RURAL
+
+# ── Assistente IA (tab 4) ────────────────────────────────────
+if menu == "🌍 Inteligência":
+  with _sub_int[4]:
+    st.header("🤖 Assistente IA Agrícola")
+    st.markdown("""
+    <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
+    border:1px solid #22c55e;margin-bottom:12px;'>
+    <b style='color:#22c55e;'>🌾 Pergunte sobre sua lavoura</b><br>
+    <span style='color:#f1f5f9;font-size:13px;'>
+    Tire dúvidas sobre manejo, pragas, doenças, adubação, mercado e muito mais.
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Contexto da área ativa
+    _ctx_area = ""
+    if st.session_state.get("dados"):
+        d = st.session_state.dados
+        _ctx_area = (
+            f"Cultura: {d.get('cultura','Soja')}, "
+            f"Área: {d.get('area',0)} ha, "
+            f"pH: {d.get('ph',0)}, "
+            f"Região: {d.get('cidade','Sul do Brasil')}, "
+            f"Produtividade esperada: {d.get('produtividade',0)} sc/ha"
+        )
+
+    # Histórico do chat
+    if "assistente_hist" not in st.session_state:
+        st.session_state.assistente_hist = []
+
+    # Exibe mensagens anteriores
+    for msg in st.session_state.assistente_hist:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Input
+    _prompt = st.chat_input("Digite sua pergunta agrícola...")
+    if _prompt:
+        st.session_state.assistente_hist.append({"role": "user", "content": _prompt})
+        with st.chat_message("user"):
+            st.markdown(_prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Consultando..."):
+                try:
+                    import anthropic as _anth
+                    _client = _anth.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY",""))
+                    _sys = (
+                        "Você é um assistente agrícola especialista brasileiro. "
+                        "Responda em português, de forma prática e objetiva para produtores rurais. "
+                        "Baseie suas respostas em EMBRAPA, CQFS RS/SC 2016 e boas práticas agrícolas. "
+                        f"Contexto da propriedade: {_ctx_area if _ctx_area else 'não informado'}."
+                    )
+                    _msgs = [{"role": m["role"], "content": m["content"]}
+                             for m in st.session_state.assistente_hist]
+                    _resp = _client.messages.create(
+                        model="claude-sonnet-4-5",
+                        max_tokens=800,
+                        system=_sys,
+                        messages=_msgs
+                    )
+                    _answer = _resp.content[0].text
+                    st.markdown(_answer)
+                    st.session_state.assistente_hist.append({"role": "assistant", "content": _answer})
+                except Exception as e:
+                    _answer = f"Erro ao consultar IA: {e}"
+                    st.error(_answer)
+
+    # Botão limpar histórico
+    if st.session_state.assistente_hist:
+        if st.button("🗑️ Limpar conversa", key="btn_limpar_assistente"):
+            st.session_state.assistente_hist = []
+            st.rerun()
+
 # ─────────────────────────────────────────────
 # MENU: SEGUNDA SAFRA / SAFRINHA
 # ─────────────────────────────────────────────
@@ -9010,6 +9216,93 @@ elif menu == "🌱 Safrinha":
 # ─────────────────────────────────────────────
 if menu == "💰 Financeiro":
   with _sub_fin[3]:
+    st.header("💵 Fluxo de Caixa")
+    if not st.session_state.areas:
+        st.info("Cadastre uma área para visualizar o fluxo de caixa.")
+    else:
+        _areas_fc = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
+        _area_fc  = st.selectbox("Área", _areas_fc, key="sel_area_fluxo_caixa")
+        _id_fc    = _area_fc.split(" - ")[0]
+
+        st.subheader("➕ Lançamentos")
+        col_fc1, col_fc2, col_fc3 = st.columns(3)
+        with col_fc1:
+            _data_fc   = st.date_input("Data", key="date_fc")
+            _tipo_fc   = st.selectbox("Tipo", ["Receita","Despesa"], key="sel_tipo_fc")
+        with col_fc2:
+            _categ_fc  = st.selectbox("Categoria",
+                ["Venda de grãos","Venda de subproduto","Insumos","Maquinário",
+                 "Mão de obra","Arrendamento","Frete","Seguro","Outros"], key="sel_categ_fc")
+            _valor_fc  = st.number_input("Valor R$", min_value=0.0, key="num_valor_fc")
+        with col_fc3:
+            _desc_fc   = st.text_input("Descrição", key="txt_desc_fc")
+            _pago_fc   = st.checkbox("Pago/Recebido", value=True, key="chk_pago_fc")
+
+        if st.button("💾 Lançar", key="btn_lancar_fc", use_container_width=True):
+            if _valor_fc > 0:
+                _lancamento = {
+                    "area_id":    _id_fc,
+                    "data":       str(_data_fc),
+                    "tipo":       _tipo_fc,
+                    "categoria":  _categ_fc,
+                    "valor":      round(_valor_fc, 2),
+                    "descricao":  _desc_fc,
+                    "pago":       _pago_fc,
+                }
+                if "fluxo_caixa" not in st.session_state:
+                    st.session_state.fluxo_caixa = []
+                st.session_state.fluxo_caixa.append(_lancamento)
+                salvar_dados_iaagro()
+                st.success(f"✅ {'Receita' if _tipo_fc=='Receita' else 'Despesa'} de R$ {_valor_fc:.2f} lançada!")
+            else:
+                st.warning("Digite um valor maior que zero.")
+
+        # Exibe saldo e lançamentos
+        _lanc = [l for l in st.session_state.get("fluxo_caixa", []) if l.get("area_id") == _id_fc]
+        if _lanc:
+            import pandas as pd
+            df_fc = pd.DataFrame(_lanc)
+            df_fc["valor_signed"] = df_fc.apply(lambda r: r["valor"] if r["tipo"]=="Receita" else -r["valor"], axis=1)
+            _total_rec  = df_fc[df_fc["tipo"]=="Receita"]["valor"].sum()
+            _total_desp = df_fc[df_fc["tipo"]=="Despesa"]["valor"].sum()
+            _saldo      = _total_rec - _total_desp
+
+            col_s1, col_s2, col_s3 = st.columns(3)
+            col_s1.metric("💚 Receitas", f"R$ {_total_rec:,.2f}")
+            col_s2.metric("🔴 Despesas", f"R$ {_total_desp:,.2f}")
+            col_s3.metric("💰 Saldo", f"R$ {_saldo:,.2f}",
+                         delta=f"{'positivo' if _saldo >= 0 else 'negativo'}")
+
+            # Gráfico evolução
+            df_fc["data_dt"] = pd.to_datetime(df_fc["data"])
+            df_fc = df_fc.sort_values("data_dt")
+            df_fc["saldo_acum"] = df_fc["valor_signed"].cumsum()
+            st.line_chart(df_fc.set_index("data_dt")["saldo_acum"])
+
+            # Tabela
+            st.dataframe(
+                df_fc[["data","tipo","categoria","descricao","valor","pago"]]
+                .rename(columns={"data":"Data","tipo":"Tipo","categoria":"Categoria",
+                                  "descricao":"Descrição","valor":"R$","pago":"Pago"}),
+                use_container_width=True
+            )
+
+            # Excluir
+            with st.expander("🗑️ Excluir lançamento"):
+                _opcoes = [f"{l['data']} — {l['tipo']} — R${l['valor']:.2f} — {l['descricao']}" for l in _lanc]
+                _del_fc = st.selectbox("Selecione", _opcoes, key="sel_del_fc")
+                if st.button("🗑️ Excluir", key="btn_del_fc"):
+                    _idx_del = _opcoes.index(_del_fc)
+                    _all_ids = [i for i, l in enumerate(st.session_state.fluxo_caixa)
+                                if l.get("area_id") == _id_fc]
+                    st.session_state.fluxo_caixa.pop(_all_ids[_idx_del])
+                    salvar_dados_iaagro()
+                    st.success("Lançamento excluído!")
+                    st.rerun()
+        else:
+            st.info("📝 Nenhum lançamento para esta área ainda.")
+
+  with _sub_fin[4]:
     import io
     st.header("🧾 Imposto de Renda — Produtor Rural")
 
