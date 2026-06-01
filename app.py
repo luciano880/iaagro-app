@@ -4667,6 +4667,22 @@ if menu == "🧪 Solo & Adubação":
   with _sub_solo[1]:
     st.header("Diagnóstico Completo")
     d = st.session_state.dados
+    # Busca dados da área com análise se session_state.dados não tiver pH
+    if "ph" not in d and st.session_state.areas:
+        _id_s = st.session_state.get("area_selecionada")
+        for _a in st.session_state.areas:
+            _dad = _a.get("Dados", _a.get("dados", {}))
+            if _dad and "ph" in _dad and (_id_s is None or _a.get("ID") == _id_s):
+                d = {**_dad, "cultura": _a.get("Cultura","Soja"),
+                     "area": _a.get("Hectares",0), "produtividade": _a.get("Produtividade",50)}
+                break
+        if "ph" not in d:  # pega qualquer área com análise
+            for _a in st.session_state.areas:
+                _dad = _a.get("Dados", _a.get("dados", {}))
+                if _dad and "ph" in _dad:
+                    d = {**_dad, "cultura": _a.get("Cultura","Soja"),
+                         "area": _a.get("Hectares",0), "produtividade": _a.get("Produtividade",50)}
+                    break
 
     if "ph" not in d:
         warning_box("Preencha primeiro a análise de solo.")
@@ -4885,10 +4901,13 @@ if menu == "🧪 Solo & Adubação":
         elif _areas_adub:
             if len(_areas_adub) > 1:
                 _sel_adub = st.selectbox("📍 Área para adubação", _areas_adub, key="sel_area_adubacao")
-                _id_adub  = _sel_adub.split(" — ")[0]
-                _a_obj    = next((a for a in st.session_state.areas if a.get("ID") == _id_adub), None)
-                if _a_obj:
-                    _dad = _a_obj.get("Dados", {})
+            else:
+                _sel_adub = _areas_adub[0]
+            _id_adub  = _sel_adub.split(" — ")[0]
+            _a_obj    = next((a for a in st.session_state.areas if a.get("ID") == _id_adub), None)
+            if _a_obj:
+                _dad = _a_obj.get("Dados", {})
+                if _dad:
                     d = {**_dad,
                          "cultura":       _a_obj.get("Cultura", d.get("cultura","Soja")),
                          "area":          _a_obj.get("Hectares", d.get("area",0)),
