@@ -5335,6 +5335,25 @@ if menu == "💰 Financeiro":
     st.header("Custos Estimados")
     d = st.session_state.dados
 
+    # Busca dados da área se session_state.dados não tiver pH
+    if "ph" not in d and st.session_state.areas:
+        _id_s = st.session_state.get("area_selecionada")
+        for _a in st.session_state.areas:
+            _dad = _a.get("Dados", _a.get("dados", {}))
+            if _dad and "ph" in _dad and (_id_s is None or _a.get("ID") == _id_s):
+                d = {**_dad, "cultura": _a.get("Cultura","Soja"),
+                     "area": _a.get("Hectares",0),
+                     "produtividade": _a.get("Produtividade",50)}
+                break
+        if "ph" not in d:
+            for _a in st.session_state.areas:
+                _dad = _a.get("Dados", _a.get("dados", {}))
+                if _dad and "ph" in _dad:
+                    d = {**_dad, "cultura": _a.get("Cultura","Soja"),
+                         "area": _a.get("Hectares",0),
+                         "produtividade": _a.get("Produtividade",50)}
+                    break
+
     if "ph" not in d:
         warning_box("Preencha primeiro Cadastro da Área e Análise de Solo.")
     else:
@@ -9389,16 +9408,15 @@ elif menu == "🌱 Safrinha":
 
     # ── Combinações típicas da região ──────────────────────────────
     ROTACOES_TIPICAS = {
-        "Soja precoce → Feijão":  {"1a":"Soja","2a":"Feijão","janela":"Nov–Jan / Fev–Mai"},
-        "Soja precoce → Milho":   {"1a":"Soja","2a":"Milho", "janela":"Out–Jan / Fev–Jun"},
-        "Milho → Feijão":         {"1a":"Milho","2a":"Feijão","janela":"Set–Jan / Fev–Mai"},
-        "Trigo → Soja":           {"1a":"Trigo","2a":"Soja", "janela":"Abr–Set / Out–Mar"},
-        "Feijão → Milho":         {"1a":"Feijão","2a":"Milho","janela":"Jan–Abr / Abr–Ago"},
-        "Soja → Trigo":           {"1a":"Soja","2a":"Trigo", "janela":"Out–Mar / Abr–Set"},
-        "Personalizada":          {"1a":"","2a":"","janela":""},
+        "Milho → Feijão":   {"1a":"Milho", "2a":"Feijão", "janela":"Set–Jan / Fev–Mai"},
+        "Milho → Soja":     {"1a":"Milho", "2a":"Soja",   "janela":"Set–Jan / Out–Mar"},
+        "Soja → Feijão":    {"1a":"Soja",  "2a":"Feijão", "janela":"Out–Jan / Fev–Mai"},
+        "Feijão → Soja":    {"1a":"Feijão","2a":"Soja",   "janela":"Jan–Abr / Out–Mar"},
+        "Feijão → Milho":   {"1a":"Feijão","2a":"Milho",  "janela":"Jan–Abr / Abr–Ago"},
+        "Soja → Milho":     {"1a":"Soja",  "2a":"Milho",  "janela":"Out–Jan / Fev–Jun"},
     }
 
-    CULTURAS_SAFRINHA = get_culturas()
+    CULTURAS_SAFRINHA = ["Milho","Soja","Feijão"]
 
     # ════════════════════════════════════════════════════
     # TAB 1 — PLANEJAR ROTAÇÃO
