@@ -3039,6 +3039,8 @@ def estimar_producao(meta, nota):
 
 
 def recomendacao_npk(cultura, produtividade, fosforo, potassio, materia_organica, argila=50, ph=5.5):
+    # Remove ícone se presente
+    cultura = cultura_limpa(cultura) if cultura else "Soja"
     """
     Recomendação NPK baseada em:
     - EMBRAPA Soja — Circular Técnica 98 + Tecnologias de Produção 2022
@@ -3256,6 +3258,7 @@ def recomendacao_npk(cultura, produtividade, fosforo, potassio, materia_organica
 
 
 def score_solo(d, cultura="Soja"):
+    cultura = cultura_limpa(cultura) if cultura else "Soja"
     """
     Score de qualidade do solo baseado nos parâmetros EMBRAPA/CQFS RS-SC 2016
     Considera limites ideais por cultura
@@ -3405,11 +3408,15 @@ SEGMENTOS_INFO = {
 }
 
 CULTURAS_POR_SEGMENTO = {
-    "🌾 Grãos":        ["Soja","Milho","Trigo","Feijão","Canola","Aveia","Arroz","Sorgo","Cevada","Girassol"],
-    "🌿 Horticultura": ["Tomate","Batata","Cebola","Alho","Mandioca"],
-    "🍎 Fruticultura": ["Laranja","Banana","Uva","Maçã","Manga","Abacate","Limão","Pêssego","Caqui","Café"],
-    "🌲 Silvicultura": ["Eucalipto","Pinus","Teca","Paricá","Cedro"],
+    "🌾 Grãos":        ["🌱 Soja","🌽 Milho","🌾 Trigo","🌱 Feijão","🌻 Canola","🌿 Aveia","🍚 Arroz","🌾 Sorgo","🌾 Cevada","🌻 Girassol"],
+    "🌿 Horticultura": ["🍅 Tomate","🥔 Batata","🧅 Cebola","🧄 Alho","🍠 Mandioca"],
+    "🍎 Fruticultura": ["🍊 Laranja","🍌 Banana","🍇 Uva","🍎 Maçã","🥭 Manga","🥑 Abacate","🍋 Limão","🍑 Pêssego","🍂 Caqui","☕ Café"],
+    "🌲 Silvicultura": ["🌳 Eucalipto","🌲 Pinus","🌴 Teca","🌿 Paricá","🌲 Cedro"],
 }
+
+# Mapa reverso para extrair nome sem ícone (para lógicas internas)
+CULTURA_NOME_LIMPO = {c: c.split(" ",1)[1] if " " in c else c
+                      for seg in CULTURAS_POR_SEGMENTO.values() for c in seg}
 
 # ─────────────────────────────────────────────
 # CONTROLE DE PLANOS — Free / Pro / Premium
@@ -3493,11 +3500,10 @@ def bloco_upgrade(recurso: str, usado: int, limite: int):
     """, unsafe_allow_html=True)
 
 def get_culturas():
-    """Retorna lista de culturas filtrada pelo segmento ativo."""
+    """Retorna lista de culturas (com ícone) filtrada pelo segmento ativo."""
     seg = st.session_state.get("segmento")
     if seg and seg in CULTURAS_POR_SEGMENTO:
         return CULTURAS_POR_SEGMENTO[seg]
-    # Sem segmento: retorna todas
     todas = []
     seen = set()
     for culturas in CULTURAS_POR_SEGMENTO.values():
@@ -3506,6 +3512,12 @@ def get_culturas():
                 todas.append(c)
                 seen.add(c)
     return todas
+
+def cultura_limpa(c):
+    """Remove ícone do nome da cultura para usar nas lógicas internas."""
+    if c and " " in c and len(c.split(" ",1)[0]) <= 2:
+        return c.split(" ",1)[1]
+    return c
 
 # ─────────────────────────────────────────────
 # MENU: INÍCIO
@@ -3956,7 +3968,7 @@ if menu == "🌾 Lavoura":
             "Girassol":90.0,"Cevada":80.0,"Pastagem":120.0,"Algodão":130.0,
             "Café":140.0,"Tabaco":110.0,"Mandioca":100.0,"Batata":100.0,
         }
-        chuva_ideal_mes = chuva_ideal_padrao.get(cultura_chuva, 120.0)
+        chuva_ideal_mes = chuva_ideal_padrao.get(cultura_limpa(cultura_chuva), 120.0)
 
         st.markdown(f"""
         <div style='background:#0f3460;color:#fff;padding:10px 16px;border-radius:8px;
