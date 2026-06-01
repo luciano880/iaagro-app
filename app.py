@@ -3959,7 +3959,7 @@ if menu == "🌾 Lavoura":
         custo_total        = st.number_input("Custo Total por hectare (R$)", min_value=0.0, value=0.0, key="num_custo_total_por_3109")
         observacoes        = st.text_area("Observações da Safra", key="txa_observa__es_da__3110")
 
-        if st.button("Salvar Histórico"):
+        if st.button("💾 Salvar Histórico", key="btn_salvar_hist", use_container_width=True):
             st.session_state.historico_produtividade.append({
                 "Área": area_escolhida, "Safra": safra,
                 "Cultura": cultura_colhida,
@@ -3968,12 +3968,63 @@ if menu == "🌾 Lavoura":
             })
             salvar_dados_iaagro()
             success_box(f"Histórico salvo! {get_icone_cultura(cultura_colhida)} {cultura_limpa(cultura_colhida)} — {produtividade_real} sc/ha")
+            st.rerun()
 
         if len(st.session_state.historico_produtividade) > 0:
             df_hist = pd.DataFrame(st.session_state.historico_produtividade)
-            # Adiciona coluna ícone+cultura se não tiver
             if "Cultura" not in df_hist.columns:
                 df_hist["Cultura"] = "—"
+
+            # ── Botão atualizar registro ──────────────────
+            st.divider()
+            st.subheader("✏️ Atualizar Registro")
+            _opcoes_hist = [
+                f"{i+1}. {r.get('Área','')} | {r.get('Safra','')} | {cultura_limpa(r.get('Cultura',''))} | {r.get('Produtividade',0)} sc/ha"
+                for i, r in enumerate(st.session_state.historico_produtividade)
+            ]
+            _sel_hist = st.selectbox("Selecione o registro para editar", _opcoes_hist, key="sel_hist_editar")
+            _idx_edit = _opcoes_hist.index(_sel_hist)
+            _reg_edit = st.session_state.historico_produtividade[_idx_edit]
+
+            col_e1, col_e2, col_e3 = st.columns(3)
+            with col_e1:
+                _safra_e  = st.text_input("Safra", value=_reg_edit.get("Safra",""), key="txt_hist_safra_edit")
+                _cult_e_list = get_culturas()
+                _cult_e_val  = _reg_edit.get("Cultura", _cult_e_list[0])
+                _cult_e_idx  = _cult_e_list.index(_cult_e_val) if _cult_e_val in _cult_e_list else 0
+                _cult_e   = st.selectbox("Cultura", _cult_e_list, index=_cult_e_idx, key="sel_hist_cult_edit")
+            with col_e2:
+                _prod_e   = st.number_input("Produtividade (sc/ha)", min_value=0.0,
+                                             value=float(_reg_edit.get("Produtividade",0)), key="num_hist_prod_edit")
+                _custo_e  = st.number_input("Custo (R$/ha)", min_value=0.0,
+                                             value=float(_reg_edit.get("Custo",0)), key="num_hist_custo_edit")
+            with col_e3:
+                _obs_e    = st.text_area("Observações", value=_reg_edit.get("Observações",""),
+                                          key="txt_hist_obs_edit", height=100)
+
+            col_btn1, col_btn2 = st.columns(2)
+            if col_btn1.button("💾 Atualizar Registro", key="btn_hist_atualizar", use_container_width=True):
+                st.session_state.historico_produtividade[_idx_edit] = {
+                    "Área":          _reg_edit.get("Área",""),
+                    "Safra":         _safra_e,
+                    "Cultura":       _cult_e,
+                    "Produtividade": _prod_e,
+                    "Custo":         _custo_e,
+                    "Observações":   _obs_e,
+                }
+                salvar_dados_iaagro()
+                success_box("✅ Registro atualizado!")
+                st.rerun()
+
+            if col_btn2.button("🗑️ Excluir Registro", key="btn_hist_excluir", use_container_width=True):
+                st.session_state.historico_produtividade.pop(_idx_edit)
+                salvar_dados_iaagro()
+                success_box("Registro excluído!")
+                st.rerun()
+
+            # ── Tabela e gráfico ──────────────────────────
+            st.divider()
+            st.subheader("📋 Todos os Registros")
             st.dataframe(df_hist, use_container_width=True)
             st.subheader("📊 Evolução Produtiva")
             area_filtro = st.selectbox("Filtrar gráfico por área", df_hist["Área"].unique(), key="sel_filtrar_gr_fico_3125")
