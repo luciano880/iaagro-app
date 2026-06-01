@@ -3667,10 +3667,10 @@ if menu == "🏠 Início":
 # MENU: ÁREAS CADASTRADAS
 # ─────────────────────────────────────────────
 elif menu == "🌾 Lavoura":
-    _sub_lav = st.tabs(["📍 Áreas Cadastradas","➕ Cadastro da Área","🗺️ Mapa de Fertilidade","🌧️ Pluviômetro","📈 Histórico de Produtividade"])
+    _sub_lav = st.tabs(["➕ Cadastro da Área","📍 Áreas Cadastradas","🗺️ Mapa de Fertilidade","🌧️ Pluviômetro","📈 Histórico de Produtividade"])
 
 if menu == "🌾 Lavoura":
-  with _sub_lav[0]:
+  with _sub_lav[1]:
     st.header("Áreas Cadastradas")
 
     if len(st.session_state.areas) == 0:
@@ -3750,7 +3750,7 @@ if menu == "🌾 Lavoura":
 # MENU: CADASTRO DA ÁREA
 # ─────────────────────────────────────────────
 if menu == "🌾 Lavoura":
-  with _sub_lav[1]:
+  with _sub_lav[0]:
     st.header("Cadastro da Área")
 
     fazenda   = st.text_input("Nome da fazenda",  st.session_state.dados.get("fazenda", ""), key="txt_nome_da_fazenda_2960")
