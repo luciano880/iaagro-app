@@ -3699,13 +3699,24 @@ if menu == "🌾 Lavoura":
             area   = st.session_state.areas[indice]
             st.session_state.id_area          = area["ID"]
             st.session_state.area_selecionada = area["ID"]
-            st.session_state.dados            = area.get("Dados", area.get("dados", {})).copy()
+            # Carrega dados completos da área (inclui análise de solo)
+            _dados_area = area.get("Dados", area.get("dados", {}))
+            st.session_state.dados = _dados_area.copy() if _dados_area else {}
             if "id_area" not in st.session_state.dados:
                 st.session_state.dados["id_area"] = area["ID"]
+            # Garante que campos da área estejam nos dados
+            st.session_state.dados.update({
+                "cultura":       area.get("Cultura", st.session_state.dados.get("cultura","Soja")),
+                "area":          area.get("Hectares", st.session_state.dados.get("area",0)),
+                "produtividade": area.get("Produtividade", st.session_state.dados.get("produtividade",50)),
+                "fazenda":       area.get("Fazenda", st.session_state.dados.get("fazenda","")),
+                "talhao":        area.get("Talhão", st.session_state.dados.get("talhao","")),
+            })
             st.session_state.aplicacoes = area.get("Aplicacoes", []).copy()
             st.session_state.estoque    = area.get("Estoque", []).copy()
             salvar_dados_iaagro()
-            success_box(f"Área {area['ID']} carregada com sucesso.")
+            success_box(f"✅ Área {area['ID']} carregada! {('Análise de solo disponível ✅' if 'ph' in st.session_state.dados else 'Sem análise de solo ainda.')}")
+            st.rerun()
 
         st.divider()
         st.subheader("Excluir Área Individual")
