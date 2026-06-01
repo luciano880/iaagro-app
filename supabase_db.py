@@ -37,7 +37,7 @@ def sb_signup(url, api_key, email, senha, nome):
 
 
 def sb_login(url, api_key, email, senha):
-    """Autentica usuário e retorna token + user_id."""
+    """Autentica usuário e retorna token + refresh_token + user_id."""
     r = requests.post(
         f"{url}/auth/v1/token?grant_type=password",
         headers={"apikey": api_key, "Content-Type": "application/json"},
@@ -47,13 +47,35 @@ def sb_login(url, api_key, email, senha):
     data = r.json()
     if "access_token" in data:
         return {
-            "ok":       True,
-            "token":    data["access_token"],
-            "user_id":  data["user"]["id"],
-            "email":    data["user"]["email"],
-            "nome":     data["user"].get("user_metadata", {}).get("nome", email),
+            "ok":            True,
+            "token":         data["access_token"],
+            "refresh_token": data.get("refresh_token", ""),
+            "user_id":       data["user"]["id"],
+            "email":         data["user"]["email"],
+            "nome":          data["user"].get("user_metadata", {}).get("nome", email),
         }
     return {"ok": False, "erro": data.get("error_description", "Falha no login")}
+
+
+def sb_refresh(url, api_key, refresh_token):
+    """Renova o access_token usando o refresh_token."""
+    try:
+        r = requests.post(
+            f"{url}/auth/v1/token?grant_type=refresh_token",
+            headers={"apikey": api_key, "Content-Type": "application/json"},
+            json={"refresh_token": refresh_token},
+            timeout=10
+        )
+        data = r.json()
+        if "access_token" in data:
+            return {
+                "ok":            True,
+                "token":         data["access_token"],
+                "refresh_token": data.get("refresh_token", refresh_token),
+            }
+    except Exception:
+        pass
+    return {"ok": False}
 
 
 def sb_logout(url, api_key, token):

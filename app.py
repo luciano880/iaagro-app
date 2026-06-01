@@ -42,7 +42,7 @@ from io import BytesIO
 try:
     from supabase_db import (
         sb_login, sb_signup, sb_logout, sb_reset_senha,
-        sb_carregar, sb_salvar, sb_plano
+        sb_carregar, sb_salvar, sb_plano, sb_refresh
     )
     _SB_DISPONIVEL = True
 except Exception:
@@ -1164,21 +1164,38 @@ def salvar_dados_iaagro():
                 st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')}"
                 return
             else:
-                # Tenta capturar erro detalhado
+                # Tenta renovar token e salvar de novo
+                _refresh = st.session_state.get("sb_refresh_token", "")
+                if _refresh and _SB_DISPONIVEL:
+                    try:
+                        _novo = sb_refresh(_sb_url, _sb_key, _refresh)
+                        if _novo.get("ok"):
+                            st.session_state.sb_token         = _novo["token"]
+                            st.session_state.sb_refresh_token = _novo["refresh_token"]
+                            # Salva query_params com novo token
+                            try:
+                                _tk = _novo["token"]
+                                st.query_params["_t1"] = _tk[:200]
+                                st.query_params["_t2"] = _tk[200:400]
+                                st.query_params["_t3"] = _tk[400:]
+                            except Exception:
+                                pass
+                            ok2 = sb_salvar(_sb_url, _sb_key, _novo["token"], _sb_uid, dados_salvos)
+                            if ok2:
+                                st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')} (renovado)"
+                                return
+                    except Exception:
+                        pass
+                # Captura erro detalhado
                 import requests as _rq
-                _payload = {"user_id": _sb_uid, "areas": "[]", "dados": "{}", "estoque": "[]",
-                            "aplicacoes": "[]", "historico_produtividade": "[]", "pluviometro": "[]",
-                            "carencia_registros": "[]", "dre_registros": "[]", "calendario_eventos": "[]",
-                            "harvest_historico": "[]", "receituarios": "[]", "safrinha_registros": "[]",
-                            "segmento": None, "atualizado_em": datetime.now().isoformat()}
-                _r = _rq.post(
-                    f"{_sb_url}/rest/v1/iaagro_dados",
+                _r = _rq.patch(
+                    f"{_sb_url}/rest/v1/iaagro_dados?user_id=eq.{_sb_uid}",
                     headers={"apikey": _sb_key, "Authorization": f"Bearer {_sb_token}",
-                             "Content-Type": "application/json",
-                             "Prefer": "resolution=merge-duplicates,return=minimal"},
-                    json=_payload, timeout=10
+                             "Content-Type": "application/json", "Prefer": "return=minimal"},
+                    json={"atualizado_em": datetime.now().isoformat()},
+                    timeout=10
                 )
-                st.session_state["_ultimo_save"] = f"❌ {_r.status_code}: {_r.text[:60]}"
+                st.session_state["_ultimo_save"] = f"❌ {_r.status_code}: {_r.text[:50]}"
         except Exception as e:
             st.session_state["_ultimo_save"] = f"❌ Erro: {str(e)[:40]}"
     else:
@@ -1351,11 +1368,12 @@ def tela_login():
                     with st.spinner("Autenticando..."):
                         res = sb_login(_SB_URL, _SB_KEY, email_l.strip(), senha_l)
                     if res["ok"]:
-                        st.session_state.logado        = True
-                        st.session_state.usuario_atual = res["nome"] or res["email"]
-                        st.session_state.sb_token      = res["token"]
-                        st.session_state.sb_user_id    = res["user_id"]
-                        st.session_state.sb_plano      = sb_plano(_SB_URL, _SB_KEY, res["token"], res["user_id"])
+                        st.session_state.logado           = True
+                        st.session_state.usuario_atual    = res["nome"] or res["email"]
+                        st.session_state.sb_token         = res["token"]
+                        st.session_state.sb_refresh_token = res.get("refresh_token", "")
+                        st.session_state.sb_user_id       = res["user_id"]
+                        st.session_state.sb_plano         = sb_plano(_SB_URL, _SB_KEY, res["token"], res["user_id"])
                         # Carrega dados do usuário do Supabase
                         dados_sb = sb_carregar(_SB_URL, _SB_KEY, res["token"], res["user_id"])
                         if dados_sb:
