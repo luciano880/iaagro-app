@@ -6947,211 +6947,211 @@ if menu == "🌍 Inteligência":
             })
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("🪨 Controle de Calcário e Gesso Aplicados")
+        st.divider()
+        st.subheader("🪨 Controle de Calcário e Gesso Aplicados")
 
-    if not st.session_state.areas:
-        warning_box("Cadastre uma área primeiro.")
-    else:
-        # Seletor explícito de área
-        _lista_areas_corr = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Fazenda','?')})"
-                             for a in st.session_state.areas]
-        _sel_area_corr = st.selectbox("📍 Área para corretivos",
-                                       _lista_areas_corr, key="sel_area_corretivos")
-        _id_area_atual = _sel_area_corr.split(" — ")[0]
-        # Inicializa registro de corretivos
-        if "corretivos_aplicados" not in st.session_state:
-            st.session_state.corretivos_aplicados = []
-
-        _corretivos = [c for c in st.session_state.corretivos_aplicados
-                       if isinstance(c, dict) and c.get("area_id") == _id_area_atual]
-
-        # ── Calcário aplicado ────────────────────────────
-        st.markdown("#### 🪨 Calcário")
-        col_ca1, col_ca2, col_ca3 = st.columns(3)
-        with col_ca1:
-            _data_calc = st.date_input("Data aplicação", key="date_calcario_aplic",
-                                        value=datetime.now().date())
-            _toneladas_calc = st.number_input("Quantidade aplicada (t/ha)", min_value=0.0,
-                                               step=0.1, key="num_calc_aplic",
-                                               help="Toneladas por hectare aplicadas")
-        with col_ca2:
-            _prnt_aplic = st.number_input("PRNT do produto (%)", min_value=0.0, max_value=100.0,
-                                           value=75.0, step=1.0, key="num_prnt_aplic",
-                                           help="Verificar na embalagem — padrão 75%")
-            _tipo_calc = st.selectbox("Tipo de calcário",
-                ["Calcário Dolomítico (Ca+Mg — ideal solos com Mg baixo)",
-                 "Calcário Calcítico (só Ca — usar se Mg já adequado)",
-                 "Calcário Magnesiano (predomina Mg)",
-                 "Cal Virgem (CaO — ação rápida)",
-                 "Cal Hidratada (Ca(OH)₂ — ação rápida)",
-                 "Outro"], key="sel_tipo_calc",
-                help="Dolomítico: >12% MgO | Calcítico: <12% MgO (CQFS RS/SC 2016)")
-
-            # Mostra info sobre o tipo escolhido
-            if "Dolomítico" in _tipo_calc:
-                st.caption("🟢 **Dolomítico:** fornece Ca e Mg — recomendado quando Ca/Mg < 2:1 ou Mg < 0.5 cmolc/dm³")
-            elif "Calcítico" in _tipo_calc:
-                st.caption("🔵 **Calcítico:** fornece só Ca — usar quando Mg já está adequado (>1.0 cmolc/dm³)")
-            elif "Magnesiano" in _tipo_calc:
-                st.caption("🟡 **Magnesiano:** predomina Mg — usar em solos com Mg muito baixo")
-        with col_ca3:
-            _incorporado = st.checkbox("Incorporado ao solo", value=True, key="chk_incorporado",
-                                        help="Incorporado com grade ou arado")
-            _obs_calc = st.text_input("Observação", placeholder="Ex: Aplicado antes do plantio",
-                                       key="txt_obs_calc")
-
-        if st.button("💾 Registrar Calcário", key="btn_reg_calc", use_container_width=True):
-            if _toneladas_calc > 0:
-                _reg_calc = {
-                    "area_id":      _id_area_atual,
-                    "tipo":         "calcario",
-                    "produto":      _tipo_calc,
-                    "data":         str(_data_calc),
-                    "toneladas_ha": round(_toneladas_calc, 2),
-                    "prnt":         _prnt_aplic,
-                    "incorporado":  _incorporado,
-                    "obs":          _obs_calc,
-                    "corrigido_em": datetime.now().isoformat(),
-                }
-                st.session_state.corretivos_aplicados.append(_reg_calc)
-                # Atualiza dados DENTRO da área correta no array areas
-                _ph_atual = 5.5
-                for _area_obj in st.session_state.areas:
-                    if _area_obj.get("ID") == _id_area_atual:
-                        _dados_area = _area_obj.get("Dados", _area_obj.get("dados", {}))
-                        _ph_atual   = _dados_area.get("ph", 5.5) if _dados_area else 5.5
-                        break
-                _elevacao = round((_toneladas_calc * _prnt_aplic / 100) * 0.3, 2)
-                _ph_novo  = min(round(_ph_atual + _elevacao, 1), 7.0)
-                # Persiste ph_pos_calagem e calcario_aplicado_ha dentro de cada área
-                for _area_obj in st.session_state.areas:
-                    if _area_obj.get("ID") == _id_area_atual:
-                        if "Dados" not in _area_obj:
-                            _area_obj["Dados"] = {}
-                        _area_obj["Dados"]["ph_pos_calagem"]      = _ph_novo
-                        _area_obj["Dados"]["calcario_aplicado_ha"] = round(
-                            _area_obj["Dados"].get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
-                        break
-                # Atualiza também dados da área ativa se for a mesma
-                if st.session_state.get("area_selecionada") == _id_area_atual:
-                    st.session_state.dados["ph_pos_calagem"]      = _ph_novo
-                    st.session_state.dados["calcario_aplicado_ha"] = round(
-                        st.session_state.dados.get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
-                salvar_dados_iaagro()
-                success_box(f"✅ {_toneladas_calc} t/ha de {_tipo_calc} registrado! pH estimado pós-calagem: {_ph_novo}")
-                st.rerun()
-            else:
-                warning_box("Informe a quantidade aplicada.")
-
-        # ── Gesso aplicado ───────────────────────────────
-        st.markdown("#### 🧱 Gesso Agrícola")
-        col_g1, col_g2, col_g3 = st.columns(3)
-        with col_g1:
-            _data_gesso = st.date_input("Data aplicação", key="date_gesso_aplic",
-                                         value=datetime.now().date())
-            _ton_gesso  = st.number_input("Quantidade aplicada (t/ha)", min_value=0.0,
-                                           step=0.1, key="num_gesso_aplic")
-        with col_g2:
-            _tipo_gesso = st.selectbox("Tipo de gesso",
-                ["Gesso Agrícola","FCA (Fosfogesso)","Outro"], key="sel_tipo_gesso")
-            _pureza_gesso = st.number_input("Pureza CaSO₄ (%)", min_value=0.0, max_value=100.0,
-                                             value=85.0, step=1.0, key="num_pureza_gesso")
-        with col_g3:
-            _obs_gesso = st.text_input("Observação", placeholder="Ex: Para subsolagem",
-                                        key="txt_obs_gesso")
-            _prof_gesso = st.selectbox("Profundidade alvo",
-                ["0-20 cm","20-40 cm","40-60 cm","Superficial"], key="sel_prof_gesso")
-
-        if st.button("💾 Registrar Gesso", key="btn_reg_gesso", use_container_width=True):
-            if _ton_gesso > 0:
-                _reg_gesso = {
-                    "area_id":      _id_area_atual,
-                    "tipo":         "gesso",
-                    "produto":      _tipo_gesso,
-                    "data":         str(_data_gesso),
-                    "toneladas_ha": round(_ton_gesso, 2),
-                    "pureza":       _pureza_gesso,
-                    "profundidade": _prof_gesso,
-                    "obs":          _obs_gesso,
-                    "corrigido_em": datetime.now().isoformat(),
-                }
-                st.session_state.corretivos_aplicados.append(_reg_gesso)
-                # Atualiza gesso dentro da área correta
-                for _area_obj in st.session_state.areas:
-                    if _area_obj.get("ID") == _id_area_atual:
-                        if "Dados" not in _area_obj:
-                            _area_obj["Dados"] = {}
-                        _area_obj["Dados"]["gesso_aplicado_ha"] = round(
-                            _area_obj["Dados"].get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
-                        break
-                if st.session_state.get("area_selecionada") == _id_area_atual:
-                    st.session_state.dados["gesso_aplicado_ha"] = round(
-                        st.session_state.dados.get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
-                salvar_dados_iaagro()
-                success_box(f"✅ {_ton_gesso} t/ha de {_tipo_gesso} registrado!")
-                st.rerun()
-            else:
-                warning_box("Informe a quantidade aplicada.")
-
-        # ── Histórico e status por área ──────────────────
-        if _corretivos:
-            import pandas as pd
-            st.markdown("#### 📋 Histórico de Corretivos")
-
-            df_corr = pd.DataFrame(_corretivos)
-            _calc_total = df_corr[df_corr["tipo"]=="calcario"]["toneladas_ha"].sum() if "tipo" in df_corr else 0
-            _gesso_total = df_corr[df_corr["tipo"]=="gesso"]["toneladas_ha"].sum() if "tipo" in df_corr else 0
-
-            # Status vs recomendado
-            _d_atual = st.session_state.dados
-            _ph_atual = _d_atual.get("ph", 5.5)
-            _dose_rec, _ = calcular_calcario_por_ph(_ph_atual, _d_atual.get("area", 1))
-            _, _dose_gesso_rec, _, _ = calcular_gesso(_d_atual)
-            _ph_pos = _d_atual.get("ph_pos_calagem", _ph_atual)
-
-            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-            col_s1.metric("🪨 Calcário aplicado", f"{_calc_total:.2f} t/ha",
-                          delta=f"Rec: {_dose_rec} t/ha")
-            col_s2.metric("🧱 Gesso aplicado", f"{_gesso_total:.2f} t/ha",
-                          delta=f"Rec: {_dose_gesso_rec:.1f} t/ha")
-            col_s3.metric("pH atual", f"{_ph_atual}")
-            col_s4.metric("pH estimado pós-calagem", f"{_ph_pos}",
-                          delta=f"+{round(_ph_pos-_ph_atual,1)}" if _ph_pos > _ph_atual else "sem aplicação")
-
-            # Alertas
-            if _calc_total < _dose_rec * 0.7:
-                st.warning(f"⚠️ Calcário aplicado ({_calc_total:.1f} t/ha) abaixo do recomendado ({_dose_rec} t/ha)")
-            elif _calc_total >= _dose_rec:
-                st.success(f"✅ Meta de calagem atingida! ({_calc_total:.1f}/{_dose_rec} t/ha)")
-
-            if _gesso_total < _dose_gesso_rec * 0.7 and _dose_gesso_rec > 0:
-                st.warning(f"⚠️ Gesso aplicado ({_gesso_total:.1f} t/ha) abaixo do recomendado ({_dose_gesso_rec:.1f} t/ha)")
-            elif _gesso_total >= _dose_gesso_rec and _dose_gesso_rec > 0:
-                st.success(f"✅ Meta de gessagem atingida! ({_gesso_total:.1f}/{_dose_gesso_rec:.1f} t/ha)")
-
-            # Tabela
-            _cols_show = [c for c in ["data","tipo","produto","toneladas_ha","prnt","incorporado","obs"] if c in df_corr.columns]
-            st.dataframe(df_corr[_cols_show].rename(columns={
-                "data":"Data","tipo":"Tipo","produto":"Produto",
-                "toneladas_ha":"t/ha","prnt":"PRNT%","incorporado":"Incorporado","obs":"Obs"
-            }), use_container_width=True)
-
-            # Excluir
-            with st.expander("🗑️ Excluir registro"):
-                _opts = [f"{c.get('data','')} — {c.get('produto','')} — {c.get('toneladas_ha',0)} t/ha"
-                         for c in _corretivos]
-                _del = st.selectbox("Selecione", _opts, key="sel_del_corretivo")
-                if st.button("🗑️ Excluir", key="btn_del_corretivo"):
-                    _idx = _opts.index(_del)
-                    _all = [i for i,c in enumerate(st.session_state.corretivos_aplicados)
-                            if c.get("area_id") == _id_area_atual]
-                    st.session_state.corretivos_aplicados.pop(_all[_idx])
-                    salvar_dados_iaagro()
-                    success_box("Registro excluído!")
-                    st.rerun()
+        if not st.session_state.areas:
+            warning_box("Cadastre uma área primeiro.")
         else:
-            st.info("📝 Nenhum corretivo registrado para esta área ainda.")
+            # Seletor explícito de área
+            _lista_areas_corr = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Fazenda','?')})"
+                                 for a in st.session_state.areas]
+            _sel_area_corr = st.selectbox("📍 Área para corretivos",
+                                           _lista_areas_corr, key="sel_area_corretivos")
+            _id_area_atual = _sel_area_corr.split(" — ")[0]
+            # Inicializa registro de corretivos
+            if "corretivos_aplicados" not in st.session_state:
+                st.session_state.corretivos_aplicados = []
+
+            _corretivos = [c for c in st.session_state.corretivos_aplicados
+                           if isinstance(c, dict) and c.get("area_id") == _id_area_atual]
+
+            # ── Calcário aplicado ────────────────────────────
+            st.markdown("#### 🪨 Calcário")
+            col_ca1, col_ca2, col_ca3 = st.columns(3)
+            with col_ca1:
+                _data_calc = st.date_input("Data aplicação", key="date_calcario_aplic",
+                                            value=datetime.now().date())
+                _toneladas_calc = st.number_input("Quantidade aplicada (t/ha)", min_value=0.0,
+                                                   step=0.1, key="num_calc_aplic",
+                                                   help="Toneladas por hectare aplicadas")
+            with col_ca2:
+                _prnt_aplic = st.number_input("PRNT do produto (%)", min_value=0.0, max_value=100.0,
+                                               value=75.0, step=1.0, key="num_prnt_aplic",
+                                               help="Verificar na embalagem — padrão 75%")
+                _tipo_calc = st.selectbox("Tipo de calcário",
+                    ["Calcário Dolomítico (Ca+Mg — ideal solos com Mg baixo)",
+                     "Calcário Calcítico (só Ca — usar se Mg já adequado)",
+                     "Calcário Magnesiano (predomina Mg)",
+                     "Cal Virgem (CaO — ação rápida)",
+                     "Cal Hidratada (Ca(OH)₂ — ação rápida)",
+                     "Outro"], key="sel_tipo_calc",
+                    help="Dolomítico: >12% MgO | Calcítico: <12% MgO (CQFS RS/SC 2016)")
+
+                # Mostra info sobre o tipo escolhido
+                if "Dolomítico" in _tipo_calc:
+                    st.caption("🟢 **Dolomítico:** fornece Ca e Mg — recomendado quando Ca/Mg < 2:1 ou Mg < 0.5 cmolc/dm³")
+                elif "Calcítico" in _tipo_calc:
+                    st.caption("🔵 **Calcítico:** fornece só Ca — usar quando Mg já está adequado (>1.0 cmolc/dm³)")
+                elif "Magnesiano" in _tipo_calc:
+                    st.caption("🟡 **Magnesiano:** predomina Mg — usar em solos com Mg muito baixo")
+            with col_ca3:
+                _incorporado = st.checkbox("Incorporado ao solo", value=True, key="chk_incorporado",
+                                            help="Incorporado com grade ou arado")
+                _obs_calc = st.text_input("Observação", placeholder="Ex: Aplicado antes do plantio",
+                                           key="txt_obs_calc")
+
+            if st.button("💾 Registrar Calcário", key="btn_reg_calc", use_container_width=True):
+                if _toneladas_calc > 0:
+                    _reg_calc = {
+                        "area_id":      _id_area_atual,
+                        "tipo":         "calcario",
+                        "produto":      _tipo_calc,
+                        "data":         str(_data_calc),
+                        "toneladas_ha": round(_toneladas_calc, 2),
+                        "prnt":         _prnt_aplic,
+                        "incorporado":  _incorporado,
+                        "obs":          _obs_calc,
+                        "corrigido_em": datetime.now().isoformat(),
+                    }
+                    st.session_state.corretivos_aplicados.append(_reg_calc)
+                    # Atualiza dados DENTRO da área correta no array areas
+                    _ph_atual = 5.5
+                    for _area_obj in st.session_state.areas:
+                        if _area_obj.get("ID") == _id_area_atual:
+                            _dados_area = _area_obj.get("Dados", _area_obj.get("dados", {}))
+                            _ph_atual   = _dados_area.get("ph", 5.5) if _dados_area else 5.5
+                            break
+                    _elevacao = round((_toneladas_calc * _prnt_aplic / 100) * 0.3, 2)
+                    _ph_novo  = min(round(_ph_atual + _elevacao, 1), 7.0)
+                    # Persiste ph_pos_calagem e calcario_aplicado_ha dentro de cada área
+                    for _area_obj in st.session_state.areas:
+                        if _area_obj.get("ID") == _id_area_atual:
+                            if "Dados" not in _area_obj:
+                                _area_obj["Dados"] = {}
+                            _area_obj["Dados"]["ph_pos_calagem"]      = _ph_novo
+                            _area_obj["Dados"]["calcario_aplicado_ha"] = round(
+                                _area_obj["Dados"].get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
+                            break
+                    # Atualiza também dados da área ativa se for a mesma
+                    if st.session_state.get("area_selecionada") == _id_area_atual:
+                        st.session_state.dados["ph_pos_calagem"]      = _ph_novo
+                        st.session_state.dados["calcario_aplicado_ha"] = round(
+                            st.session_state.dados.get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
+                    salvar_dados_iaagro()
+                    success_box(f"✅ {_toneladas_calc} t/ha de {_tipo_calc} registrado! pH estimado pós-calagem: {_ph_novo}")
+                    st.rerun()
+                else:
+                    warning_box("Informe a quantidade aplicada.")
+
+            # ── Gesso aplicado ───────────────────────────────
+            st.markdown("#### 🧱 Gesso Agrícola")
+            col_g1, col_g2, col_g3 = st.columns(3)
+            with col_g1:
+                _data_gesso = st.date_input("Data aplicação", key="date_gesso_aplic",
+                                             value=datetime.now().date())
+                _ton_gesso  = st.number_input("Quantidade aplicada (t/ha)", min_value=0.0,
+                                               step=0.1, key="num_gesso_aplic")
+            with col_g2:
+                _tipo_gesso = st.selectbox("Tipo de gesso",
+                    ["Gesso Agrícola","FCA (Fosfogesso)","Outro"], key="sel_tipo_gesso")
+                _pureza_gesso = st.number_input("Pureza CaSO₄ (%)", min_value=0.0, max_value=100.0,
+                                                 value=85.0, step=1.0, key="num_pureza_gesso")
+            with col_g3:
+                _obs_gesso = st.text_input("Observação", placeholder="Ex: Para subsolagem",
+                                            key="txt_obs_gesso")
+                _prof_gesso = st.selectbox("Profundidade alvo",
+                    ["0-20 cm","20-40 cm","40-60 cm","Superficial"], key="sel_prof_gesso")
+
+            if st.button("💾 Registrar Gesso", key="btn_reg_gesso", use_container_width=True):
+                if _ton_gesso > 0:
+                    _reg_gesso = {
+                        "area_id":      _id_area_atual,
+                        "tipo":         "gesso",
+                        "produto":      _tipo_gesso,
+                        "data":         str(_data_gesso),
+                        "toneladas_ha": round(_ton_gesso, 2),
+                        "pureza":       _pureza_gesso,
+                        "profundidade": _prof_gesso,
+                        "obs":          _obs_gesso,
+                        "corrigido_em": datetime.now().isoformat(),
+                    }
+                    st.session_state.corretivos_aplicados.append(_reg_gesso)
+                    # Atualiza gesso dentro da área correta
+                    for _area_obj in st.session_state.areas:
+                        if _area_obj.get("ID") == _id_area_atual:
+                            if "Dados" not in _area_obj:
+                                _area_obj["Dados"] = {}
+                            _area_obj["Dados"]["gesso_aplicado_ha"] = round(
+                                _area_obj["Dados"].get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
+                            break
+                    if st.session_state.get("area_selecionada") == _id_area_atual:
+                        st.session_state.dados["gesso_aplicado_ha"] = round(
+                            st.session_state.dados.get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
+                    salvar_dados_iaagro()
+                    success_box(f"✅ {_ton_gesso} t/ha de {_tipo_gesso} registrado!")
+                    st.rerun()
+                else:
+                    warning_box("Informe a quantidade aplicada.")
+
+            # ── Histórico e status por área ──────────────────
+            if _corretivos:
+                import pandas as pd
+                st.markdown("#### 📋 Histórico de Corretivos")
+
+                df_corr = pd.DataFrame(_corretivos)
+                _calc_total = df_corr[df_corr["tipo"]=="calcario"]["toneladas_ha"].sum() if "tipo" in df_corr else 0
+                _gesso_total = df_corr[df_corr["tipo"]=="gesso"]["toneladas_ha"].sum() if "tipo" in df_corr else 0
+
+                # Status vs recomendado
+                _d_atual = st.session_state.dados
+                _ph_atual = _d_atual.get("ph", 5.5)
+                _dose_rec, _ = calcular_calcario_por_ph(_ph_atual, _d_atual.get("area", 1))
+                _, _dose_gesso_rec, _, _ = calcular_gesso(_d_atual)
+                _ph_pos = _d_atual.get("ph_pos_calagem", _ph_atual)
+
+                col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+                col_s1.metric("🪨 Calcário aplicado", f"{_calc_total:.2f} t/ha",
+                              delta=f"Rec: {_dose_rec} t/ha")
+                col_s2.metric("🧱 Gesso aplicado", f"{_gesso_total:.2f} t/ha",
+                              delta=f"Rec: {_dose_gesso_rec:.1f} t/ha")
+                col_s3.metric("pH atual", f"{_ph_atual}")
+                col_s4.metric("pH estimado pós-calagem", f"{_ph_pos}",
+                              delta=f"+{round(_ph_pos-_ph_atual,1)}" if _ph_pos > _ph_atual else "sem aplicação")
+
+                # Alertas
+                if _calc_total < _dose_rec * 0.7:
+                    st.warning(f"⚠️ Calcário aplicado ({_calc_total:.1f} t/ha) abaixo do recomendado ({_dose_rec} t/ha)")
+                elif _calc_total >= _dose_rec:
+                    st.success(f"✅ Meta de calagem atingida! ({_calc_total:.1f}/{_dose_rec} t/ha)")
+
+                if _gesso_total < _dose_gesso_rec * 0.7 and _dose_gesso_rec > 0:
+                    st.warning(f"⚠️ Gesso aplicado ({_gesso_total:.1f} t/ha) abaixo do recomendado ({_dose_gesso_rec:.1f} t/ha)")
+                elif _gesso_total >= _dose_gesso_rec and _dose_gesso_rec > 0:
+                    st.success(f"✅ Meta de gessagem atingida! ({_gesso_total:.1f}/{_dose_gesso_rec:.1f} t/ha)")
+
+                # Tabela
+                _cols_show = [c for c in ["data","tipo","produto","toneladas_ha","prnt","incorporado","obs"] if c in df_corr.columns]
+                st.dataframe(df_corr[_cols_show].rename(columns={
+                    "data":"Data","tipo":"Tipo","produto":"Produto",
+                    "toneladas_ha":"t/ha","prnt":"PRNT%","incorporado":"Incorporado","obs":"Obs"
+                }), use_container_width=True)
+
+                # Excluir
+                with st.expander("🗑️ Excluir registro"):
+                    _opts = [f"{c.get('data','')} — {c.get('produto','')} — {c.get('toneladas_ha',0)} t/ha"
+                             for c in _corretivos]
+                    _del = st.selectbox("Selecione", _opts, key="sel_del_corretivo")
+                    if st.button("🗑️ Excluir", key="btn_del_corretivo"):
+                        _idx = _opts.index(_del)
+                        _all = [i for i,c in enumerate(st.session_state.corretivos_aplicados)
+                                if c.get("area_id") == _id_area_atual]
+                        st.session_state.corretivos_aplicados.pop(_all[_idx])
+                        salvar_dados_iaagro()
+                        success_box("Registro excluído!")
+                        st.rerun()
+            else:
+                st.info("📝 Nenhum corretivo registrado para esta área ainda.")
 
 # ─────────────────────────────────────────────
 # MENU: OCR LAUDO DE SOLO
