@@ -3667,7 +3667,7 @@ if menu == "🏠 Início":
 # MENU: ÁREAS CADASTRADAS
 # ─────────────────────────────────────────────
 elif menu == "🌾 Lavoura":
-    _sub_lav = st.tabs(["📍 Áreas Cadastradas","➕ Cadastro da Área","📈 Histórico de Produtividade","🌧️ Pluviômetro","🗺️ Mapa de Fertilidade"])
+    _sub_lav = st.tabs(["📍 Áreas Cadastradas","➕ Cadastro da Área","🗺️ Mapa de Fertilidade","🌧️ Pluviômetro","📈 Histórico de Produtividade"])
 
 if menu == "🌾 Lavoura":
   with _sub_lav[0]:
@@ -3895,7 +3895,7 @@ if menu == "🌾 Lavoura":
 # MENU: HISTÓRICO DE PRODUTIVIDADE
 # ─────────────────────────────────────────────
 if menu == "🌾 Lavoura":
-  with _sub_lav[2]:
+  with _sub_lav[4]:
     st.header("📈 Histórico de Produtividade")
 
     if len(st.session_state.areas) == 0:
@@ -4158,7 +4158,7 @@ if menu == "🌾 Lavoura":
 # MENU: MAPA DE FERTILIDADE
 # ─────────────────────────────────────────────
 if menu == "🌾 Lavoura":
-  with _sub_lav[4]:
+  with _sub_lav[2]:
     st.header("🗺️ Mapa de Fertilidade por Cores")
     st.subheader("🌦️ Mapa Climático dos Talhões")
 
