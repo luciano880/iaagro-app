@@ -4845,10 +4845,57 @@ if menu == "🧪 Solo & Adubação":
 if menu == "🧪 Solo & Adubação":
   with _sub_solo[2]:
     st.header("🌱 Adubação Inteligente")
+
+    # Busca dados da área selecionada — prioridade: area ativa > primeira área
     d = st.session_state.dados
+    _id_sel = st.session_state.get("area_selecionada")
+
+    # Se dados não têm pH mas há áreas cadastradas, pega da área selecionada
+    if "ph" not in d and st.session_state.areas:
+        for _a in st.session_state.areas:
+            if _id_sel and _a.get("ID") == _id_sel:
+                _dados_area = _a.get("Dados", _a.get("dados", {}))
+                if _dados_area and "ph" in _dados_area:
+                    d = {**_dados_area,
+                         "cultura": _a.get("Cultura", "Soja"),
+                         "area":    _a.get("Hectares", 0),
+                         "produtividade": _a.get("Produtividade", 50)}
+                    break
+        # Se ainda não tem, pega da primeira área com análise
+        if "ph" not in d:
+            for _a in st.session_state.areas:
+                _dados_area = _a.get("Dados", _a.get("dados", {}))
+                if _dados_area and "ph" in _dados_area:
+                    d = {**_dados_area,
+                         "cultura": _a.get("Cultura", "Soja"),
+                         "area":    _a.get("Hectares", 0),
+                         "produtividade": _a.get("Produtividade", 50)}
+                    break
+
+    # Seletor de área quando há múltiplas
+    if st.session_state.areas:
+        _areas_adub = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Cultura','?')})"
+                       for a in st.session_state.areas
+                       if a.get("Dados") and "ph" in a.get("Dados", {})]
+        _areas_sem = [a for a in st.session_state.areas
+                      if not a.get("Dados") or "ph" not in a.get("Dados", {})]
+
+        if _areas_sem and not _areas_adub:
+            warning_box("Preencha a Análise de Solo para ver as recomendações de adubação.")
+        elif _areas_adub:
+            if len(_areas_adub) > 1:
+                _sel_adub = st.selectbox("📍 Área para adubação", _areas_adub, key="sel_area_adubacao")
+                _id_adub  = _sel_adub.split(" — ")[0]
+                _a_obj    = next((a for a in st.session_state.areas if a.get("ID") == _id_adub), None)
+                if _a_obj:
+                    _dad = _a_obj.get("Dados", {})
+                    d = {**_dad,
+                         "cultura":       _a_obj.get("Cultura", d.get("cultura","Soja")),
+                         "area":          _a_obj.get("Hectares", d.get("area",0)),
+                         "produtividade": _a_obj.get("Produtividade", d.get("produtividade",50))}
 
     if "ph" not in d:
-        warning_box("Preencha primeiro o Cadastro da Área e a Análise de Solo.")
+        warning_box("Preencha primeiro a Análise de Solo na aba 🧪 Análise de Solo.")
     else:
         cultura      = d.get("cultura", "Soja")
         area         = d.get("area", 0)
