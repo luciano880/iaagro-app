@@ -4979,7 +4979,11 @@ if menu == "🧪 Solo & Adubação":
                                        key="txt_obs_calc")
 
         if st.button("💾 Registrar Calcário", key="btn_reg_calc", use_container_width=True):
-            if _toneladas_calc > 0:
+            if _toneladas_calc <= 0:
+                st.error(f"❌ Digite a quantidade em t/ha (valor atual: {_toneladas_calc})")
+            elif not _id_area_atual:
+                st.error("❌ Selecione uma área primeiro")
+            else:
                 _reg_calc = {
                     "area_id":      _id_area_atual,
                     "tipo":         "calcario",
@@ -5018,7 +5022,6 @@ if menu == "🧪 Solo & Adubação":
                 salvar_dados_iaagro()
                 success_box(f"✅ {_toneladas_calc} t/ha de {_tipo_calc} registrado! pH estimado pós-calagem: {_ph_novo}")
                 st.rerun()
-            else:
                 warning_box("Informe a quantidade aplicada.")
 
         # ── Gesso aplicado ───────────────────────────────
