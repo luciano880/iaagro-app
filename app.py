@@ -3923,9 +3923,20 @@ if menu == "🌾 Lavoura":
     if len(st.session_state.areas) == 0:
         warning_box("Cadastre uma área primeiro.")
     else:
-        lista_areas = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
+        lista_areas        = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
         area_escolhida     = st.selectbox("Selecione a Área", lista_areas, key="sel_selecione_a__re_3106")
         safra              = st.text_input("Safra", placeholder="2024/2025", key="txt_safra_3107")
+
+        # Cultura colhida — com ícones
+        _culturas_hist = get_culturas()
+        # Pega cultura da área selecionada como padrão
+        _id_hist = area_escolhida.split(" - ")[0]
+        _area_hist_obj = next((a for a in st.session_state.areas if a.get("ID") == _id_hist), None)
+        _cult_padrao = _area_hist_obj.get("Cultura", _culturas_hist[0]) if _area_hist_obj else _culturas_hist[0]
+        _idx_cult = _culturas_hist.index(_cult_padrao) if _cult_padrao in _culturas_hist else 0
+        cultura_colhida = st.selectbox("Cultura colhida", _culturas_hist,
+                                        index=_idx_cult, key="sel_cultura_hist")
+
         produtividade_real = st.number_input("Produtividade Real (sc/ha)", min_value=0.0, value=60.0, key="num_produtividade_r_3108")
         custo_total        = st.number_input("Custo Total por hectare (R$)", min_value=0.0, value=0.0, key="num_custo_total_por_3109")
         observacoes        = st.text_area("Observações da Safra", key="txa_observa__es_da__3110")
@@ -3933,14 +3944,18 @@ if menu == "🌾 Lavoura":
         if st.button("Salvar Histórico"):
             st.session_state.historico_produtividade.append({
                 "Área": area_escolhida, "Safra": safra,
+                "Cultura": cultura_colhida,
                 "Produtividade": produtividade_real,
                 "Custo": custo_total, "Observações": observacoes
             })
             salvar_dados_iaagro()
-            success_box("Histórico salvo com sucesso!")
+            success_box(f"Histórico salvo! {get_icone_cultura(cultura_colhida)} {cultura_limpa(cultura_colhida)} — {produtividade_real} sc/ha")
 
         if len(st.session_state.historico_produtividade) > 0:
             df_hist = pd.DataFrame(st.session_state.historico_produtividade)
+            # Adiciona coluna ícone+cultura se não tiver
+            if "Cultura" not in df_hist.columns:
+                df_hist["Cultura"] = "—"
             st.dataframe(df_hist, use_container_width=True)
             st.subheader("📊 Evolução Produtiva")
             area_filtro = st.selectbox("Filtrar gráfico por área", df_hist["Área"].unique(), key="sel_filtrar_gr_fico_3125")
