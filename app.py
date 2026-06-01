@@ -6955,15 +6955,32 @@ if menu == "🧪 Solo & Adubação":
                     "corrigido_em": datetime.now().isoformat(),
                 }
                 st.session_state.corretivos_aplicados.append(_reg_calc)
-                # Atualiza ph estimado pós-calagem na área
-                _ph_atual = st.session_state.dados.get("ph", 5.5)
+                # Atualiza dados DENTRO da área correta no array areas
+                _ph_atual = 5.5
+                for _area_obj in st.session_state.areas:
+                    if _area_obj.get("ID") == _id_area_atual:
+                        _dados_area = _area_obj.get("Dados", _area_obj.get("dados", {}))
+                        _ph_atual   = _dados_area.get("ph", 5.5) if _dados_area else 5.5
+                        break
                 _elevacao = round((_toneladas_calc * _prnt_aplic / 100) * 0.3, 2)
                 _ph_novo  = min(round(_ph_atual + _elevacao, 1), 7.0)
-                st.session_state.dados["ph_pos_calagem"] = _ph_novo
-                st.session_state.dados["calcario_aplicado_ha"] = round(
-                    st.session_state.dados.get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
+                # Persiste ph_pos_calagem e calcario_aplicado_ha dentro de cada área
+                for _area_obj in st.session_state.areas:
+                    if _area_obj.get("ID") == _id_area_atual:
+                        if "Dados" not in _area_obj:
+                            _area_obj["Dados"] = {}
+                        _area_obj["Dados"]["ph_pos_calagem"]      = _ph_novo
+                        _area_obj["Dados"]["calcario_aplicado_ha"] = round(
+                            _area_obj["Dados"].get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
+                        break
+                # Atualiza também dados da área ativa se for a mesma
+                if st.session_state.get("area_selecionada") == _id_area_atual:
+                    st.session_state.dados["ph_pos_calagem"]      = _ph_novo
+                    st.session_state.dados["calcario_aplicado_ha"] = round(
+                        st.session_state.dados.get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
                 salvar_dados_iaagro()
                 success_box(f"✅ {_toneladas_calc} t/ha de {_tipo_calc} registrado! pH estimado pós-calagem: {_ph_novo}")
+                st.rerun()
             else:
                 warning_box("Informe a quantidade aplicada.")
 
@@ -7000,10 +7017,20 @@ if menu == "🧪 Solo & Adubação":
                     "corrigido_em": datetime.now().isoformat(),
                 }
                 st.session_state.corretivos_aplicados.append(_reg_gesso)
-                st.session_state.dados["gesso_aplicado_ha"] = round(
-                    st.session_state.dados.get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
+                # Atualiza gesso dentro da área correta
+                for _area_obj in st.session_state.areas:
+                    if _area_obj.get("ID") == _id_area_atual:
+                        if "Dados" not in _area_obj:
+                            _area_obj["Dados"] = {}
+                        _area_obj["Dados"]["gesso_aplicado_ha"] = round(
+                            _area_obj["Dados"].get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
+                        break
+                if st.session_state.get("area_selecionada") == _id_area_atual:
+                    st.session_state.dados["gesso_aplicado_ha"] = round(
+                        st.session_state.dados.get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
                 salvar_dados_iaagro()
                 success_box(f"✅ {_ton_gesso} t/ha de {_tipo_gesso} registrado!")
+                st.rerun()
             else:
                 warning_box("Informe a quantidade aplicada.")
 
