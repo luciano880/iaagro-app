@@ -4260,9 +4260,9 @@ if menu == "🌾 Lavoura":
             elif "Laranja" in cor_str: fundo = "#f97316"
             else:                      fundo = "#dc2626"
             _cs = linha["Status calagem"]
-            _cc = {"✅ Meta atingida":"#14532d","🟡 Parcial":"#854d0e",
-                   "🔴 Insuficiente":"#7f1d1d","⚪ Não aplicado":"#334155",
-                   "⚪ Sem análise":"#334155"}.get(_cs,"#334155")
+            _cc_borda = {"✅ Meta atingida":"#22c55e","🟡 Parcial":"#eab308",
+                         "🔴 Insuficiente":"#ef4444","⚪ Não aplicado":"#64748b",
+                         "⚪ Sem análise":"#64748b"}.get(_cs,"#64748b")
             with cols_card[i % 3]:
                 st.markdown(f"""
                 <div style="background:{fundo};padding:16px;border-radius:14px;
@@ -4271,14 +4271,13 @@ if menu == "🌾 Lavoura":
                 <p style="margin:2px 0;">🌱 {linha['Cultura']} | {linha['Área ha']} ha</p>
                 <p style="margin:2px 0;">📊 Score: {linha['Score']} — {linha['Classe']}</p>
                 <p style="margin:2px 0;">🌧️ Clima: {linha['Clima']}</p>
-                <hr style="border-color:rgba(255,255,255,0.3);margin:6px 0;">
-                <div style="background:{_cc};border-radius:6px;padding:6px 10px;margin-top:4px;">
-                <p style="margin:2px 0;">🪨 Calcário: {linha['Calcário t/ha']} t/ha aplicado</p>
-                <p style="margin:2px 0;">📋 Recomendado: {linha['Rec. calcário']}</p>
-                <p style="margin:2px 0;">{_cs}</p>
-                <p style="margin:2px 0;">🧱 Gesso: {linha['Gesso t/ha']} t/ha</p>
-                <p style="margin:2px 0;">pH: {linha['pH atual']} → pós-calagem: {linha['pH pós-calagem']}</p>
-                </div>
+                <hr style="border-color:rgba(255,255,255,0.4);margin:8px 0;">
+                <p style="margin:2px 0;border-left:3px solid {_cc_borda};padding-left:8px;">
+                🪨 Calcário: <b>{linha['Calcário t/ha']} t/ha</b> aplicado (rec: {linha['Rec. calcário']})<br>
+                {_cs}<br>
+                🧱 Gesso: <b>{linha['Gesso t/ha']} t/ha</b><br>
+                🧪 pH: {linha['pH atual']} → <b>{linha['pH pós-calagem']}</b> (pós-calagem)
+                </p>
                 <p style="margin:6px 0 0 0;font-size:11px;opacity:0.85;">{linha['Alertas']}</p>
                 </div>""", unsafe_allow_html=True)
 
@@ -6891,10 +6890,15 @@ if menu == "🧪 Solo & Adubação":
     st.divider()
     st.subheader("🪨 Controle de Calcário e Gesso Aplicados")
 
-    _id_area_atual = st.session_state.get("area_selecionada") or (
-        st.session_state.areas[0]["ID"] if st.session_state.areas else None)
-
-    if _id_area_atual:
+    if not st.session_state.areas:
+        warning_box("Cadastre uma área primeiro.")
+    else:
+        # Seletor explícito de área
+        _lista_areas_corr = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Fazenda','?')})"
+                             for a in st.session_state.areas]
+        _sel_area_corr = st.selectbox("📍 Área para corretivos",
+                                       _lista_areas_corr, key="sel_area_corretivos")
+        _id_area_atual = _sel_area_corr.split(" — ")[0]
         # Inicializa registro de corretivos
         if "corretivos_aplicados" not in st.session_state:
             st.session_state.corretivos_aplicados = []
@@ -7061,8 +7065,6 @@ if menu == "🧪 Solo & Adubação":
                     st.rerun()
         else:
             st.info("📝 Nenhum corretivo registrado para esta área ainda.")
-    else:
-        warning_box("Cadastre e selecione uma área primeiro.")
 
 # ─────────────────────────────────────────────
 # MENU: OCR LAUDO DE SOLO
