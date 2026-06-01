@@ -3258,11 +3258,11 @@ def recomendacao_npk(cultura, produtividade, fosforo, potassio, materia_organica
 
 
 def score_solo(d, cultura="Soja"):
-    cultura = cultura_limpa(cultura) if cultura else "Soja"
     """
     Score de qualidade do solo baseado nos parâmetros EMBRAPA/CQFS RS-SC 2016
     Considera limites ideais por cultura
     """
+    cultura = cultura_limpa(cultura) if cultura else "Soja"
     score   = 100
     alertas = []
     ph               = d.get("ph", 0)
@@ -3417,6 +3417,16 @@ CULTURAS_POR_SEGMENTO = {
 # Mapa reverso para extrair nome sem ícone (para lógicas internas)
 CULTURA_NOME_LIMPO = {c: c.split(" ",1)[1] if " " in c else c
                       for seg in CULTURAS_POR_SEGMENTO.values() for c in seg}
+
+# Ícone por nome limpo da cultura
+CULTURA_ICONE = {c.split(" ",1)[1] if " " in c else c: c.split(" ",1)[0] if " " in c else "🌱"
+                 for seg in CULTURAS_POR_SEGMENTO.values() for c in seg}
+
+def get_icone_cultura(cultura):
+    """Retorna o ícone da cultura (com ou sem ícone no nome)."""
+    if not cultura: return "🌱"
+    nome = cultura_limpa(cultura)
+    return CULTURA_ICONE.get(nome, "🌱")
 
 # ─────────────────────────────────────────────
 # CONTROLE DE PLANOS — Free / Pro / Premium
@@ -4306,7 +4316,7 @@ if menu == "🌾 Lavoura":
                 <div style="background:{fundo};padding:16px;border-radius:14px;
                 margin-bottom:14px;color:white;font-weight:bold;box-shadow:0 4px 12px rgba(0,0,0,0.25);">
                 <h3 style="margin:0 0 6px 0;">{linha['Talhão']}</h3>
-                <p style="margin:2px 0;">🌱 {linha['Cultura']} | {linha['Área ha']} ha</p>
+                <p style="margin:2px 0;">{get_icone_cultura(linha['Cultura'])} {cultura_limpa(linha['Cultura'])} | {linha['Área ha']} ha</p>
                 <p style="margin:2px 0;">📊 Score: {linha['Score']} — {linha['Classe']}</p>
                 <p style="margin:2px 0;">🌧️ Clima: {linha['Clima']}</p>
                 <hr style="border-color:rgba(255,255,255,0.4);margin:8px 0;">
