@@ -6881,12 +6881,6 @@ if menu == "🌍 Inteligência":
             })
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
 
-
-# ─────────────────────────────────────────────
-# CONTROLE CALCÁRIO E GESSO — dentro da aba Adubação
-# ─────────────────────────────────────────────
-if menu == "🧪 Solo & Adubação":
-  with _sub_solo[2]:
     st.divider()
     st.subheader("🪨 Controle de Calcário e Gesso Aplicados")
 
