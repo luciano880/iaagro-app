@@ -1284,7 +1284,8 @@ def _tentar_autologin():
                 # Carrega TODOS os campos do Supabase
                 _campos = ["dados","areas","estoque","aplicacoes","historico_produtividade",
                            "pluviometro","carencia_registros","dre_registros","calendario_eventos",
-                           "harvest_historico","receituarios","safrinha_registros","fluxo_caixa","segmento"]
+                           "harvest_historico","receituarios","safrinha_registros","fluxo_caixa",
+                           "corretivos_aplicados","segmento"]
                 for k in _campos:
                     if k in _dados and _dados[k] not in (None, [], {}):
                         setattr(st.session_state, k, _dados[k])
@@ -1795,6 +1796,8 @@ if "precos_data"       not in st.session_state: st.session_state.precos_data    
 if "receituarios"      not in st.session_state: st.session_state.receituarios      = dados_carregados.get("receituarios", [])
 if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinida  = False
 if "safrinha_registros" not in st.session_state: st.session_state.safrinha_registros = dados_carregados.get("safrinha_registros", [])
+if "corretivos_aplicados" not in st.session_state or (not st.session_state.get("corretivos_aplicados") and dados_carregados.get("corretivos_aplicados")):
+    st.session_state.corretivos_aplicados = dados_carregados.get("corretivos_aplicados", [])
 if "fluxo_caixa" not in st.session_state or (not st.session_state.get("fluxo_caixa") and dados_carregados.get("fluxo_caixa")):
     st.session_state.fluxo_caixa = dados_carregados.get("fluxo_caixa", [])
 if "corretivos_aplicados" not in st.session_state or (not st.session_state.get("corretivos_aplicados") and dados_carregados.get("corretivos_aplicados")):
@@ -4166,16 +4169,44 @@ if menu == "🌾 Lavoura":
             elif score >= 70: cor = "🟡 Amarelo"
             elif score >= 50: cor = "🟠 Laranja"
             else:             cor = "🔴 Vermelho"
+
+            # ── Dados de calcário e gesso aplicados ──────
+            _corr = st.session_state.get("corretivos_aplicados", [])
+            _calc_area = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="calcario"]
+            _gesso_area = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="gesso"]
+            _calc_total = round(sum(c.get("toneladas_ha",0) for c in _calc_area), 2)
+            _gesso_total = round(sum(c.get("toneladas_ha",0) for c in _gesso_area), 2)
+            _ph_corrigido = dados_area.get("ph_pos_calagem", dados_area.get("ph", 0)) if dados_area else 0
+            _ph_orig = dados_area.get("ph", 0) if dados_area else 0
+
+            # Status calagem
+            if dados_area and "ph" in dados_area:
+                _dose_rec, _ = calcular_calcario_por_ph(dados_area.get("ph",5.5), area.get("Hectares",1))
+                if _calc_total == 0:
+                    _calc_status = "⚪ Não aplicado"
+                elif _calc_total >= _dose_rec:
+                    _calc_status = "✅ Meta atingida"
+                elif _calc_total >= _dose_rec * 0.5:
+                    _calc_status = "🟡 Parcial"
+                else:
+                    _calc_status = "🔴 Insuficiente"
+                _calc_color = {"✅ Meta atingida":"#14532d","🟡 Parcial":"#78350f",
+                               "🔴 Insuficiente":"#7f1d1d","⚪ Não aplicado":"#1e293b"}
+                _calc_rec_txt = f"{_dose_rec} t/ha"
+            else:
+                _calc_status = "⚪ Sem análise"
+                _calc_color  = {"⚪ Sem análise":"#1e293b"}
+                _calc_rec_txt = "-"
+
+            # ── Clima ────────────────────────────────────
             registros_area = [r for r in st.session_state.pluviometro
                               if isinstance(r, dict) and
                               (r.get("area_id") == area.get("ID","") or
                                r.get("Área") == area.get("ID",""))]
             if len(registros_area) > 0:
-                # Suporta formato novo (mm) e antigo (Perda Estimada)
                 if "Perda Estimada" in registros_area[0]:
                     perda_media_clima = sum(r.get("Perda Estimada", 0) for r in registros_area) / len(registros_area)
                 else:
-                    # Novo formato — calcula perda por déficit/excesso
                     _ideal = 120.0
                     _meses = {}
                     for r in registros_area:
@@ -4183,67 +4214,117 @@ if menu == "🌾 Lavoura":
                         _meses[_k] = _meses.get(_k, 0) + r.get("mm", 0)
                     _perdas = []
                     for _mm in _meses.values():
-                        if _mm < _ideal * 0.7:
-                            _perdas.append((_ideal - _mm) * 0.15)
-                        elif _mm > _ideal * 1.3:
-                            _perdas.append((_mm - _ideal) * 0.08)
-                        else:
-                            _perdas.append(0)
+                        if _mm < _ideal * 0.7:   _perdas.append((_ideal - _mm) * 0.15)
+                        elif _mm > _ideal * 1.3: _perdas.append((_mm - _ideal) * 0.08)
+                        else:                    _perdas.append(0)
                     perda_media_clima = sum(_perdas) / len(_perdas) if _perdas else 0
                 if   perda_media_clima <= 5:  clima_cor = "🟢 Ideal"
                 elif perda_media_clima <= 12: clima_cor = "🟡 Atenção"
                 else:                         clima_cor = "🔴 Crítico"
             else:
                 clima_cor = "⚪ Sem dados"
+
             mapa_dados.append({
-                "ID": area.get("ID",""), "Fazenda": area.get("Fazenda",""),
-                "Talhão": area.get("Talhão",""), "Clima": clima_cor,
-                "Cultura": area.get("Cultura",""), "Área ha": area.get("Hectares",0),
-                "Score": score, "Classe": classe, "Cor": cor,
-                "Alertas": ", ".join(alertas)
+                "ID":             area.get("ID",""),
+                "Fazenda":        area.get("Fazenda",""),
+                "Talhão":         area.get("Talhão",""),
+                "Cultura":        area.get("Cultura",""),
+                "Área ha":        area.get("Hectares",0),
+                "Score":          score,
+                "Classe":         classe,
+                "Cor":            cor,
+                "Clima":          clima_cor,
+                "pH atual":       _ph_orig,
+                "pH pós-calagem": _ph_corrigido,
+                "Calcário t/ha":  _calc_total,
+                "Rec. calcário":  _calc_rec_txt,
+                "Status calagem": _calc_status,
+                "Gesso t/ha":     _gesso_total,
+                "Alertas":        ", ".join(alertas),
             })
+
         df_mapa = pd.DataFrame(mapa_dados)
+
+        # ── Visão geral ──────────────────────────────────
         st.subheader("📍 Visão geral dos talhões")
         st.dataframe(df_mapa, use_container_width=True)
-        st.subheader("🎨 Legenda")
-        st.write("🟢 Verde = solo excelente | 🟡 Amarelo = solo bom | 🟠 Laranja = solo médio | 🔴 Vermelho = solo crítico")
+
+        # ── Cards visuais com calagem ─────────────────────
         st.subheader("🛰️ Mapa Visual dos Talhões")
-        cols = st.columns(3)
+        st.write("🟢 Verde = solo excelente | 🟡 Amarelo = bom | 🟠 Laranja = médio | 🔴 Vermelho = crítico")
+        cols_card = st.columns(3)
         for i, linha in df_mapa.iterrows():
             cor_str = linha["Cor"]
             if "Verde"   in cor_str: fundo = "#16a34a"
             elif "Amarelo" in cor_str: fundo = "#eab308"
             elif "Laranja" in cor_str: fundo = "#f97316"
             else:                      fundo = "#dc2626"
-            with cols[i % 3]:
-                st.markdown(
-                    f"""<div style="background-color:{fundo};padding:18px;border-radius:18px;
-                    margin-bottom:15px;color:white;font-weight:bold;box-shadow:0 4px 12px rgba(0,0,0,0.25);">
-                    <h3>{linha['Talhão']}</h3><p>ID: {linha['ID']}</p>
-                    <p>Cultura: {linha['Cultura']}</p><p>Área: {linha['Área ha']} ha</p>
-                    <p>Classe: {linha['Classe']}</p><p>Score: {linha['Score']}</p>
-                    <p>{linha['Alertas']}</p></div>""",
-                    unsafe_allow_html=True
-                )
-        st.subheader("🌡️ Heatmap de Fertilidade")
-        df_heatmap = df_mapa[["Talhão","Score"]].copy()
-        st.write("Quanto mais alto o score, melhor a fertilidade do talhão.")
+            _cs = linha["Status calagem"]
+            _cc = {"✅ Meta atingida":"#14532d","🟡 Parcial":"#854d0e",
+                   "🔴 Insuficiente":"#7f1d1d","⚪ Não aplicado":"#334155",
+                   "⚪ Sem análise":"#334155"}.get(_cs,"#334155")
+            with cols_card[i % 3]:
+                st.markdown(f"""
+                <div style="background:{fundo};padding:16px;border-radius:14px;
+                margin-bottom:14px;color:white;font-weight:bold;box-shadow:0 4px 12px rgba(0,0,0,0.25);">
+                <h3 style="margin:0 0 6px 0;">{linha['Talhão']}</h3>
+                <p style="margin:2px 0;">🌱 {linha['Cultura']} | {linha['Área ha']} ha</p>
+                <p style="margin:2px 0;">📊 Score: {linha['Score']} — {linha['Classe']}</p>
+                <p style="margin:2px 0;">🌧️ Clima: {linha['Clima']}</p>
+                <hr style="border-color:rgba(255,255,255,0.3);margin:6px 0;">
+                <div style="background:{_cc};border-radius:6px;padding:6px 10px;margin-top:4px;">
+                <p style="margin:2px 0;">🪨 Calcário: {linha['Calcário t/ha']} t/ha aplicado</p>
+                <p style="margin:2px 0;">📋 Recomendado: {linha['Rec. calcário']}</p>
+                <p style="margin:2px 0;">{_cs}</p>
+                <p style="margin:2px 0;">🧱 Gesso: {linha['Gesso t/ha']} t/ha</p>
+                <p style="margin:2px 0;">pH: {linha['pH atual']} → pós-calagem: {linha['pH pós-calagem']}</p>
+                </div>
+                <p style="margin:6px 0 0 0;font-size:11px;opacity:0.85;">{linha['Alertas']}</p>
+                </div>""", unsafe_allow_html=True)
 
-        # Colorir manualmente sem depender de matplotlib/cmap
+        # ── Heatmap fertilidade ──────────────────────────
+        st.subheader("🌡️ Heatmap de Fertilidade")
+
         def cor_score(val):
             if val >= 70:   return "background-color: #14532d; color: white"
             elif val >= 40: return "background-color: #78350f; color: white"
             else:           return "background-color: #7f1d1d; color: white"
 
+        def cor_calc(val):
+            try:
+                v = float(val)
+                if v == 0:   return "background-color: #1e293b; color: #94a3b8"
+                elif v >= 2: return "background-color: #14532d; color: white"
+                elif v >= 1: return "background-color: #78350f; color: white"
+                else:        return "background-color: #7f1d1d; color: white"
+            except: return ""
+
+        def cor_ph(val):
+            try:
+                v = float(val)
+                if v >= 6.0: return "background-color: #14532d; color: white"
+                elif v >= 5.5: return "background-color: #78350f; color: white"
+                else:          return "background-color: #7f1d1d; color: white"
+            except: return ""
+
+        _heat_cols = ["Talhão","Score","pH atual","pH pós-calagem","Calcário t/ha","Gesso t/ha","Status calagem"]
+        df_heat = df_mapa[[c for c in _heat_cols if c in df_mapa.columns]].copy()
+
         try:
-            st.dataframe(
-                df_heatmap.style.applymap(cor_score, subset=["Score"]),
-                use_container_width=True
-            )
+            _styled = df_heat.style\
+                .applymap(cor_score, subset=["Score"])\
+                .applymap(cor_ph, subset=["pH atual","pH pós-calagem"])\
+                .applymap(cor_calc, subset=["Calcário t/ha","Gesso t/ha"])
+            st.dataframe(_styled, use_container_width=True)
         except Exception:
-            st.dataframe(df_heatmap, use_container_width=True)
+            st.dataframe(df_heat, use_container_width=True)
+
+        st.caption("🟢 Verde = ótimo | 🟡 Laranja = atenção | 🔴 Vermelho = crítico | ⚫ Cinza = sem dados")
+
+        # ── Ranking ──────────────────────────────────────
         st.subheader("📊 Ranking de Fertilidade")
         st.bar_chart(df_mapa.set_index("Talhão")["Score"])
+
         st.subheader("🛰️ Mapa GPS dos Talhões")
 
         # Coordenadas — prioridade: GPS salvo > área cadastrada > padrão
