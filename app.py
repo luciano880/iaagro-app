@@ -4172,23 +4172,38 @@ if menu == "🌾 Lavoura":
             historicos_area = [h for h in st.session_state.historico_produtividade if h["Área"].startswith(area["ID"])]
             if len(historicos_area) > 0:
                 media_hist = sum(h["Produtividade"] for h in historicos_area) / len(historicos_area)
-            if dados_area and "ph" in dados_area:
-                score, classe, alertas = score_solo(dados_area)
+
+            # ── Dados de calcário e gesso aplicados ──────
+            _corr       = st.session_state.get("corretivos_aplicados", [])
+            _calc_area  = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="calcario"]
+            _gesso_area = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="gesso"]
+            _calc_total  = round(sum(c.get("toneladas_ha",0) for c in _calc_area), 2)
+            _gesso_total = round(sum(c.get("toneladas_ha",0) for c in _gesso_area), 2)
+
+            # Usa pH pós-calagem no score se calcário foi aplicado
+            _dados_score = dados_area.copy() if dados_area else {}
+            _ph_orig     = _dados_score.get("ph", 0)
+            _ph_corrigido = _dados_score.get("ph_pos_calagem", _ph_orig)
+
+            # Se tem calcário mas ph_pos_calagem não foi calculado ainda, calcula agora
+            if _calc_total > 0 and _ph_corrigido == _ph_orig and _ph_orig > 0:
+                _elevacao_total = round((_calc_total * 0.75) * 0.3, 2)
+                _ph_corrigido   = min(round(_ph_orig + _elevacao_total, 1), 7.0)
+                _dados_score["ph_pos_calagem"] = _ph_corrigido
+
+            # Usa pH corrigido no score visual
+            if _calc_total > 0 and _ph_corrigido > _ph_orig:
+                _dados_score["ph"] = _ph_corrigido  # score usa pH pós-calagem
+
+            if _dados_score and "ph" in _dados_score:
+                score, classe, alertas = score_solo(_dados_score)
             else:
                 score = 0; classe = "Sem análise"; alertas = ["Sem análise de solo"]
+
             if   score >= 85: cor = "🟢 Verde"
             elif score >= 70: cor = "🟡 Amarelo"
             elif score >= 50: cor = "🟠 Laranja"
             else:             cor = "🔴 Vermelho"
-
-            # ── Dados de calcário e gesso aplicados ──────
-            _corr = st.session_state.get("corretivos_aplicados", [])
-            _calc_area = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="calcario"]
-            _gesso_area = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="gesso"]
-            _calc_total = round(sum(c.get("toneladas_ha",0) for c in _calc_area), 2)
-            _gesso_total = round(sum(c.get("toneladas_ha",0) for c in _gesso_area), 2)
-            _ph_corrigido = dados_area.get("ph_pos_calagem", dados_area.get("ph", 0)) if dados_area else 0
-            _ph_orig = dados_area.get("ph", 0) if dados_area else 0
 
             # Status calagem
             if dados_area and "ph" in dados_area:
