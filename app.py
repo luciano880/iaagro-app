@@ -2978,6 +2978,128 @@ def atualizar_area_atual():
     salvar_dados_iaagro()
 
 
+def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura="", area_ha=0, operador=""):
+    """Gera PDF profissional com programação de aplicações por estádio."""
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm, mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, KeepTogether
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            rightMargin=1.5*cm, leftMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=2*cm)
+    story = []
+
+    COR_VERDE  = colors.HexColor("#16a34a")
+    COR_VERDE_E= colors.HexColor("#14532d")
+    COR_AZUL   = colors.HexColor("#1e3a5f")
+    COR_CINZA  = colors.HexColor("#f1f5f9")
+    COR_BORDA  = colors.HexColor("#e2e8f0")
+    COR_BRANCO = colors.white
+    COR_TEXTO  = colors.HexColor("#0f172a")
+    COR_SUB    = colors.HexColor("#64748b")
+    COR_TIPO   = {
+        "Herbicida":colors.HexColor("#fef3c7"),"Fungicida":colors.HexColor("#dbeafe"),
+        "Inseticida":colors.HexColor("#fee2e2"),"Adjuvante":colors.HexColor("#d1fae5"),
+        "Óleo mineral/vegetal":colors.HexColor("#ede9fe"),"Fertilizante foliar":colors.HexColor("#fce7f3"),
+        "Regulador":colors.HexColor("#ffedd5"),"Outro":COR_CINZA,
+    }
+
+    def P(txt, size=9, bold=False, color=None, align=TA_LEFT):
+        fn = "Helvetica-Bold" if bold else "Helvetica"
+        c  = color or COR_TEXTO
+        return Paragraph(txt, ParagraphStyle("p", fontName=fn, fontSize=size, textColor=c, alignment=align, leading=size+3))
+
+    # CABEÇALHO
+    h = [[P("IAAgro",18,True,COR_VERDE), P("PROGRAMAÇÃO DE APLICACOES",14,True,COR_BRANCO,TA_CENTER),
+          P(f"Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}",7,False,COR_CINZA,TA_RIGHT)]]
+    th = Table(h, colWidths=[4*cm,10*cm,4.5*cm])
+    th.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),COR_VERDE_E),
+        ("TOPPADDING",(0,0),(-1,-1),10),("BOTTOMPADDING",(0,0),(-1,-1),10),
+        ("LEFTPADDING",(0,0),(-1,-1),10),("RIGHTPADDING",(0,0),(-1,-1),10),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.append(th); story.append(Spacer(1,3*mm))
+
+    # INFO PROPRIEDADE
+    i = [[P(f"<b>Fazenda:</b> {fazenda or '—'}"),P(f"<b>Talhao:</b> {talhao or '—'}"),
+          P(f"<b>Cultura:</b> {cultura or '—'}"),P(f"<b>Area:</b> {area_ha} ha"),
+          P(f"<b>Responsavel:</b> {operador or '—'}")]]
+    ti = Table(i, colWidths=[3.5*cm,3.5*cm,3*cm,2.5*cm,6*cm])
+    ti.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),COR_CINZA),("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
+        ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),6)]))
+    story.append(ti); story.append(Spacer(1,4*mm))
+
+    # LEGENDA
+    leg = [("Herbicida","#fef3c7"),("Fungicida","#dbeafe"),("Inseticida","#fee2e2"),
+           ("Adjuvante","#d1fae5"),("Oleo","#ede9fe"),("Fert.Foliar","#fce7f3")]
+    tl = Table([[P(n,7,True) for n,_ in leg]], colWidths=[3*cm]*6)
+    tl.setStyle(TableStyle([*[("BACKGROUND",(i,0),(i,0),colors.HexColor(c)) for i,(n,c) in enumerate(leg)],
+        ("GRID",(0,0),(-1,-1),0.3,COR_BORDA),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3),
+        ("ALIGN",(0,0),(-1,-1),"CENTER")]))
+    story.append(P("Legenda:",7,False,COR_SUB)); story.append(Spacer(1,1*mm))
+    story.append(tl); story.append(Spacer(1,5*mm))
+
+    # BLOCOS POR ESTÁDIO
+    for num, aplic in enumerate(aplicacoes, 1):
+        est = aplic.get("Estádio") or aplic.get("Aplicação","")
+        for e in ["🌱","🌿","🌾","🌸","🫘","📋"]: est = est.replace(e,"").strip()
+
+        cab = [[P(f"{num}. {est}",11,True,COR_BRANCO),
+                P(f"Data: {aplic.get('Data','—')} | Area: {aplic.get('Área aplicada ha',0)} ha | "
+                  f"Calda: {aplic.get('Volume calda L/ha',0)} L/ha | "
+                  f"Tanques: {aplic.get('Número tanques',0):.1f} | "
+                  f"Pulverizador: {aplic.get('Pulverizador','—')} | "
+                  f"Clima: {aplic.get('Clima aplicação','—')}",8,False,COR_CINZA)]]
+        tc = Table(cab, colWidths=[4.5*cm,14*cm])
+        tc.setStyle(TableStyle([("BACKGROUND",(0,0),(0,0),COR_VERDE),("BACKGROUND",(1,0),(1,0),COR_AZUL),
+            ("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7),
+            ("LEFTPADDING",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+
+        hdr = [P("PRODUTO",8,True,COR_BRANCO,TA_CENTER),P("TIPO",8,True,COR_BRANCO,TA_CENTER),
+               P("DOSE/ha",8,True,COR_BRANCO,TA_CENTER),P("UNIDADE",8,True,COR_BRANCO,TA_CENTER),
+               P("POR TANQUE",8,True,COR_BRANCO,TA_CENTER),P("TOTAL AREA",8,True,COR_BRANCO,TA_CENTER)]
+        rows = [hdr]
+        for p in aplic.get("Produtos",[]):
+            unid = p.get("Unidade","").replace("/ha","")
+            rows.append([
+                P(f"<b>{p.get('Produto','')}</b>",8,True),
+                P(p.get("Tipo",""),8),
+                P(str(p.get("Dose por ha",0)),8,False,None,TA_CENTER),
+                P(p.get("Unidade",""),8,False,None,TA_CENTER),
+                P(f"<b>{p.get('Produto por tanque',0):.2f}</b> {unid}",8,True,None,TA_CENTER),
+                P(f"<b>{p.get('Total usado',0):.2f}</b> {unid}",8,True,COR_VERDE_E,TA_CENTER),
+            ])
+        tp = Table(rows, colWidths=[4.5*cm,2.5*cm,2*cm,2*cm,3*cm,4.5*cm])
+        stp = [("BACKGROUND",(0,0),(-1,0),COR_VERDE_E),("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
+               ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
+               ("LEFTPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE")]
+        for ri, p in enumerate(aplic.get("Produtos",[]),1):
+            stp.append(("BACKGROUND",(1,ri),(1,ri),COR_TIPO.get(p.get("Tipo",""),COR_CINZA)))
+            stp.append(("BACKGROUND",(0,ri),(0,ri),COR_CINZA if ri%2 else COR_BRANCO))
+        tp.setStyle(TableStyle(stp))
+
+        ass = [[P(f"<b>Operador:</b> {aplic.get('Operador','_________________________')}",8),
+                P("<b>Inicio:</b> ____/____/______ ___:___ h",8),
+                P("<b>Assinatura:</b> _______________________",8)]]
+        ta = Table(ass, colWidths=[5.5*cm,5.5*cm,7.5*cm])
+        ta.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f8fafc")),
+            ("GRID",(0,0),(-1,-1),0.3,COR_BORDA),("TOPPADDING",(0,0),(-1,-1),5),
+            ("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),8)]))
+
+        story.append(KeepTogether([tc,tp,ta,Spacer(1,5*mm)]))
+
+    story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
+    story.append(Spacer(1,2*mm))
+    story.append(P(f"IAAgro - Inteligencia Agricola de Precisao | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Uso interno",
+                   7,False,COR_SUB,TA_CENTER))
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
 def calcular_calcario_por_ph(ph, area):
     """
     Calagem pelo método SMP (CQFS RS/SC 2016) ou pH em água.
@@ -3369,15 +3491,30 @@ def score_solo(d, cultura="Soja"):
     return score, classe, alertas
 
 
-def baixar_estoque(nome_insumo, quantidade_usada):
+def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
+    """
+    Dá baixa no estoque convertendo unidades automaticamente.
+    Estoque sempre em L ou kg. Aplicação pode ser mL/ha, g/ha, etc.
+    """
+    def converter_para_base(qtd, unid):
+        """Converte para a unidade base: L ou kg."""
+        unid = (unid or "").lower().replace(" ", "")
+        if "ml" in unid:     return qtd / 1000  # mL → L
+        if "g/ha" in unid or unid == "g":   return qtd / 1000  # g → kg
+        if "mg" in unid:     return qtd / 1_000_000
+        return qtd  # já em L ou kg
+
+    qtd_convertida = converter_para_base(quantidade_usada, unidade_usada)
+
     for item in st.session_state.estoque:
         if item["Insumo"] == nome_insumo:
-            if item["Quantidade"] >= quantidade_usada:
-                item["Quantidade"] -= quantidade_usada
-                item["Valor Total R$"] = item["Quantidade"] * item["Valor Unitário R$"]
-                return True, "Baixa realizada com sucesso."
-            return False, "Estoque insuficiente."
-    return False, "Insumo não encontrado."
+            estoque_atual = float(item.get("Quantidade", 0))
+            if estoque_atual >= qtd_convertida:
+                item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
+                item["Valor Total R$"] = item["Quantidade"] * item.get("Valor Unitário R$", 0)
+                return True, f"Baixa de {qtd_convertida:.3f} realizada."
+            return False, f"Estoque insuficiente: tem {estoque_atual:.3f}, precisa {qtd_convertida:.3f}"
+    return False, "Insumo não encontrado no estoque."
 
 
 # ─────────────────────────────────────────────
@@ -6173,9 +6310,13 @@ if menu == "📦 Operacional":
         col_h1, col_h2, col_h3 = st.columns(3)
         with col_h1:
             estadio_sel = st.selectbox("📅 Estádio fenológico", ESTADIOS, key="sel_estadio_aplic")
-            nome_aplic  = st.text_input("Nome da aplicação",
-                                         value=estadio_sel if estadio_sel != "📋 Outro" else "",
-                                         key="txt_nome_aplic")
+            # Nome automático conforme estádio — só pede digitação se "Outro"
+            if estadio_sel == "📋 Outro":
+                nome_aplic = st.text_input("Nome da aplicação", placeholder="Ex: Aplicação especial",
+                                            key="txt_nome_aplic")
+            else:
+                nome_aplic = estadio_sel
+                st.info(f"📋 Nome: **{nome_aplic}**")
         with col_h2:
             data_aplic = st.date_input("Data", key="dat_data_aplic")
             area_aplic = st.number_input("Área (ha)", min_value=0.0,
@@ -6239,7 +6380,7 @@ if menu == "📦 Operacional":
                 if p["Dose por ha"] <= 0: error_box(f"Dose zero: {p['Produto']}."); erro = True
             if not erro:
                 for p in produtos_aplic:
-                    s, m = baixar_estoque(p["Produto"], p["Total usado"])
+                    s, m = baixar_estoque(p["Produto"], p["Total usado"], p.get("Unidade","L/ha"))
                     if not s: error_box(f"{p['Produto']}: {m}"); erro = True
             if not erro:
                 st.session_state.aplicacoes.append({
@@ -6266,6 +6407,26 @@ if menu == "📦 Operacional":
 
         st.divider()
         st.subheader("📋 Histórico de Aplicações")
+
+        # Botão PDF de programação
+        if st.session_state.aplicacoes:
+            _d = st.session_state.dados
+            _pdf_bytes = gerar_pdf_programacao_aplicacoes(
+                aplicacoes   = st.session_state.aplicacoes,
+                fazenda      = _d.get("fazenda",""),
+                talhao       = _d.get("talhao",""),
+                cultura      = cultura_limpa(_d.get("cultura","")),
+                area_ha      = _d.get("area",0),
+                operador     = _d.get("operador",""),
+            )
+            st.download_button(
+                label="📄 Baixar Programação de Aplicações (PDF)",
+                data=_pdf_bytes,
+                file_name=f"programacao_aplicacoes_{datetime.now().strftime('%d%m%Y')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="btn_download_pdf_aplic"
+            )
         if len(st.session_state.aplicacoes) == 0:
             info_box("Nenhuma aplicação registrada ainda.")
         else:
@@ -6305,7 +6466,7 @@ if menu == "📦 Operacional":
                                           key=f"btn_confirmar_aplic_{idx_a}", use_container_width=True):
                             _erro_baixa = False
                             for p in _prods:
-                                s, m = baixar_estoque(p["Produto"], p.get("Total usado", 0))
+                                s, m = baixar_estoque(p["Produto"], p.get("Total usado", 0), p.get("Unidade","L/ha"))
                                 if not s:
                                     st.warning(f"⚠️ {p['Produto']}: {m}")
                                     _erro_baixa = True
