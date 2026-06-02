@@ -6030,7 +6030,13 @@ if menu == "📦 Operacional":
             cultura    = st.selectbox("Cultura", get_culturas() + ["Ambos"], key="cultura_estoque")
             litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
             dose_ha    = st.number_input("Dose por hectare (kg/L)", min_value=0.0, value=0.0, key="dose_ha_estoque")
-            capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
+            capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0,
+                                                   value=int(st.session_state.dados.get("cap_tanque_salva", 2000)),
+                                                   key="tanque_estoque",
+                                                   help="💾 Salvo automaticamente")
+            if capacidade_tanque != st.session_state.dados.get("cap_tanque_salva", 2000) and capacidade_tanque > 0:
+                st.session_state.dados["cap_tanque_salva"] = capacidade_tanque
+                salvar_dados_iaagro()
         with col2:
             quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0, key="num_quantidade_em_e_4611")
             unidade     = st.selectbox("Unidade do estoque", ["kg","litros","ton","sacos","galões","unidades"], key="sel_unidade_do_esto_4612")
@@ -6177,7 +6183,16 @@ if menu == "📦 Operacional":
                                           key="num_area_aplic")
         with col_h3:
             calda_lha  = st.number_input("Volume calda (L/ha)", min_value=0.0, value=100.0, key="num_calda_lha")
-            cap_tanque = st.number_input("Capacidade tanque (L)", min_value=0.0, value=3000.0, key="num_cap_tanque")
+            # Carrega capacidade salva ou usa padrão 3000L
+            _cap_salva = st.session_state.dados.get("cap_tanque_salva", 3000.0)
+            cap_tanque = st.number_input("Capacidade tanque (L)", min_value=0.0,
+                                          value=float(_cap_salva), key="num_cap_tanque",
+                                          help="💾 Salvo automaticamente para próximas aplicações")
+            # Salva automaticamente quando muda
+            if cap_tanque != _cap_salva and cap_tanque > 0:
+                st.session_state.dados["cap_tanque_salva"] = cap_tanque
+                salvar_dados_iaagro()
+                st.caption(f"✅ Tanque de {cap_tanque:.0f}L salvo!")
 
         area_por_tanque = round(cap_tanque / calda_lha, 2) if calda_lha > 0 else 0
         n_tanques       = round(area_aplic / area_por_tanque, 2) if area_por_tanque > 0 else 0
@@ -6259,6 +6274,60 @@ if menu == "📦 Operacional":
                       "🫘 R3 – R4 (Granação)":7,"🫘 R5 – R6":8,"🌾 Pré-colheita":9}
             aplicacoes_ordenadas = sorted(st.session_state.aplicacoes,
                 key=lambda x: _ordem.get(x.get("Estádio", x.get("Aplicação","")), 99))
+
+            for idx_a, aplic in enumerate(aplicacoes_ordenadas):
+                _status = aplic.get("Status", "pendente")
+                _cor_card = "#14532d" if _status == "aplicado" else "#1e3a5f"
+                _badge    = "✅ Aplicado" if _status == "aplicado" else "⏳ Pendente"
+
+                with st.expander(f"{aplic.get('Estádio','') or aplic.get('Aplicação','')} — {aplic.get('Data','')} | {_badge}", expanded=False):
+                    col_i1, col_i2 = st.columns(2)
+                    col_i1.markdown(f"**Área:** {aplic.get('Área aplicada ha',0)} ha")
+                    col_i1.markdown(f"**Calda:** {aplic.get('Volume calda L/ha',0)} L/ha")
+                    col_i1.markdown(f"**Tanques:** {aplic.get('Número tanques',0):.1f}")
+                    col_i2.markdown(f"**Operador:** {aplic.get('Operador','—')}")
+                    col_i2.markdown(f"**Pulverizador:** {aplic.get('Pulverizador','—')}")
+                    col_i2.markdown(f"**Clima:** {aplic.get('Clima aplicação','—')}")
+
+                    # Produtos
+                    st.markdown("**🧪 Produtos:**")
+                    _prods = aplic.get("Produtos", [])
+                    for p in _prods:
+                        st.markdown(f"- **{p.get('Produto','')}** ({p.get('Tipo','')}) — "
+                                    f"{p.get('Dose por ha',0)} {p.get('Unidade','')} | "
+                                    f"Total: {p.get('Total usado',0)} {p.get('Unidade','').replace('/ha','')}")
+
+                    col_b1, col_b2 = st.columns(2)
+
+                    # Botão confirmar aplicação e dar baixa no estoque
+                    if _status != "aplicado":
+                        if col_b1.button("✅ Confirmar Aplicação (dá baixa no estoque)",
+                                          key=f"btn_confirmar_aplic_{idx_a}", use_container_width=True):
+                            _erro_baixa = False
+                            for p in _prods:
+                                s, m = baixar_estoque(p["Produto"], p.get("Total usado", 0))
+                                if not s:
+                                    st.warning(f"⚠️ {p['Produto']}: {m}")
+                                    _erro_baixa = True
+                            # Marca como aplicado
+                            _idx_orig = st.session_state.aplicacoes.index(aplic)
+                            st.session_state.aplicacoes[_idx_orig]["Status"] = "aplicado"
+                            salvar_dados_iaagro()
+                            if not _erro_baixa:
+                                success_box(f"✅ Aplicação confirmada! Estoque atualizado.")
+                            else:
+                                success_box("Aplicação marcada. Verifique o estoque manualmente.")
+                            st.rerun()
+                    else:
+                        col_b1.success("✅ Já confirmada e baixa dada no estoque")
+
+                    # Botão excluir
+                    if col_b2.button("🗑️ Excluir", key=f"apagar_app_{idx_a}", use_container_width=True):
+                        _idx_orig = st.session_state.aplicacoes.index(aplic)
+                        st.session_state.aplicacoes.pop(_idx_orig)
+                        salvar_dados_iaagro()
+                        st.rerun()
+
   with _sub_op[2]:
     st.header("⏱️ Controle de Prazo de Carência e Reentrada")
     st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
