@@ -6929,6 +6929,185 @@ if menu == "💰 Financeiro":
             st.bar_chart(df_lucro.set_index("Safra")["Lucro"])
 
 
+
+# ─────────────────────────────────────────────
+# MENU: RELATÓRIO FINAL
+# ─────────────────────────────────────────────
+elif menu == "📄 Relatório Final":
+    st.header("📄 Relatório Final da Propriedade")
+
+    if not st.session_state.areas:
+        warning_box("Cadastre pelo menos uma área para gerar o relatório.")
+    else:
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
+        border-left:5px solid #22c55e;margin-bottom:12px;'>
+        <b style='color:#22c55e;'>📋 Relatório completo da propriedade</b><br>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        Gera um PDF profissional com análise de solo, recomendações de adubação,
+        histórico de produtividade e resumo da propriedade.
+        </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        _areas_rel = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Cultura','?')})"
+                      for a in st.session_state.areas]
+        _sel_rel   = st.selectbox("📍 Área para o relatório", _areas_rel, key="sel_area_relatorio")
+        _id_rel    = _sel_rel.split(" — ")[0]
+        _area_rel  = next((a for a in st.session_state.areas if a.get("ID") == _id_rel), {})
+        _dados_rel = _area_rel.get("Dados", _area_rel.get("dados", {})) or {}
+
+        col_r1, col_r2 = st.columns(2)
+        nome_produtor = col_r1.text_input("Nome do produtor",
+                                           value=st.session_state.get("usuario_atual",""),
+                                           key="rel_produtor")
+        municipio = col_r2.text_input("Município/UF",
+                                       value=_dados_rel.get("cidade",""), key="rel_municipio")
+
+        if st.button("📄 Gerar Relatório Final (PDF)", key="btn_gerar_relatorio", use_container_width=True):
+            try:
+                from reportlab.lib.pagesizes import A4
+                from reportlab.lib import colors as rl_colors
+                from reportlab.lib.units import cm
+                from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                                 Table, TableStyle, HRFlowable)
+                from reportlab.lib.styles import ParagraphStyle
+                from reportlab.lib.enums import TA_CENTER, TA_LEFT
+                from io import BytesIO
+
+                buf_r = BytesIO()
+                doc_r = SimpleDocTemplate(buf_r, pagesize=A4,
+                                          rightMargin=2*cm, leftMargin=2*cm,
+                                          topMargin=2*cm, bottomMargin=2*cm)
+                el_r = []
+                COR_V = rl_colors.HexColor("#16a34a")
+                COR_E = rl_colors.HexColor("#14532d")
+                COR_A = rl_colors.HexColor("#1e3a5f")
+                COR_C = rl_colors.HexColor("#f1f5f9")
+                COR_B = rl_colors.HexColor("#e2e8f0")
+                COR_W = rl_colors.white
+
+                def Pr(txt, size=9, bold=False, color=None, align=TA_LEFT):
+                    fn = "Helvetica-Bold" if bold else "Helvetica"
+                    c  = color or rl_colors.HexColor("#0f172a")
+                    return Paragraph(txt, ParagraphStyle("p", fontName=fn, fontSize=size,
+                                                          textColor=c, alignment=align, leading=size+3))
+
+                # Cabeçalho
+                if os.path.exists("IAAgrologo.jpeg"):
+                    from reportlab.platypus import Image as RLImage
+                    el_r.append(RLImage("IAAgrologo.jpeg", width=3*cm, height=1.5*cm))
+                el_r.append(Pr("RELATÓRIO AGRONÔMICO COMPLETO", 16, True, COR_E, TA_CENTER))
+                el_r.append(Pr("IAAgro — Inteligência Agrícola de Precisão", 9, False, COR_A, TA_CENTER))
+                el_r.append(Pr(f"Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 8, False, rl_colors.HexColor("#64748b"), TA_CENTER))
+                el_r.append(Spacer(1, 0.3*cm))
+                el_r.append(HRFlowable(width="100%", thickness=2, color=COR_V))
+                el_r.append(Spacer(1, 0.3*cm))
+
+                # Info propriedade
+                t_inf = Table([[
+                    Pr(f"<b>Produtor:</b> {nome_produtor or '—'}"),
+                    Pr(f"<b>Município:</b> {municipio or '—'}"),
+                    Pr(f"<b>Talhão:</b> {_area_rel.get('Talhão','—')}"),
+                    Pr(f"<b>Área:</b> {_area_rel.get('Hectares',0)} ha"),
+                ]], colWidths=[4*cm,3.5*cm,4*cm,4*cm])
+                t_inf.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),COR_C),
+                    ("GRID",(0,0),(-1,-1),0.4,COR_B),("TOPPADDING",(0,0),(-1,-1),5),
+                    ("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),6)]))
+                el_r.append(t_inf); el_r.append(Spacer(1,0.4*cm))
+
+                # Análise de solo
+                if "ph" in _dados_rel:
+                    el_r.append(Pr("ANÁLISE DE SOLO", 11, True, COR_E))
+                    el_r.append(HRFlowable(width="100%", thickness=1, color=COR_V))
+                    el_r.append(Spacer(1,0.2*cm))
+                    rows_s = [[Pr("<b>Parâmetro</b>",9,True,COR_W),Pr("<b>Valor</b>",9,True,COR_W),
+                               Pr("<b>Unidade</b>",9,True,COR_W),Pr("<b>Referência</b>",9,True,COR_W)],
+                              [Pr("pH"),Pr(str(_dados_rel.get("ph","—"))),Pr("adimensional"),Pr("5.5–6.5")],
+                              [Pr("Fósforo P"),Pr(str(_dados_rel.get("fosforo","—"))),Pr("mg/dm3"),Pr(">12")],
+                              [Pr("Potássio K"),Pr(str(_dados_rel.get("potassio","—"))),Pr("mg/dm3"),Pr(">80")],
+                              [Pr("Cálcio Ca"),Pr(str(_dados_rel.get("calcio","—"))),Pr("cmolc/dm3"),Pr(">2.0")],
+                              [Pr("Magnésio Mg"),Pr(str(_dados_rel.get("magnesio","—"))),Pr("cmolc/dm3"),Pr(">0.5")],
+                              [Pr("Mat. Orgânica"),Pr(str(_dados_rel.get("materia_organica","—"))),Pr("g/dm3"),Pr(">25")],
+                              [Pr("CTC"),Pr(str(_dados_rel.get("ctc","—"))),Pr("cmolc/dm3"),Pr(">8.0")],
+                              [Pr("V%"),Pr(str(_dados_rel.get("v_percent","—"))),Pr("%"),Pr(">60%")],
+                              [Pr("Argila"),Pr(str(_dados_rel.get("argila","—"))),Pr("%"),Pr("—")]]
+                    ts = Table(rows_s, colWidths=[4*cm,3*cm,3.5*cm,5*cm])
+                    ts.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),COR_E),("TEXTCOLOR",(0,0),(-1,0),COR_W),
+                        ("ROWBACKGROUNDS",(0,1),(-1,-1),[COR_C,COR_W]),("GRID",(0,0),(-1,-1),0.4,COR_B),
+                        ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),
+                        ("LEFTPADDING",(0,0),(-1,-1),6)]))
+                    el_r.append(ts); el_r.append(Spacer(1,0.4*cm))
+
+                    # Recomendação NPK
+                    el_r.append(Pr("RECOMENDAÇÃO DE ADUBAÇÃO (EMBRAPA/CQFS 2016)", 11, True, COR_E))
+                    el_r.append(HRFlowable(width="100%", thickness=1, color=COR_V))
+                    el_r.append(Spacer(1,0.2*cm))
+                    try:
+                        _cult = cultura_limpa(_area_rel.get("Cultura","Soja"))
+                        _prd  = _area_rel.get("Produtividade",50)
+                        _aha  = _area_rel.get("Hectares",1)
+                        n,p,k = recomendacao_npk(_cult,_prd,
+                            _dados_rel.get("fosforo",10),_dados_rel.get("potassio",100),
+                            _dados_rel.get("materia_organica",2.5),
+                            _dados_rel.get("argila",35),_dados_rel.get("ph",5.5))
+                        rows_n = [[Pr("<b>Nutriente</b>",9,True,COR_W),Pr("<b>kg/ha</b>",9,True,COR_W),
+                                   Pr("<b>Total área</b>",9,True,COR_W),Pr("<b>Fonte sugerida</b>",9,True,COR_W)],
+                                  [Pr("Nitrogênio (N)"),Pr(f"{n:.0f}"),Pr(f"{n*_aha:.0f} kg"),Pr("Ureia / MAP")],
+                                  [Pr("Fósforo (P2O5)"),Pr(f"{p:.0f}"),Pr(f"{p*_aha:.0f} kg"),Pr("MAP / TSP")],
+                                  [Pr("Potássio (K2O)"),Pr(f"{k:.0f}"),Pr(f"{k*_aha:.0f} kg"),Pr("KCl")]]
+                        tn = Table(rows_n, colWidths=[4*cm,3*cm,4*cm,4.5*cm])
+                        tn.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),COR_E),("TEXTCOLOR",(0,0),(-1,0),COR_W),
+                            ("ROWBACKGROUNDS",(0,1),(-1,-1),[COR_C,COR_W]),("GRID",(0,0),(-1,-1),0.4,COR_B),
+                            ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),
+                            ("LEFTPADDING",(0,0),(-1,-1),6)]))
+                        el_r.append(tn)
+                    except Exception:
+                        el_r.append(Pr("Dados insuficientes para recomendação.",9))
+                    el_r.append(Spacer(1,0.4*cm))
+
+                # Histórico
+                _hist = [h for h in st.session_state.historico_produtividade
+                         if h.get("Área","").startswith(_id_rel)]
+                if _hist:
+                    el_r.append(Pr("HISTÓRICO DE PRODUTIVIDADE", 11, True, COR_E))
+                    el_r.append(HRFlowable(width="100%", thickness=1, color=COR_V))
+                    el_r.append(Spacer(1,0.2*cm))
+                    rows_h = [[Pr("<b>Safra</b>",9,True,COR_W),Pr("<b>Cultura</b>",9,True,COR_W),
+                               Pr("<b>Produtividade</b>",9,True,COR_W),Pr("<b>Custo R$/ha</b>",9,True,COR_W)]]
+                    for h in _hist:
+                        rows_h.append([Pr(h.get("Safra","—"),9),
+                                       Pr(cultura_limpa(h.get("Cultura","—")),9),
+                                       Pr(f"{h.get('Produtividade',0):.1f} sc/ha",9),
+                                       Pr(f"R$ {h.get('Custo',0):.2f}",9)])
+                    th_ = Table(rows_h, colWidths=[3*cm,4*cm,4*cm,4.5*cm])
+                    th_.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),COR_E),("TEXTCOLOR",(0,0),(-1,0),COR_W),
+                        ("ROWBACKGROUNDS",(0,1),(-1,-1),[COR_C,COR_W]),("GRID",(0,0),(-1,-1),0.4,COR_B),
+                        ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),
+                        ("LEFTPADDING",(0,0),(-1,-1),6)]))
+                    el_r.append(th_); el_r.append(Spacer(1,0.4*cm))
+
+                # Rodapé
+                el_r.append(HRFlowable(width="100%", thickness=1, color=COR_V))
+                el_r.append(Pr(f"IAAgro — {datetime.now().strftime('%d/%m/%Y %H:%M')} | Uso interno",
+                               7, False, rl_colors.HexColor("#64748b"), TA_CENTER))
+                doc_r.build(el_r)
+                buf_r.seek(0)
+                st.session_state["_pdf_relatorio"] = buf_r.read()
+                st.success("✅ Relatório gerado com sucesso!")
+            except Exception as e:
+                st.error(f"Erro: {e}")
+
+        if st.session_state.get("_pdf_relatorio"):
+            st.download_button(
+                label     = "⬇️ Baixar Relatório PDF",
+                data      = st.session_state["_pdf_relatorio"],
+                file_name = f"relatorio_iaagro_{datetime.now().strftime('%d%m%Y')}.pdf",
+                mime      = "application/pdf",
+                use_container_width = True,
+                key       = "btn_download_relatorio"
+            )
+
 # ─────────────────────────────────────────────
 # MENU: CALENDÁRIO AGRÍCOLA
 # ─────────────────────────────────────────────
