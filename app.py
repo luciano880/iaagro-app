@@ -6411,36 +6411,31 @@ if menu == "📦 Operacional":
         # Botão PDF de programação
         if st.session_state.aplicacoes:
             _d = st.session_state.dados
+            if st.button("📄 Gerar PDF — Programação de Aplicações",
+                         key="btn_gerar_pdf_aplic", use_container_width=True):
+                try:
+                    _pdf_bytes = gerar_pdf_programacao_aplicacoes(
+                        aplicacoes = st.session_state.aplicacoes,
+                        fazenda    = _d.get("fazenda",""),
+                        talhao     = _d.get("talhao",""),
+                        cultura    = cultura_limpa(_d.get("cultura","")),
+                        area_ha    = _d.get("area",0),
+                        operador   = _d.get("operador",""),
+                    )
+                    st.session_state["_pdf_aplic"] = _pdf_bytes
+                    st.success("✅ PDF gerado! Clique em Baixar abaixo.")
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
 
-            @st.cache_data(show_spinner=False)
-            def _gerar_pdf_cache(_aplic_json, _fazenda, _talhao, _cultura, _area, _operador):
-                import json
-                return gerar_pdf_programacao_aplicacoes(
-                    aplicacoes = json.loads(_aplic_json),
-                    fazenda    = _fazenda,
-                    talhao     = _talhao,
-                    cultura    = _cultura,
-                    area_ha    = _area,
-                    operador   = _operador,
+            if st.session_state.get("_pdf_aplic"):
+                st.download_button(
+                    label       = "⬇️ Baixar PDF",
+                    data        = st.session_state["_pdf_aplic"],
+                    file_name   = f"programacao_aplicacoes_{datetime.now().strftime('%d%m%Y')}.pdf",
+                    mime        = "application/pdf",
+                    use_container_width = True,
+                    key         = "btn_download_pdf_aplic"
                 )
-
-            import json as _json
-            _pdf_bytes = _gerar_pdf_cache(
-                _json.dumps(st.session_state.aplicacoes, ensure_ascii=False, default=str),
-                _d.get("fazenda",""),
-                _d.get("talhao",""),
-                cultura_limpa(_d.get("cultura","")),
-                _d.get("area",0),
-                _d.get("operador",""),
-            )
-            st.download_button(
-                label       = "📄 Baixar Programação de Aplicações (PDF)",
-                data        = _pdf_bytes,
-                file_name   = f"programacao_aplicacoes_{datetime.now().strftime('%d%m%Y')}.pdf",
-                mime        = "application/pdf",
-                use_container_width = True,
-                key         = "btn_download_pdf_aplic"
-            )
         if len(st.session_state.aplicacoes) == 0:
             info_box("Nenhuma aplicação registrada ainda.")
         else:
