@@ -5851,23 +5851,25 @@ if menu == "🧪 Solo & Adubação":
                 if _hist_sb:
                     import pandas as _pd_fert
                     df_hist_fert = _pd_fert.DataFrame(_hist_sb)
-                elif _area_fert.get("Dados",{}).get("ph") or _area_fert.get("dados",{}).get("ph"):
-                    # Fallback: monta de uma entrada a partir dos dados atuais
-                    _d = _area_fert.get("Dados") or _area_fert.get("dados") or {}
+                else:
+                    # Busca dados de solo: tenta Dados, dados, ou session_state.dados se for a área ativa
+                    _d = (_area_fert.get("Dados") or _area_fert.get("dados") or {})
+                    if not _d.get("ph") and st.session_state.dados.get("id_area") == id_area_fert:
+                        _d = st.session_state.dados
                     if _d and _d.get("ph"):
                         import pandas as _pd_fert
                         df_hist_fert = _pd_fert.DataFrame([{
-                            "data":             "Atual",
-                            "ph":               float(_d.get("ph",0)),
-                            "fosforo":          float(_d.get("fosforo",0)),
-                            "potassio":         float(_d.get("potassio",0)),
-                            "materia_organica": float(_d.get("materia_organica",0)),
-                            "calcio":           float(_d.get("calcio",0)),
-                            "magnesio":         float(_d.get("magnesio",0)),
-                            "aluminio":         float(_d.get("aluminio",0)),
-                            "nota":             float(_d.get("nota_solo", _area_fert.get("Nota Solo",0)) or 0),
-                            "score":            float(_d.get("score_solo", _area_fert.get("score_solo",0)) or 0),
-                            "classe":           _d.get("classe_solo", _area_fert.get("classe_solo","—")),
+                            "data":             "Análise atual",
+                            "ph":               float(_d.get("ph", 0)),
+                            "fosforo":          float(_d.get("fosforo", 0)),
+                            "potassio":         float(_d.get("potassio", 0)),
+                            "materia_organica": float(_d.get("materia_organica", 0)),
+                            "calcio":           float(_d.get("calcio", 0)),
+                            "magnesio":         float(_d.get("magnesio", 0)),
+                            "aluminio":         float(_d.get("aluminio", 0)),
+                            "nota":             float(_d.get("nota_solo", _area_fert.get("Nota Solo", 0)) or 0),
+                            "score":            float(_d.get("score_solo", _area_fert.get("score_solo", 0)) or 0),
+                            "classe":           _d.get("classe_solo", _area_fert.get("classe_solo", "—")),
                         }])
 
         if df_hist_fert.empty:
@@ -5909,7 +5911,10 @@ if menu == "🧪 Solo & Adubação":
                 if "materia_organica" in df_hist_fert.columns:
                     st.line_chart(df_hist_fert.set_index("data")[["materia_organica"]])
 
-
+# ─────────────────────────────────────────────
+# MENU: CUSTOS
+# ─────────────────────────────────────────────
+elif menu == "💰 Financeiro":
     _sub_fin = st.tabs([
         "🌾 Custos da Lavoura",
         "🔧 Custos Complementares",
