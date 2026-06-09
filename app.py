@@ -7822,22 +7822,42 @@ if menu == "🌍 Inteligência":
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         if st.button("🔄 Atualizar Cotações CEPEA", key="btn_buscar_precos",
                      use_container_width=True, type="primary"):
-            with st.spinner("🌐 Buscando cotações CEPEA via IA..."):
-                try:
-                    _precos_novos = buscar_precos_cepea_ia()
-                    if isinstance(_precos_novos, dict) and _precos_novos:
-                        st.session_state["_precos_mercado"] = _precos_novos
-                        st.session_state["_precos_ts"] = datetime.now().strftime("%H:%M:%S")
-                        st.rerun()
-                    else:
-                        _err = st.session_state.get("_cepea_erro","Sem resposta da IA")
-                        st.warning(f"⚠️ {_err}")
-                except Exception as _ex:
-                    st.error(f"Erro: {_ex}")
+            # Verifica cache — bloqueia se atualizou há menos de 5 minutos
+            _ts_ultimo = st.session_state.get("_precos_ts_unix", 0)
+            _seg_desde = datetime.now().timestamp() - _ts_ultimo
+            if _ts_ultimo > 0 and _seg_desde < 300:
+                _resta = int(300 - _seg_desde)
+                st.warning(f"⏳ Aguarde {_resta}s para atualizar novamente (limite de requisições).")
+            else:
+                with st.spinner("🌐 Buscando cotações CEPEA via IA..."):
+                    try:
+                        _precos_novos = buscar_precos_cepea_ia()
+                        if isinstance(_precos_novos, dict) and _precos_novos:
+                            st.session_state["_precos_mercado"]  = _precos_novos
+                            st.session_state["_precos_ts"]       = datetime.now().strftime("%H:%M:%S")
+                            st.session_state["_precos_ts_unix"]  = datetime.now().timestamp()
+                            st.session_state["_cepea_erro"]      = ""
+                            st.rerun()
+                        else:
+                            _err = st.session_state.get("_cepea_erro","Sem resposta")
+                            if "429" in str(_err) or "rate_limit" in str(_err).lower():
+                                st.error("⏱️ Muitas requisições — aguarde alguns minutos e tente novamente.")
+                            elif "API key" in str(_err):
+                                st.error("🔑 API Key não configurada. Verifique os Secrets do Streamlit Cloud.")
+                            else:
+                                st.warning(f"⚠️ Não foi possível buscar preços: {_err}")
+                    except Exception as _ex:
+                        st.error(f"Erro: {_ex}")
         if st.session_state.get("_precos_ts"):
             st.caption(f"⏱️ Última atualização: {st.session_state['_precos_ts']}")
-        if st.session_state.get("_cepea_erro"):
-            st.caption(f"ℹ️ {st.session_state['_cepea_erro']}")
+        _err_show = st.session_state.get("_cepea_erro","")
+        if _err_show:
+            if "429" in str(_err_show) or "rate_limit" in str(_err_show).lower():
+                st.caption("⏱️ Rate limit atingido — aguarde alguns minutos")
+            elif "API key" in str(_err_show):
+                st.caption("🔑 Verifique a ANTHROPIC_API_KEY nos Secrets")
+            elif _err_show:
+                st.caption(f"ℹ️ {str(_err_show)[:80]}")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
