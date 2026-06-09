@@ -889,11 +889,21 @@ def buscar_precos_cepea_ia():
 
         hoje_str = datetime.now().strftime("%d/%m/%Y")
         prompt = (
-            f"Data: {hoje_str}. "
-            "Pesquise o preço atual de commodities agrícolas no Brasil (CEPEA/ESALQ ou mercado físico). "
-            "Responda APENAS com este JSON (sem texto, sem markdown, sem explicação):\n"
-            '{"soja":118.0,"milho":50.0,"trigo":69.0,"cafe":1850.0,"algodao":122.0,"boi":325.0,"arroz":74.0,"fonte":"CEPEA","data":"'
-            + datetime.now().strftime("%d/%m/%Y") + '"}'
+            f"Hoje é {hoje_str}. "
+            "Pesquise AGORA no site do CEPEA (cepea.esalq.usp.br) ou em fontes de mercado físico brasileiro "
+            "os preços FÍSICOS das seguintes commodities NO BRASIL (NÃO use preços da CBOT/Bolsa de Chicago): "
+            "- Soja: preço físico PR/SC em R$/sc 60kg (referência COAMO, Paranaguá ou CEPEA/ESALQ Paraná) "
+            "- Milho: preço físico PR/SC em R$/sc 60kg (referência Maringá, Cascavel ou CEPEA Paraná) "
+            "- Trigo: preço físico PR em R$/sc 60kg (referência CEPEA/ESALQ) "
+            "- Café: preço físico SP em R$/sc 60kg (referência CEPEA/ESALQ São Paulo) "
+            "- Algodão: preço físico MT em R$/@ (referência CEPEA) "
+            "- Boi Gordo: preço físico SP em R$/@ (referência CEPEA/ESALQ São Paulo) "
+            "- Arroz: preço físico RS em R$/sc 50kg (referência CEPEA) "
+            "IMPORTANTE: os preços físicos brasileiros típicos são: soja ~110-130 R$/sc, milho ~50-65 R$/sc, trigo ~65-80 R$/sc. "
+            "Se não encontrar, use a melhor estimativa do mercado físico brasileiro disponível. "
+            "Responda SOMENTE com JSON válido, sem texto extra, sem markdown:\n"
+            '{"soja":0.0,"milho":0.0,"trigo":0.0,"cafe":0.0,"algodao":0.0,"boi":0.0,"arroz":0.0,'
+            '"fonte":"CEPEA/ESALQ","mercado":"fisico_br","data":"' + hoje_str + '"}'
         )
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -7876,7 +7886,24 @@ if menu == "🌍 Inteligência":
 
         _fonte_p = _precos_cache.get("fonte","CEPEA")
         _data_p  = _precos_cache.get("data","")
-        st.caption(f"📊 Fonte: {_fonte_p}{f' — {_data_p}' if _data_p else ''}")
+        _mercado = _precos_cache.get("mercado","")
+        _is_fisico = "fisico" in str(_mercado).lower() or "cepea" in str(_fonte_p).lower()
+
+        if _is_fisico:
+            st.markdown(f"""
+            <div style='background:#14532d;border-radius:8px;padding:8px 14px;
+            border-left:4px solid #22c55e;margin:6px 0;'>
+            <span style='color:#6ee7b7;font-size:12px;font-weight:700;'>
+            ✅ Mercado Físico Brasileiro — {_fonte_p}{f' — {_data_p}' if _data_p else ''}
+            </span></div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div style='background:#78350f;border-radius:8px;padding:8px 14px;
+            border-left:4px solid #f59e0b;margin:6px 0;'>
+            <span style='color:#fde68a;font-size:12px;font-weight:700;'>
+            ⚠️ Atenção: preços podem ser referência CBOT/Bolsa convertidos para R$ — não representa o mercado físico local.
+            Fonte: {_fonte_p}{f' — {_data_p}' if _data_p else ''}
+            </span></div>""", unsafe_allow_html=True)
 
     else:
         st.markdown("""
