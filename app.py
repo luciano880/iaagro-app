@@ -1817,30 +1817,37 @@ if (_SUPABASE_ATIVO
 
 dados_carregados = {}
 
-# Se autologin funcionou, dados já estão no session_state — não sobrescreve
-# Se não, tenta Supabase com token existente, senão arquivo local
-if not st.session_state.get("areas"):
-    if _dados_supabase:
-        dados_carregados = _dados_supabase
-    elif (_SUPABASE_ATIVO
-          and st.session_state.get("sb_token")
-          and st.session_state.get("sb_user_id")):
-        try:
-            dados_carregados = sb_carregar(
-                _SB_URL, _SB_KEY,
-                st.session_state.sb_token,
-                st.session_state.sb_user_id
-            ) or {}
-        except Exception:
-            dados_carregados = carregar_dados_iaagro()
-    else:
+# Carrega do Supabase sempre que logado — garante dados frescos incluindo contratos_troca
+if _dados_supabase:
+    dados_carregados = _dados_supabase
+elif (_SUPABASE_ATIVO
+      and st.session_state.get("sb_token")
+      and st.session_state.get("sb_user_id")):
+    try:
+        dados_carregados = sb_carregar(
+            _SB_URL, _SB_KEY,
+            st.session_state.sb_token,
+            st.session_state.sb_user_id
+        ) or {}
+    except Exception:
         dados_carregados = carregar_dados_iaagro()
+else:
+    dados_carregados = carregar_dados_iaagro()
+
+# Aplica cada campo: se session_state vazio E supabase tem dados, carrega do supabase
+def _carregar_campo(campo, default):
+    _local = st.session_state.get(campo)
+    _remoto = dados_carregados.get(campo, default)
+    if not _local and _remoto:
+        setattr(st.session_state, campo, _remoto)
+    elif campo not in st.session_state:
+        setattr(st.session_state, campo, default)
 
 if "dados" not in st.session_state:
     _d = dados_carregados.get("dados", {})
-    st.session_state.dados   = _d if isinstance(_d, dict) else {}
+    st.session_state.dados = _d if isinstance(_d, dict) else {}
 if "areas" not in st.session_state or (not st.session_state.areas and dados_carregados.get("areas")):
-    st.session_state.areas   = dados_carregados.get("areas", [])
+    st.session_state.areas = dados_carregados.get("areas", [])
 if "contador_area" not in st.session_state:
     _areas_dc = st.session_state.get("areas", dados_carregados.get("areas", []))
     st.session_state.contador_area = max(
@@ -1882,8 +1889,6 @@ if "contratos_troca" not in st.session_state or (not st.session_state.get("contr
     st.session_state.contratos_troca = dados_carregados.get("contratos_troca", [])
 if "fluxo_caixa" not in st.session_state or (not st.session_state.get("fluxo_caixa") and dados_carregados.get("fluxo_caixa")):
     st.session_state.fluxo_caixa = dados_carregados.get("fluxo_caixa", [])
-if "corretivos_aplicados" not in st.session_state or (not st.session_state.get("corretivos_aplicados") and dados_carregados.get("corretivos_aplicados")):
-    st.session_state.corretivos_aplicados = dados_carregados.get("corretivos_aplicados", [])
 if "harvest_historico" not in st.session_state or (not st.session_state.get("harvest_historico") and dados_carregados.get("harvest_historico")):
     st.session_state.harvest_historico = dados_carregados.get("harvest_historico", [])
 if "receituarios" not in st.session_state or (not st.session_state.get("receituarios") and dados_carregados.get("receituarios")):
@@ -5928,8 +5933,9 @@ if menu == "💰 Financeiro":
   with _sub_fin[2]:
     st.header("🤝 Contratos de Troca (Barter)")
 
+    # Garante que contratos_troca está inicializado (sem sobrescrever dados carregados)
     if "contratos_troca" not in st.session_state:
-        st.session_state.contratos_troca = []
+        st.session_state.contratos_troca = dados_carregados.get("contratos_troca", [])
 
     st.subheader("➕ Novo Contrato")
     col_t1, col_t2, col_t3 = st.columns(3)
@@ -5959,24 +5965,45 @@ if menu == "💰 Financeiro":
 
     if st.session_state.contratos_troca:
         st.divider()
-        import pandas as pd
-        df_t = pd.DataFrame(st.session_state.contratos_troca)
-        _total_t = df_t["Valor total R$"].sum()
+        import pandas as _pd_b
+        df_t = _pd_b.DataFrame(st.session_state.contratos_troca)
+        _total_t  = df_t["Valor total R$"].sum()
         _total_sc = df_t["Sacas"].sum()
+
         col_rt1, col_rt2 = st.columns(2)
         col_rt1.metric("💰 Valor total em contratos", f"R$ {_total_t:,.2f}")
         col_rt2.metric("🌾 Total de sacas", f"{_total_sc:,.0f} sc")
-        st.dataframe(df_t, use_container_width=True, hide_index=True)
 
-        with st.expander("🗑️ Excluir contrato"):
-            _opts_t = [f"{r.get('Data entrega','')} — {r.get('Grão','')} {r.get('Sacas',0):.0f}sc — R${r.get('Valor total R$',0):,.2f}"
-                       for r in st.session_state.contratos_troca]
-            _del_t = st.selectbox("Selecione", _opts_t, key="sel_del_troca")
-            if st.button("🗑️ Excluir", key="btn_del_troca"):
-                _idx_t = _opts_t.index(_del_t)
+        st.markdown("#### 📋 Contratos registrados")
+        for _idx_t, _cont in enumerate(st.session_state.contratos_troca):
+            _col_c1, _col_c2, _col_c3, _col_c4, _col_c5 = st.columns([2,1.5,1.5,2,0.8])
+            _col_c1.markdown(
+                f"<div style='background:#0f3460;border-radius:8px;padding:8px 12px;"
+                f"border-left:3px solid #22c55e;'>"
+                f"<span style='color:#6ee7b7;font-weight:700;font-size:13px;'>🌾 {_cont.get('Grão','')}</span>"
+                f"</div>", unsafe_allow_html=True)
+            _col_c2.markdown(
+                f"<div style='background:#0f3460;border-radius:8px;padding:8px 12px;'>"
+                f"<span style='color:#94a3b8;font-size:11px;'>SACAS</span><br>"
+                f"<span style='color:#f1f5f9;font-weight:700;'>{_cont.get('Sacas',0):.0f} sc</span>"
+                f"</div>", unsafe_allow_html=True)
+            _col_c3.markdown(
+                f"<div style='background:#0f3460;border-radius:8px;padding:8px 12px;'>"
+                f"<span style='color:#94a3b8;font-size:11px;'>R$/SC</span><br>"
+                f"<span style='color:#f1f5f9;font-weight:700;'>R$ {_cont.get('Valor/sc R$',0):.2f}</span>"
+                f"</div>", unsafe_allow_html=True)
+            _col_c4.markdown(
+                f"<div style='background:#14532d;border-radius:8px;padding:8px 12px;'>"
+                f"<span style='color:#6ee7b7;font-size:11px;'>TOTAL</span><br>"
+                f"<span style='color:#22c55e;font-weight:800;'>R$ {_cont.get('Valor total R$',0):,.2f}</span><br>"
+                f"<span style='color:#64748b;font-size:10px;'>📅 {_cont.get('Data entrega','')}</span>"
+                f"</div>", unsafe_allow_html=True)
+            if _col_c5.button("🗑️", key=f"del_barter_{_idx_t}",
+                               help=f"Excluir contrato {_cont.get('Grão','')}"):
                 st.session_state.contratos_troca.pop(_idx_t)
                 salvar_dados_iaagro()
                 st.rerun()
+            st.markdown("<div style='margin:4px 0;'></div>", unsafe_allow_html=True)
 
 # ── ABA 3: EVOLUÇÃO POR SAFRA ─────────────────────────────────────────────
 if menu == "💰 Financeiro":
@@ -6947,75 +6974,14 @@ if menu == "📦 Operacional":
                     </span>
                     </div>""", unsafe_allow_html=True)
 
-        # Tabela principal com botões de ação por linha
+        # Tabela principal
         _cols_exib = [c for c in ["Insumo","Categoria","Quantidade","Unidade",
                                    "Valor Unitário R$","Valor Total R$","Lote","Status"]
                       if c in _df_filtered.columns]
-
-        # Header da tabela
-        _hc = st.columns([3,2,1.2,0.8,1.2,1.2,1.5,1,1.2])
-        _headers = ["Produto","Categoria","Qtd","Un","R$/un","Total","Lote","Status",""]
-        for _hi, _hh in zip(_hc, _headers):
-            _hi.markdown(f"<span style='color:#6ee7b7;font-size:11px;font-weight:800;"
-                         f"letter-spacing:1px;'>{_hh}</span>", unsafe_allow_html=True)
-        st.markdown("<hr style='margin:4px 0;border-color:#1e4976;'>", unsafe_allow_html=True)
-
-        # Linhas com botão excluir
-        _itens_filtrados = []
-        for _it in st.session_state.estoque:
-            _nome_it = _it.get("Insumo","")
-            # Aplica filtros
-            if _filtro_cat != "Todas" and _it.get("Categoria","") != _filtro_cat:
-                continue
-            _qtd_it = float(_it.get("Quantidade",0))
-            _min_it = float(_it.get("Estoque Mínimo",5))
-            _status_it = "❌ Zerado" if _qtd_it <= 0 else ("⚠️ Baixo" if _qtd_it <= _min_it else "✅ OK")
-            if _filtro_status != "Todos" and _status_it != _filtro_status:
-                continue
-            if _busca_tabela and _busca_tabela.lower() not in _nome_it.lower():
-                continue
-            _itens_filtrados.append((_it, _status_it))
-
-        for _idx_it, (_it, _status_it) in enumerate(_itens_filtrados):
-            _nome_it = _it.get("Insumo","")
-            _qtd_it  = float(_it.get("Quantidade",0))
-            _cor_lin = "#7f1d1d" if _qtd_it <= 0 else ("#78350f" if _status_it == "⚠️ Baixo" else "#0f2d4a")
-            _borda_lin = "#ef4444" if _qtd_it <= 0 else ("#f59e0b" if _status_it == "⚠️ Baixo" else "#1e4976")
-
-            st.markdown(f"<div style='background:{_cor_lin};border-radius:8px;padding:2px 4px;"
-                        f"border-left:3px solid {_borda_lin};margin:2px 0;'>", unsafe_allow_html=True)
-            _rc = st.columns([3,2,1.2,0.8,1.2,1.2,1.5,1,1.2])
-            _rc[0].markdown(f"<span style='color:#f1f5f9;font-size:13px;font-weight:600;'>{_nome_it}</span>",
-                            unsafe_allow_html=True)
-            _rc[1].markdown(f"<span style='color:#94a3b8;font-size:12px;'>{_it.get('Categoria','')}</span>",
-                            unsafe_allow_html=True)
-            _rc[2].markdown(f"<span style='color:#f1f5f9;font-size:13px;font-weight:700;'>{_qtd_it:.2f}</span>",
-                            unsafe_allow_html=True)
-            _rc[3].markdown(f"<span style='color:#94a3b8;font-size:12px;'>{_it.get('Unidade','')}</span>",
-                            unsafe_allow_html=True)
-            _rc[4].markdown(f"<span style='color:#94a3b8;font-size:12px;'>R${_it.get('Valor Unitário R$',0):.2f}</span>",
-                            unsafe_allow_html=True)
-            _rc[5].markdown(f"<span style='color:#22c55e;font-size:12px;font-weight:700;'>R${_it.get('Valor Total R$',0):.2f}</span>",
-                            unsafe_allow_html=True)
-            _rc[6].markdown(f"<span style='color:#64748b;font-size:11px;'>{str(_it.get('Lote',''))[:12]}</span>",
-                            unsafe_allow_html=True)
-            _rc[7].markdown(f"<span style='font-size:11px;'>{_status_it}</span>",
-                            unsafe_allow_html=True)
-            # Botão excluir direto na linha
-            if _rc[8].button("🗑️", key=f"del_est_{_idx_it}_{_nome_it[:8]}",
-                              help=f"Excluir {_nome_it}"):
-                st.session_state.estoque = [i for i in st.session_state.estoque
-                                             if i["Insumo"] != _nome_it]
-                salvar_dados_iaagro()
-                st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        if not _itens_filtrados:
-            st.info("Nenhum produto encontrado com os filtros selecionados.")
+        st.dataframe(_df_filtered[_cols_exib], use_container_width=True, hide_index=True)
 
         # Editar quantidade manualmente
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("✏️ Ajustar quantidade / estoque mínimo"):
+        with st.expander("✏️ Ajustar quantidade / excluir produto"):
             _nomes_est = [i["Insumo"] for i in st.session_state.estoque]
             _prod_edit = st.selectbox("Produto", _nomes_est, key="sel_prod_edit_est")
             _item_edit = next((i for i in st.session_state.estoque if i["Insumo"] == _prod_edit), None)
