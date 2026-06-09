@@ -914,71 +914,126 @@ def buscar_precos_cepea_ia():
             },
             json={
                 "model":      "claude-sonnet-4-5",
-                "max_tokens": 500,
+                "max_tokens": 1000,
                 "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages":   [{"role": "user", "content": prompt}]
             },
             timeout=60
         )
-        if resp.status_code == 200:
-            blocos = resp.json().get("content", [])
-            texto  = "".join(b.get("text", "") for b in blocos if b.get("type") == "text")
-            texto  = texto.replace("```json", "").replace("```", "").strip()
-
-            # Tenta encontrar JSON em qualquer parte do texto
-            dados = None
-            # Procura por todos os { } no texto
-            idx = 0
-            while idx < len(texto):
-                inicio = texto.find("{", idx)
-                if inicio < 0:
-                    break
-                fim = texto.rfind("}", inicio) + 1
-                if fim <= inicio:
-                    break
-                try:
-                    candidato = json.loads(texto[inicio:fim])
-                    campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
-                    if all(isinstance(candidato.get(c, 0), (int, float)) and float(candidato.get(c, 0)) > 10 for c in campos):
-                        dados = candidato
-                        break
-                except Exception:
-                    pass  # falha silenciada — não crítico
-                idx = inicio + 1
-
-            if dados:
-                st.session_state["_cepea_erro"] = ""
-                return dados
-            else:
-                # Tenta extrair valores individualmente se modelo respondeu em texto
-                import re
-                valores = {}
-                mapa = {
-                    "soja":    r"soja[^0-9]*(\d+[.,]\d+)",
-                    "milho":   r"milho[^0-9]*(\d+[.,]\d+)",
-                    "trigo":   r"trigo[^0-9]*(\d+[.,]\d+)",
-                    "cafe":    r"caf[eé][^0-9]*(\d+[.,]\d+)",
-                    "algodao": r"algod[aã]o[^0-9]*(\d+[.,]\d+)",
-                    "boi":     r"boi[^0-9]*(\d+[.,]\d+)",
-                    "arroz":   r"arroz[^0-9]*(\d+[.,]\d+)",
-                }
-                for campo, pat in mapa.items():
-                    m = re.search(pat, texto.lower())
-                    if m:
-                        valores[campo] = float(m.group(1).replace(",", "."))
-
-                if len(valores) >= 5:
-                    for campo in ["soja","milho","trigo","cafe","algodao","boi","arroz"]:
-                        if campo not in valores:
-                            valores[campo] = 0.0
-                    valores["fonte"] = "CEPEA/ESALQ"
-                    valores["data"]  = datetime.now().strftime("%d/%m/%Y")
-                    st.session_state["_cepea_erro"] = ""
-                    return valores
-
-                st.session_state["_cepea_erro"] = f"JSON não encontrado: {texto[:60]}"
-        else:
+        if resp.status_code != 200:
             st.session_state["_cepea_erro"] = f"HTTP {resp.status_code}: {resp.text[:60]}"
+            return None
+
+        # Loop de tool_use — continua até end_turn
+        _msgs = [{"role": "user", "content": prompt}]
+        _resp_data = resp.json()
+        _max_iter = 4
+        _iter = 0
+        texto = ""
+
+        while _iter < _max_iter:
+            _iter += 1
+            _content = _resp_data.get("content", [])
+            _stop    = _resp_data.get("stop_reason", "end_turn")
+
+            # Coleta texto da resposta
+            for bloco in _content:
+                if bloco.get("type") == "text":
+                    texto += bloco.get("text", "")
+
+            if _stop == "end_turn":
+                break
+
+            if _stop == "tool_use":
+                # Adiciona resposta do assistant e resultado fake da tool
+                _msgs.append({"role": "assistant", "content": _content})
+                _tool_results = []
+                for bloco in _content:
+                    if bloco.get("type") == "tool_use":
+                        _tool_results.append({
+                            "type":        "tool_result",
+                            "tool_use_id": bloco["id"],
+                            "content":     "Busca realizada. Por favor retorne os preços encontrados em JSON."
+                        })
+                if _tool_results:
+                    _msgs.append({"role": "user", "content": _tool_results})
+                    _r2 = requests.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "Content-Type":      "application/json",
+                            "x-api-key":         api_key,
+                            "anthropic-version": "2023-06-01",
+                        },
+                        json={
+                            "model":    "claude-sonnet-4-5",
+                            "max_tokens": 1000,
+                            "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
+                            "messages": _msgs,
+                        },
+                        timeout=60
+                    )
+                    if _r2.status_code == 200:
+                        _resp_data = _r2.json()
+                    else:
+                        break
+                else:
+                    break
+            else:
+                break
+
+        texto = texto.replace("```json", "").replace("```", "").strip()
+        dados = None
+        # Procura JSON no texto
+        idx = 0
+        while idx < len(texto):
+            inicio = texto.find("{", idx)
+            if inicio < 0:
+                break
+            fim = texto.rfind("}", inicio) + 1
+            if fim <= inicio:
+                break
+            try:
+                candidato = json.loads(texto[inicio:fim])
+                campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
+                if all(isinstance(candidato.get(c, 0), (int, float)) and float(candidato.get(c, 0)) > 10 for c in campos):
+                    dados = candidato
+                    break
+            except Exception:
+                pass
+            idx = inicio + 1
+
+        if dados:
+            st.session_state["_cepea_erro"] = ""
+            return dados
+        else:
+            # Tenta extrair valores individualmente se modelo respondeu em texto
+            import re
+            valores = {}
+            mapa = {
+                "soja":    r"soja[^0-9]*(\d+[.,]\d+)",
+                "milho":   r"milho[^0-9]*(\d+[.,]\d+)",
+                "trigo":   r"trigo[^0-9]*(\d+[.,]\d+)",
+                "cafe":    r"caf[eé][^0-9]*(\d+[.,]\d+)",
+                "algodao": r"algod[aã]o[^0-9]*(\d+[.,]\d+)",
+                "boi":     r"boi[^0-9]*(\d+[.,]\d+)",
+                "arroz":   r"arroz[^0-9]*(\d+[.,]\d+)",
+            }
+            for campo, pat in mapa.items():
+                m = re.search(pat, texto.lower())
+                if m:
+                    valores[campo] = float(m.group(1).replace(",", "."))
+
+            if len(valores) >= 5:
+                for campo in ["soja","milho","trigo","cafe","algodao","boi","arroz"]:
+                    if campo not in valores:
+                        valores[campo] = 0.0
+                valores["fonte"] = "CEPEA/ESALQ"
+                valores["mercado"] = "fisico_br"
+                valores["data"]  = datetime.now().strftime("%d/%m/%Y")
+                st.session_state["_cepea_erro"] = ""
+                return valores
+
+            st.session_state["_cepea_erro"] = f"JSON não encontrado: {texto[:60]}"
     except Exception as e:
         st.session_state["_cepea_erro"] = f"Exceção: {str(e)[:80]}"
     return None
