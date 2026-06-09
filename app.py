@@ -7573,12 +7573,20 @@ if menu == "🌍 Inteligência":
     if st.session_state.get("_precos_ts"):
         st.caption(f"⏱️ Atualizado às {st.session_state['_precos_ts']}")
 
-    # Monta dólar
+    # Monta dólar — garante que é sempre float
+    try:
+        _dolar = float(_dolar) if _dolar else 0.0
+    except (TypeError, ValueError):
+        _dolar = 0.0
+
     if _dolar > 0:
         _dolar_str = f"R$ {_dolar:.4f}"
     else:
         # tenta pegar do cache de preços
-        _dolar = _precos_cache.get("dolar", 0.0) if isinstance(_precos_cache, dict) else 0.0
+        try:
+            _dolar = float(_precos_cache.get("dolar", 0.0)) if isinstance(_precos_cache, dict) else 0.0
+        except (TypeError, ValueError):
+            _dolar = 0.0
         _dolar_str = f"R$ {_dolar:.4f}" if _dolar > 0 else "Indisponível"
 
     # Cards de commodities
@@ -7595,7 +7603,7 @@ if menu == "🌍 Inteligência":
 
     if isinstance(_precos_cache, dict) and len(_precos_cache) > 2:
         # Injeta dólar separado
-        if _dolar > 0:
+        if isinstance(_dolar, (int, float)) and _dolar > 0:
             _precos_cache["dolar"] = _dolar
 
         cols_cards = st.columns(4)
