@@ -6947,14 +6947,75 @@ if menu == "📦 Operacional":
                     </span>
                     </div>""", unsafe_allow_html=True)
 
-        # Tabela principal
+        # Tabela principal com botões de ação por linha
         _cols_exib = [c for c in ["Insumo","Categoria","Quantidade","Unidade",
                                    "Valor Unitário R$","Valor Total R$","Lote","Status"]
                       if c in _df_filtered.columns]
-        st.dataframe(_df_filtered[_cols_exib], use_container_width=True, hide_index=True)
+
+        # Header da tabela
+        _hc = st.columns([3,2,1.2,0.8,1.2,1.2,1.5,1,1.2])
+        _headers = ["Produto","Categoria","Qtd","Un","R$/un","Total","Lote","Status",""]
+        for _hi, _hh in zip(_hc, _headers):
+            _hi.markdown(f"<span style='color:#6ee7b7;font-size:11px;font-weight:800;"
+                         f"letter-spacing:1px;'>{_hh}</span>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:4px 0;border-color:#1e4976;'>", unsafe_allow_html=True)
+
+        # Linhas com botão excluir
+        _itens_filtrados = []
+        for _it in st.session_state.estoque:
+            _nome_it = _it.get("Insumo","")
+            # Aplica filtros
+            if _filtro_cat != "Todas" and _it.get("Categoria","") != _filtro_cat:
+                continue
+            _qtd_it = float(_it.get("Quantidade",0))
+            _min_it = float(_it.get("Estoque Mínimo",5))
+            _status_it = "❌ Zerado" if _qtd_it <= 0 else ("⚠️ Baixo" if _qtd_it <= _min_it else "✅ OK")
+            if _filtro_status != "Todos" and _status_it != _filtro_status:
+                continue
+            if _busca_tabela and _busca_tabela.lower() not in _nome_it.lower():
+                continue
+            _itens_filtrados.append((_it, _status_it))
+
+        for _idx_it, (_it, _status_it) in enumerate(_itens_filtrados):
+            _nome_it = _it.get("Insumo","")
+            _qtd_it  = float(_it.get("Quantidade",0))
+            _cor_lin = "#7f1d1d" if _qtd_it <= 0 else ("#78350f" if _status_it == "⚠️ Baixo" else "#0f2d4a")
+            _borda_lin = "#ef4444" if _qtd_it <= 0 else ("#f59e0b" if _status_it == "⚠️ Baixo" else "#1e4976")
+
+            st.markdown(f"<div style='background:{_cor_lin};border-radius:8px;padding:2px 4px;"
+                        f"border-left:3px solid {_borda_lin};margin:2px 0;'>", unsafe_allow_html=True)
+            _rc = st.columns([3,2,1.2,0.8,1.2,1.2,1.5,1,1.2])
+            _rc[0].markdown(f"<span style='color:#f1f5f9;font-size:13px;font-weight:600;'>{_nome_it}</span>",
+                            unsafe_allow_html=True)
+            _rc[1].markdown(f"<span style='color:#94a3b8;font-size:12px;'>{_it.get('Categoria','')}</span>",
+                            unsafe_allow_html=True)
+            _rc[2].markdown(f"<span style='color:#f1f5f9;font-size:13px;font-weight:700;'>{_qtd_it:.2f}</span>",
+                            unsafe_allow_html=True)
+            _rc[3].markdown(f"<span style='color:#94a3b8;font-size:12px;'>{_it.get('Unidade','')}</span>",
+                            unsafe_allow_html=True)
+            _rc[4].markdown(f"<span style='color:#94a3b8;font-size:12px;'>R${_it.get('Valor Unitário R$',0):.2f}</span>",
+                            unsafe_allow_html=True)
+            _rc[5].markdown(f"<span style='color:#22c55e;font-size:12px;font-weight:700;'>R${_it.get('Valor Total R$',0):.2f}</span>",
+                            unsafe_allow_html=True)
+            _rc[6].markdown(f"<span style='color:#64748b;font-size:11px;'>{str(_it.get('Lote',''))[:12]}</span>",
+                            unsafe_allow_html=True)
+            _rc[7].markdown(f"<span style='font-size:11px;'>{_status_it}</span>",
+                            unsafe_allow_html=True)
+            # Botão excluir direto na linha
+            if _rc[8].button("🗑️", key=f"del_est_{_idx_it}_{_nome_it[:8]}",
+                              help=f"Excluir {_nome_it}"):
+                st.session_state.estoque = [i for i in st.session_state.estoque
+                                             if i["Insumo"] != _nome_it]
+                salvar_dados_iaagro()
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        if not _itens_filtrados:
+            st.info("Nenhum produto encontrado com os filtros selecionados.")
 
         # Editar quantidade manualmente
-        with st.expander("✏️ Ajustar quantidade / excluir produto"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("✏️ Ajustar quantidade / estoque mínimo"):
             _nomes_est = [i["Insumo"] for i in st.session_state.estoque]
             _prod_edit = st.selectbox("Produto", _nomes_est, key="sel_prod_edit_est")
             _item_edit = next((i for i in st.session_state.estoque if i["Insumo"] == _prod_edit), None)
