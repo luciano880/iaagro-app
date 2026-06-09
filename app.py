@@ -972,7 +972,6 @@ def buscar_precos_cepea_ia():
     except Exception as e:
         st.session_state["_cepea_erro"] = f"Exceção: {str(e)[:80]}"
     return None
-    return None
 
 
 def converter_para_reais(precos_cbot, dolar):
