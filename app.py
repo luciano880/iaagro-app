@@ -5621,6 +5621,115 @@ if menu == "🧪 Solo & Adubação":
             success_box("Recomendação de adubação salva com sucesso.")
 
 # ─────────────────────────────────────────────
+# MENU: OCR LAUDO DE SOLO
+# ─────────────────────────────────────────────
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[3]:
+    st.header("📄 OCR — Leitura Automática de Laudo de Solo")
+    st.markdown("""
+    <div style='background:#0f3460;border-radius:12px;padding:14px 18px;
+    border-left:5px solid #22c55e;margin-bottom:16px;'>
+    <b style='color:#22c55e;'>📌 Como funciona</b><br>
+    <span style='color:#f1f5f9;font-size:13px;'>
+    Faça upload do laudo de solo em PDF ou imagem (JPG/PNG).
+    O sistema extrai automaticamente os valores e preenche a Análise de Solo.
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_ocr1, col_ocr2 = st.columns(2)
+    with col_ocr1:
+        arquivo_ocr = st.file_uploader(
+            "📎 Upload do laudo (PDF, JPG, PNG)",
+            type=["pdf","jpg","jpeg","png"],
+            key="upl_ocr_laudo"
+        )
+    with col_ocr2:
+        _idioma_ocr = st.selectbox("Idioma do laudo", ["por","eng"], key="sel_idioma_ocr",
+                                    help="por = Português | eng = Inglês")
+        _auto_preencher = st.checkbox("Preencher análise automaticamente", value=True,
+                                       key="chk_auto_preencher")
+
+    if arquivo_ocr:
+        texto_ocr = ""
+        with st.spinner("🔍 Lendo laudo..."):
+            try:
+                if arquivo_ocr.type == "application/pdf":
+                    texto_ocr = extrair_texto_pdf(arquivo_ocr)
+                else:
+                    from PIL import Image as _PIL
+                    _img = _PIL.open(arquivo_ocr)
+                    texto_ocr = pytesseract.image_to_string(_img, lang=_idioma_ocr)
+            except Exception as _e:
+                st.error(f"❌ Erro ao ler arquivo: {_e}")
+
+        if texto_ocr and texto_ocr.strip():
+            with st.expander("📋 Texto extraído (bruto)", expanded=False):
+                st.text(texto_ocr[:3000])
+
+            # Parseia valores
+            _vals = parsear_laudo_ocr(texto_ocr)
+            _encontrados = {k: v for k, v in _vals.items() if v is not None}
+
+            if _encontrados:
+                st.success(f"✅ {len(_encontrados)} parâmetros encontrados no laudo!")
+
+                # Monta tabela de preview
+                _preview_rows = []
+                _labels = {
+                    "ph": "pH", "fosforo": "Fósforo P (mg/dm³)",
+                    "potassio": "Potássio K (mg/dm³)", "calcio": "Cálcio Ca (cmolc/dm³)",
+                    "magnesio": "Magnésio Mg (cmolc/dm³)", "aluminio": "Alumínio Al (cmolc/dm³)",
+                    "materia_organica": "Matéria Orgânica (%)", "ctc": "CTC (cmolc/dm³)",
+                    "enxofre": "Enxofre S (mg/dm³)", "boro": "Boro B",
+                    "zinco": "Zinco Zn", "manganes": "Manganês Mn",
+                    "cobre": "Cobre Cu",
+                }
+                for k, v in _encontrados.items():
+                    _preview_rows.append({
+                        "Parâmetro": _labels.get(k, k),
+                        "Valor extraído": v,
+                        "Chave": k,
+                    })
+
+                import pandas as _pd
+                st.dataframe(_pd.DataFrame(_preview_rows)[["Parâmetro","Valor extraído"]],
+                             use_container_width=True, hide_index=True)
+
+                if _auto_preencher:
+                    if st.button("✅ Aplicar valores na Análise de Solo", key="btn_aplicar_ocr",
+                                 use_container_width=True, type="primary"):
+                        for k, v in _encontrados.items():
+                            try:
+                                st.session_state.dados[k] = float(v)
+                            except Exception:
+                                pass
+                        atualizar_area_atual()
+                        salvar_dados_iaagro()
+                        success_box("✅ Valores aplicados! Vá para a aba 🧪 Análise de Solo para conferir.")
+                else:
+                    st.info("ℹ️ Marque 'Preencher análise automaticamente' para aplicar os valores.")
+            else:
+                st.warning("⚠️ Nenhum parâmetro reconhecido automaticamente. Verifique o texto extraído acima e preencha manualmente.")
+
+        elif arquivo_ocr:
+            st.error("❌ Não foi possível extrair texto do arquivo. Verifique se o PDF não é escaneado sem OCR ou tente uma imagem JPG/PNG do laudo.")
+
+    # Dicas de uso
+    st.divider()
+    st.markdown("""
+    <div style='background:#0f3460;border-radius:10px;padding:12px 16px;border:1px solid #334155;'>
+    <b style='color:#6ee7b7;'>💡 Dicas para melhor resultado</b><br>
+    <span style='color:#cbd5e1;font-size:13px;'>
+    • <b>PDF digital</b> (gerado por computador) tem melhor precisão que PDF escaneado<br>
+    • Para laudos escaneados, tire foto com boa iluminação e envie como JPG<br>
+    • Laudos IAC/Embrapa e CQFS RS/SC são reconhecidos automaticamente<br>
+    • Após aplicar, confira os valores na aba <b>🧪 Análise de Solo</b>
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
 # MENU: CUSTOS
 # ─────────────────────────────────────────────
 elif menu == "💰 Financeiro":
