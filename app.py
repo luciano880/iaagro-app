@@ -53,6 +53,23 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 
 # ─────────────────────────────────────────────
+# SEGMENTOS E CULTURAS — definidos no topo para uso em tela_login
+# ─────────────────────────────────────────────
+SEGMENTOS_INFO = {
+    "🌾 Grãos":        {"desc":"Soja, Milho, Trigo e outros cereais",   "cor":"#14532d","borda":"#22c55e"},
+    "🌿 Horticultura": {"desc":"Hortaliças, verduras e legumes",         "cor":"#14532d","borda":"#84cc16"},
+    "🎯 Fruticultura": {"desc":"Frutas tropicais, uva, café e outras",  "cor":"#7f1d1d","borda":"#f87171"},
+    "🌲 Silvicultura": {"desc":"Eucalipto, Pinus e reflorestamento",     "cor":"#1e3a5f","borda":"#38bdf8"},
+}
+
+CULTURAS_POR_SEGMENTO = {
+    "🌾 Grãos":        ["🌱 Soja","🌽 Milho","🌾 Trigo","🌱 Feijão","🌻 Canola","🌿 Aveia","🍚 Arroz","🌾 Sorgo","🌾 Cevada","🌻 Girassol"],
+    "🌿 Horticultura": ["🍅 Tomate","🥔 Batata","🧅 Cebola","🧄 Alho","🍠 Mandioca","🥬 Alface","🥕 Cenoura","🥦 Brócolis","🥒 Pepino","🫑 Pimentão"],
+    "🎯 Fruticultura": ["🍊 Laranja","🍌 Banana","🍇 Uva","🍎 Maçã","🥭 Manga","🥑 Abacate","🍋 Limão","🍑 Pêssego","🍂 Caqui","☕ Café"],
+    "🌲 Silvicultura": ["🌳 Eucalipto","🌲 Pinus","🌴 Teca","🌿 Paricá","🌲 Cedro"],
+}
+
+# ─────────────────────────────────────────────
 # CORREÇÃO 1: função sem recursão infinita
 # ─────────────────────────────────────────────
 def adicionar_logo_fundo():
@@ -3602,20 +3619,8 @@ if st.session_state.area_selecionada:
 
 # ─────────────────────────────────────────────
 # MAPEAMENTO GLOBAL DE CULTURAS POR SEGMENTO
+# (definição completa no topo do arquivo — aqui apenas mapas derivados)
 # ─────────────────────────────────────────────
-SEGMENTOS_INFO = {
-    "🌾 Grãos":        {"desc":"Soja, Milho, Trigo e outros cereais",   "cor":"#14532d","borda":"#22c55e"},
-    "🌿 Horticultura": {"desc":"Hortaliças, verduras e legumes",         "cor":"#14532d","borda":"#84cc16"},
-    "🎯 Fruticultura": {"desc":"Frutas tropicais, uva, café e outras",  "cor":"#7f1d1d","borda":"#f87171"},
-    "🌲 Silvicultura": {"desc":"Eucalipto, Pinus e reflorestamento",     "cor":"#1e3a5f","borda":"#38bdf8"},
-}
-
-CULTURAS_POR_SEGMENTO = {
-    "🌾 Grãos":        ["🌱 Soja","🌽 Milho","🌾 Trigo","🌱 Feijão","🌻 Canola","🌿 Aveia","🍚 Arroz","🌾 Sorgo","🌾 Cevada","🌻 Girassol"],
-    "🌿 Horticultura": ["🍅 Tomate","🥔 Batata","🧅 Cebola","🧄 Alho","🍠 Mandioca","🥬 Alface","🥕 Cenoura","🥦 Brócolis","🥒 Pepino","🫑 Pimentão"],
-    "🎯 Fruticultura": ["🍊 Laranja","🍌 Banana","🍇 Uva","🍎 Maçã","🥭 Manga","🥑 Abacate","🍋 Limão","🍑 Pêssego","🍂 Caqui","☕ Café"],
-    "🌲 Silvicultura": ["🌳 Eucalipto","🌲 Pinus","🌴 Teca","🌿 Paricá","🌲 Cedro"],
-}
 
 # Mapa reverso para extrair nome sem ícone (para lógicas internas)
 CULTURA_NOME_LIMPO = {c: c.split(" ",1)[1] if " " in c else c
