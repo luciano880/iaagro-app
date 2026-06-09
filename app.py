@@ -6631,107 +6631,365 @@ elif menu == "📦 Operacional":
 
 if menu == "📦 Operacional":
   with _sub_op[0]:
-    st.header("📦 Estoque de Insumos")
+    # ── HEADER com KPIs ──────────────────────────────────────────────────────
+    import pandas as _pd_est
 
-    # ── Busca por catálogo ──────────────────────────────
-    st.subheader("🔍 Buscar produto pelo nome")
-    _busca_prod = st.text_input("Digite o nome ou ingrediente ativo",
-                                 placeholder="Ex: Roundup, glifosato, Fox...",
-                                 key="txt_busca_produto_catalogo")
-    _resultados = buscar_produtos_catalogo(_busca_prod) if _busca_prod else []
+    _est = st.session_state.estoque
+    _df_est = _pd_est.DataFrame(_est) if _est else _pd_est.DataFrame()
 
-    if _busca_prod and _resultados:
-        _opcoes_cat = [f"{p['nome']} ({p['fab']}) — {p['cat']}" for p in _resultados[:20]]
-        _sel_cat    = st.selectbox("Selecione o produto", _opcoes_cat, key="sel_prod_catalogo")
-        _prod_sel   = _resultados[_opcoes_cat.index(_sel_cat)]
-        st.caption(f"🧪 IA: **{_prod_sel['ia']}** | Categoria: **{_prod_sel['cat']}** | Fab: **{_prod_sel['fab']}**")
-        col_cat1, col_cat2, col_cat3 = st.columns(3)
-        _qtd_cat   = col_cat1.number_input("Quantidade", min_value=0.0, key="num_qtd_catalogo")
-        _unid_cat  = col_cat2.selectbox("Unidade", ["L","kg","mL","g","sc","un"], key="sel_unid_catalogo")
-        _emb_cat   = col_cat2.selectbox("Embalagem",
-                        ["1 L","5 L","10 L","20 L","50 L","100 L",
-                         "1 kg","5 kg","10 kg","20 kg","50 kg",
-                         "200 mL","500 mL","1000 mL","100 g","500 g","1000 g","Outro"],
-                        key="sel_emb_catalogo")
-        _preco_cat = col_cat3.number_input("Preço unitário R$", min_value=0.0, key="num_preco_catalogo")
-        _lote_cat  = col_cat3.text_input("Lote/Validade", key="txt_lote_catalogo")
-        if st.button("💾 Adicionar ao Estoque", key="btn_add_catalogo", use_container_width=True):
-            if _qtd_cat > 0:
-                st.session_state.estoque.append({
-                    "Insumo": _prod_sel["nome"], "Categoria": _prod_sel["cat"],
-                    "Fabricante": _prod_sel["fab"], "Ingrediente Ativo": _prod_sel["ia"],
-                    "Quantidade": _qtd_cat, "Unidade": _unid_cat, "Embalagem": _emb_cat,
-                    "Valor Unitário R$": _preco_cat,
-                    "Valor Total R$": round(_qtd_cat * _preco_cat, 2),
-                    "Lote": _lote_cat,
-                })
-                salvar_dados_iaagro()
-                success_box(f"✅ {_prod_sel['nome']} — {_qtd_cat} {_unid_cat} adicionado!")
-                st.rerun()
-            else:
-                warning_box("Informe a quantidade.")
-    elif _busca_prod:
-        st.info("Produto não encontrado no catálogo. Use o cadastro manual abaixo.")
+    _total_itens   = len(_df_est)
+    _valor_total   = float(_df_est["Valor Total R$"].sum()) if not _df_est.empty and "Valor Total R$" in _df_est else 0
+    _criticos      = sum(1 for i in _est if float(i.get("Quantidade",0)) <= 0)
+    _baixos        = sum(1 for i in _est if 0 < float(i.get("Quantidade",0)) <= 5)
 
-    with st.expander("➕ Cadastrar Manualmente (produto não listado)"):
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>📦 Estoque de Insumos</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Controle de defensivos, fertilizantes e insumos agrícolas
+    </p></div>
+    """, unsafe_allow_html=True)
+
+    # KPIs
+    _kc1, _kc2, _kc3, _kc4 = st.columns(4)
+    _kc1.markdown(f"""<div style='background:#0f3460;border-radius:12px;padding:14px;text-align:center;border:1px solid #1e4976;'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>📦 TOTAL ITENS</div>
+    <div style='color:#6ee7b7;font-size:28px;font-weight:800;'>{_total_itens}</div>
+    </div>""", unsafe_allow_html=True)
+    _kc2.markdown(f"""<div style='background:#0f3460;border-radius:12px;padding:14px;text-align:center;border:1px solid #1e4976;'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>💰 VALOR TOTAL</div>
+    <div style='color:#22c55e;font-size:22px;font-weight:800;'>R$ {_valor_total:,.0f}</div>
+    </div>""", unsafe_allow_html=True)
+    _kc3.markdown(f"""<div style='background:{"#7f1d1d" if _criticos>0 else "#0f3460"};border-radius:12px;padding:14px;text-align:center;border:1px solid {"#ef4444" if _criticos>0 else "#1e4976"};'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>❌ ZERADOS</div>
+    <div style='color:#{"ef4444" if _criticos>0 else "6ee7b7"};font-size:28px;font-weight:800;'>{_criticos}</div>
+    </div>""", unsafe_allow_html=True)
+    _kc4.markdown(f"""<div style='background:{"#78350f" if _baixos>0 else "#0f3460"};border-radius:12px;padding:14px;text-align:center;border:1px solid {"#f59e0b" if _baixos>0 else "#1e4976"};'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>⚠️ ESTOQUE BAIXO</div>
+    <div style='color:#{"f59e0b" if _baixos>0 else "6ee7b7"};font-size:28px;font-weight:800;'>{_baixos}</div>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── ABAS DE ENTRADA ──────────────────────────────────────────────────────
+    _tab_cat, _tab_manual, _tab_nfe = st.tabs([
+        "🔍 Buscar Catálogo", "✏️ Cadastro Manual", "📄 Importar NF-e XML"
+    ])
+
+    # ── TAB 1: CATÁLOGO ───────────────────────────────────────────────────────
+    with _tab_cat:
+        st.markdown("#### 🔍 Buscar produto no catálogo")
+        _busca_prod = st.text_input("Digite o nome ou ingrediente ativo",
+                                     placeholder="Ex: Roundup, glifosato, Fox...",
+                                     key="txt_busca_produto_catalogo")
+        _resultados = buscar_produtos_catalogo(_busca_prod) if _busca_prod else []
+
+        if _busca_prod and _resultados:
+            _opcoes_cat = [f"{p['nome']} ({p['fab']}) — {p['cat']}" for p in _resultados[:20]]
+            _sel_cat    = st.selectbox("Selecione o produto", _opcoes_cat, key="sel_prod_catalogo")
+            _prod_sel   = _resultados[_opcoes_cat.index(_sel_cat)]
+            st.markdown(f"""
+            <div style='background:#0f3460;border-radius:10px;padding:10px 14px;
+            border-left:4px solid #22c55e;margin:8px 0;'>
+            🧪 <b style='color:#6ee7b7;'>IA:</b> {_prod_sel['ia']} &nbsp;|&nbsp;
+            <b style='color:#6ee7b7;'>Cat:</b> {_prod_sel['cat']} &nbsp;|&nbsp;
+            <b style='color:#6ee7b7;'>Fab:</b> {_prod_sel['fab']}
+            </div>""", unsafe_allow_html=True)
+
+            col_cat1, col_cat2, col_cat3 = st.columns(3)
+            _qtd_cat   = col_cat1.number_input("Quantidade", min_value=0.0, key="num_qtd_catalogo")
+            _unid_cat  = col_cat2.selectbox("Unidade", ["L","kg","mL","g","sc","un"], key="sel_unid_catalogo")
+            _emb_cat   = col_cat2.selectbox("Embalagem",
+                            ["1 L","5 L","10 L","20 L","50 L","100 L",
+                             "1 kg","5 kg","10 kg","20 kg","50 kg",
+                             "200 mL","500 mL","1000 mL","100 g","500 g","1000 g","Outro"],
+                            key="sel_emb_catalogo")
+            _preco_cat = col_cat3.number_input("Preço unitário R$", min_value=0.0, key="num_preco_catalogo")
+            _lote_cat  = col_cat3.text_input("Lote/Validade", key="txt_lote_catalogo")
+            _estmin_cat = col_cat1.number_input("Estoque mínimo", min_value=0.0, value=5.0, key="num_estmin_cat")
+
+            if st.button("✅ Adicionar ao Estoque", key="btn_add_catalogo",
+                         use_container_width=True, type="primary"):
+                if _qtd_cat > 0:
+                    # Verifica se já existe — soma quantidade
+                    _existe = next((i for i in st.session_state.estoque
+                                    if i["Insumo"] == _prod_sel["nome"]), None)
+                    if _existe:
+                        _existe["Quantidade"] = round(float(_existe.get("Quantidade",0)) + _qtd_cat, 4)
+                        _existe["Valor Total R$"] = round(_existe["Quantidade"] * _preco_cat, 2)
+                        if _preco_cat > 0:
+                            _existe["Valor Unitário R$"] = _preco_cat
+                        success_box(f"✅ Saldo atualizado: {_prod_sel['nome']} → {_existe['Quantidade']} {_unid_cat}")
+                    else:
+                        st.session_state.estoque.append({
+                            "Insumo": _prod_sel["nome"], "Categoria": _prod_sel["cat"],
+                            "Fabricante": _prod_sel["fab"], "Ingrediente Ativo": _prod_sel["ia"],
+                            "Quantidade": _qtd_cat, "Unidade": _unid_cat, "Embalagem": _emb_cat,
+                            "Valor Unitário R$": _preco_cat,
+                            "Valor Total R$": round(_qtd_cat * _preco_cat, 2),
+                            "Lote": _lote_cat, "Estoque Mínimo": _estmin_cat,
+                        })
+                        success_box(f"✅ {_prod_sel['nome']} — {_qtd_cat} {_unid_cat} adicionado!")
+                    salvar_dados_iaagro()
+                    st.rerun()
+                else:
+                    warning_box("Informe a quantidade.")
+        elif _busca_prod:
+            st.info("Produto não encontrado no catálogo. Use a aba **✏️ Cadastro Manual**.")
+
+    # ── TAB 2: MANUAL ────────────────────────────────────────────────────────
+    with _tab_manual:
+        st.markdown("#### ✏️ Cadastrar produto manualmente")
         col_e1, col_e2, col_e3 = st.columns(3)
-        nome_usar  = col_e1.text_input("Nome do insumo", key="txt_nome_usar")
-        categ_usar = col_e2.selectbox("Categoria", ["Herbicida","Fungicida","Inseticida","Adjuvante",
-                                       "Óleo","Fertilizante foliar","Semente","Calcário","Gesso","Outro"],
-                                       key="sel_cat_usar")
-        qtd_usar   = col_e3.number_input("Quantidade", min_value=0.0, key="num_qtd_usar")
+        nome_usar   = col_e1.text_input("Nome do insumo *", key="txt_nome_usar")
+        categ_usar  = col_e2.selectbox("Categoria", ["Herbicida","Fungicida","Inseticida","Adjuvante",
+                                        "Óleo","Fertilizante foliar","Semente","Calcário","Gesso",
+                                        "Fertilizante sólido","Micronutriente","Inoculante","Outro"],
+                                        key="sel_cat_usar")
+        qtd_usar    = col_e3.number_input("Quantidade *", min_value=0.0, key="num_qtd_usar")
         col_e4, col_e5, col_e6 = st.columns(3)
-        unid_usar  = col_e4.selectbox("Unidade", ["L","kg","mL","g","sc","un"], key="sel_unid_usar")
-        emb_usar   = col_e5.selectbox("Embalagem",
+        unid_usar   = col_e4.selectbox("Unidade", ["L","kg","mL","g","sc","un"], key="sel_unid_usar")
+        emb_usar    = col_e5.selectbox("Embalagem",
                         ["1 L","5 L","10 L","20 L","50 L","100 L",
                          "1 kg","5 kg","10 kg","20 kg","50 kg",
                          "200 mL","500 mL","1000 mL","Outro"],
                         key="sel_emb_usar")
-        preco_usar = col_e6.number_input("Preço unitário R$", min_value=0.0, key="num_preco_usar")
-        ia_usar    = col_e4.text_input("Ingrediente ativo", key="txt_ia_usar")
-        lote_usar  = col_e5.text_input("Lote/Validade", key="txt_lote_usar")
-        if st.button("💾 Adicionar ao Estoque", key="btn_add_estoque", use_container_width=True):
+        preco_usar  = col_e6.number_input("Preço unitário R$", min_value=0.0, key="num_preco_usar")
+        col_e7, col_e8, col_e9 = st.columns(3)
+        ia_usar     = col_e7.text_input("Ingrediente ativo", key="txt_ia_usar")
+        lote_usar   = col_e8.text_input("Lote/Validade", key="txt_lote_usar")
+        estmin_usar = col_e9.number_input("Estoque mínimo", min_value=0.0, value=5.0, key="num_estmin_usar")
+
+        if st.button("✅ Adicionar ao Estoque", key="btn_add_estoque",
+                     use_container_width=True, type="primary"):
             if nome_usar.strip() and qtd_usar > 0:
-                st.session_state.estoque.append({
-                    "Insumo": nome_usar, "Categoria": categ_usar,
-                    "Ingrediente Ativo": ia_usar, "Quantidade": qtd_usar,
-                    "Unidade": unid_usar, "Embalagem": emb_usar,
-                    "Valor Unitário R$": preco_usar,
-                    "Valor Total R$": round(qtd_usar * preco_usar, 2),
-                    "Lote": lote_usar,
-                })
+                _existe = next((i for i in st.session_state.estoque
+                                if i["Insumo"] == nome_usar.strip()), None)
+                if _existe:
+                    _existe["Quantidade"] = round(float(_existe.get("Quantidade",0)) + qtd_usar, 4)
+                    _existe["Valor Total R$"] = round(_existe["Quantidade"] * preco_usar, 2)
+                    success_box(f"✅ Saldo atualizado: {nome_usar} → {_existe['Quantidade']} {unid_usar}")
+                else:
+                    st.session_state.estoque.append({
+                        "Insumo": nome_usar.strip(), "Categoria": categ_usar,
+                        "Ingrediente Ativo": ia_usar, "Quantidade": qtd_usar,
+                        "Unidade": unid_usar, "Embalagem": emb_usar,
+                        "Valor Unitário R$": preco_usar,
+                        "Valor Total R$": round(qtd_usar * preco_usar, 2),
+                        "Lote": lote_usar, "Estoque Mínimo": estmin_usar,
+                    })
+                    success_box(f"✅ {nome_usar} adicionado ao estoque.")
                 salvar_dados_iaagro()
-                success_box(f"✅ {nome_usar} adicionado ao estoque.")
                 st.rerun()
             else:
                 warning_box("Informe nome e quantidade.")
 
+    # ── TAB 3: NF-e XML ──────────────────────────────────────────────────────
+    with _tab_nfe:
+        st.markdown("#### 📄 Importar Nota Fiscal Eletrônica (XML)")
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
+        border-left:4px solid #22c55e;margin-bottom:12px;'>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        📧 Faça upload do XML da NF-e recebida por e-mail ou do sistema do fornecedor.
+        Todos os produtos entram no estoque automaticamente com quantidade e valor.
+        </span></div>""", unsafe_allow_html=True)
+
+        _xml_file = st.file_uploader("📎 Upload do XML da NF-e",
+                                      type=["xml"], key="upl_nfe_xml")
+        if _xml_file:
+            try:
+                import xml.etree.ElementTree as _ET
+                _tree = _ET.parse(_xml_file)
+                _root = _tree.getroot()
+                _ns   = {"nfe": "http://www.portalfiscal.inf.br/nfe"}
+
+                def _txt(el, tag, ns):
+                    _e = el.find(tag, ns)
+                    return _e.text.strip() if _e is not None and _e.text else ""
+
+                # Dados da NF
+                _inf = _root.find(".//nfe:infNFe", _ns) or _root.find(".//{http://www.portalfiscal.inf.br/nfe}infNFe")
+                _emit_nome = ""
+                _n_nf = ""
+                _dt_emis = ""
+                if _inf is not None:
+                    _emit_nome = _txt(_inf, "nfe:emit/nfe:xNome", _ns) or _txt(_inf, "{http://www.portalfiscal.inf.br/nfe}emit/{http://www.portalfiscal.inf.br/nfe}xNome", {})
+                    _n_nf = _txt(_inf, "nfe:ide/nfe:nNF", _ns)
+                    _dt_emis = _txt(_inf, "nfe:ide/nfe:dhEmi", _ns)[:10] if _txt(_inf, "nfe:ide/nfe:dhEmi", _ns) else ""
+
+                # Itens
+                _dets = _root.findall(".//nfe:det", _ns)
+                if not _dets:
+                    _dets = _root.findall(".//{http://www.portalfiscal.inf.br/nfe}det")
+
+                _itens_nfe = []
+                for _det in _dets:
+                    _prod_el = _det.find("nfe:prod", _ns) or _det.find("{http://www.portalfiscal.inf.br/nfe}prod")
+                    if _prod_el is None:
+                        continue
+                    def _t(tag):
+                        _e = _prod_el.find(f"nfe:{tag}", _ns)
+                        if _e is None:
+                            _e = _prod_el.find(f"{{http://www.portalfiscal.inf.br/nfe}}{tag}")
+                        return _e.text.strip() if _e is not None and _e.text else ""
+
+                    _nome_prod = _t("xProd")
+                    _qtd_str   = _t("qCom")
+                    _unid_str  = _t("uCom")
+                    _vul_str   = _t("vUnCom")
+                    _vtot_str  = _t("vProd")
+                    try: _qtd_f  = float(_qtd_str.replace(",","."))
+                    except: _qtd_f = 0.0
+                    try: _vul_f  = float(_vul_str.replace(",","."))
+                    except: _vul_f = 0.0
+                    try: _vtot_f = float(_vtot_str.replace(",","."))
+                    except: _vtot_f = round(_qtd_f * _vul_f, 2)
+
+                    # Normaliza unidade
+                    _unid_map = {"UN":"un","UNID":"un","L":"L","LT":"L","KG":"kg",
+                                 "G":"g","ML":"mL","SC":"sc","SAC":"sc","CX":"un"}
+                    _unid_norm = _unid_map.get(_unid_str.upper(), _unid_str.lower() or "un")
+                    _itens_nfe.append({
+                        "Insumo": _nome_prod, "Quantidade": _qtd_f,
+                        "Unidade": _unid_norm, "Valor Unitário R$": _vul_f,
+                        "Valor Total R$": _vtot_f,
+                    })
+
+                if _itens_nfe:
+                    st.success(f"✅ NF-e nº {_n_nf} de **{_emit_nome or 'Fornecedor'}** — {len(_itens_nfe)} produto(s)")
+                    if _dt_emis:
+                        st.caption(f"📅 Emissão: {_dt_emis}")
+
+                    import pandas as _pd_nfe
+                    st.dataframe(_pd_nfe.DataFrame(_itens_nfe)[["Insumo","Quantidade","Unidade","Valor Unitário R$","Valor Total R$"]],
+                                 use_container_width=True, hide_index=True)
+
+                    if st.button("✅ Importar todos para o Estoque", key="btn_importar_nfe",
+                                 use_container_width=True, type="primary"):
+                        _importados = 0
+                        for _it in _itens_nfe:
+                            if not _it["Insumo"] or _it["Quantidade"] <= 0:
+                                continue
+                            _existe = next((i for i in st.session_state.estoque
+                                           if i["Insumo"] == _it["Insumo"]), None)
+                            _obs = f"NF-e nº {_n_nf} — {_emit_nome} — {_dt_emis}"
+                            if _existe:
+                                _existe["Quantidade"] = round(float(_existe.get("Quantidade",0)) + _it["Quantidade"], 4)
+                                _existe["Valor Total R$"] = round(_existe["Quantidade"] * _it["Valor Unitário R$"], 2)
+                                if _it["Valor Unitário R$"] > 0:
+                                    _existe["Valor Unitário R$"] = _it["Valor Unitário R$"]
+                            else:
+                                st.session_state.estoque.append({
+                                    "Insumo": _it["Insumo"], "Categoria": "Outro",
+                                    "Quantidade": _it["Quantidade"], "Unidade": _it["Unidade"],
+                                    "Valor Unitário R$": _it["Valor Unitário R$"],
+                                    "Valor Total R$": _it["Valor Total R$"],
+                                    "Fabricante": _emit_nome, "Lote": _obs,
+                                    "Estoque Mínimo": 5.0,
+                                })
+                            _importados += 1
+                        salvar_dados_iaagro()
+                        success_box(f"✅ {_importados} produto(s) importado(s) da NF-e para o estoque!")
+                        st.rerun()
+                else:
+                    st.warning("Nenhum produto encontrado no XML. Verifique se é uma NF-e válida.")
+            except Exception as _ex:
+                st.error(f"❌ Erro ao processar XML: {_ex}")
+                st.info("Verifique se o arquivo é um XML de NF-e válido (modelo 55).")
+
+    # ── TABELA DO ESTOQUE ────────────────────────────────────────────────────
+    st.markdown("---")
     if st.session_state.estoque:
-        import pandas as pd
-        tabela_estoque = pd.DataFrame(st.session_state.estoque)
-        for col in ["Embalagem","Ingrediente Ativo","Fabricante"]:
-            if col not in tabela_estoque.columns:
-                tabela_estoque[col] = "—"
-        with st.expander("🗑️ Remover produto"):
-            produto_excluir = st.selectbox("Produto",
-                [item["Insumo"] for item in st.session_state.estoque],
-                key="produto_excluir_estoque")
-            if st.button("🗑️ Remover", key="btn_remover_estoque"):
-                st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != produto_excluir]
-                salvar_dados_iaagro()
-                success_box(f"{produto_excluir} removido.")
-                st.rerun()
-        tabela_estoque["Status"] = tabela_estoque.apply(
-            lambda r: "❌ Zerado" if r.get("Quantidade",0) <= 0 else
-                      "⚠️ Baixo"  if r.get("Quantidade",0) <= 5  else "✅ OK", axis=1)
-        st.dataframe(tabela_estoque, use_container_width=True)
-        col4, col5, col6 = st.columns(3)
-        col4.metric("📦 Itens", len(tabela_estoque))
-        col5.metric("💰 Valor total", f"R$ {tabela_estoque['Valor Total R$'].sum():,.2f}")
-        col6.metric("⚠️ Estoque baixo", len(tabela_estoque[tabela_estoque["Status"].isin(["⚠️ Baixo","❌ Zerado"])]))
-        for item in st.session_state.estoque:
-            if item.get("Quantidade",0) <= 0:
-                error_box(f"❌ {item.get('Insumo','')}: estoque zerado!")
+        _df_show = _pd_est.DataFrame(st.session_state.estoque)
+        for _col in ["Embalagem","Ingrediente Ativo","Fabricante","Lote","Estoque Mínimo"]:
+            if _col not in _df_show.columns:
+                _df_show[_col] = "—" if _col != "Estoque Mínimo" else 5.0
+
+        _df_show["Status"] = _df_show.apply(
+            lambda r: "❌ Zerado" if float(r.get("Quantidade",0)) <= 0 else
+                      ("⚠️ Baixo" if float(r.get("Quantidade",0)) <= float(r.get("Estoque Mínimo",5)) else "✅ OK"),
+            axis=1
+        )
+
+        # Filtros
+        _col_f1, _col_f2, _col_f3 = st.columns(3)
+        _filtro_cat = _col_f1.selectbox("Filtrar por categoria",
+                        ["Todas"] + sorted(_df_show["Categoria"].dropna().unique().tolist()),
+                        key="filtro_cat_estoque")
+        _filtro_status = _col_f2.selectbox("Filtrar por status",
+                        ["Todos","✅ OK","⚠️ Baixo","❌ Zerado"], key="filtro_status_estoque")
+        _busca_tabela = _col_f3.text_input("🔍 Buscar", placeholder="Nome do produto...",
+                                            key="busca_tabela_estoque")
+
+        _df_filtered = _df_show.copy()
+        if _filtro_cat != "Todas":
+            _df_filtered = _df_filtered[_df_filtered["Categoria"] == _filtro_cat]
+        if _filtro_status != "Todos":
+            _df_filtered = _df_filtered[_df_filtered["Status"] == _filtro_status]
+        if _busca_tabela:
+            _df_filtered = _df_filtered[_df_filtered["Insumo"].str.contains(_busca_tabela, case=False, na=False)]
+
+        # Cards de alertas
+        _alertas = [i for i in st.session_state.estoque if float(i.get("Quantidade",0)) <= float(i.get("Estoque Mínimo",5))]
+        if _alertas:
+            with st.expander(f"🔔 {len(_alertas)} alerta(s) de estoque", expanded=True):
+                for _al in _alertas:
+                    _cor = "#7f1d1d" if float(_al.get("Quantidade",0)) <= 0 else "#78350f"
+                    _ico = "❌" if float(_al.get("Quantidade",0)) <= 0 else "⚠️"
+                    st.markdown(f"""
+                    <div style='background:{_cor};border-radius:8px;padding:8px 14px;
+                    margin:3px 0;display:flex;justify-content:space-between;align-items:center;'>
+                    <span style='color:#fff;font-weight:600;'>{_ico} {_al.get('Insumo','')}</span>
+                    <span style='color:#fca5a5;font-size:13px;'>
+                    {_al.get('Quantidade',0):.2f} {_al.get('Unidade','')} restante
+                    (mín: {_al.get('Estoque Mínimo',5):.0f})
+                    </span>
+                    </div>""", unsafe_allow_html=True)
+
+        # Tabela principal
+        _cols_exib = [c for c in ["Insumo","Categoria","Quantidade","Unidade",
+                                   "Valor Unitário R$","Valor Total R$","Lote","Status"]
+                      if c in _df_filtered.columns]
+        st.dataframe(_df_filtered[_cols_exib], use_container_width=True, hide_index=True)
+
+        # Editar quantidade manualmente
+        with st.expander("✏️ Ajustar quantidade / excluir produto"):
+            _nomes_est = [i["Insumo"] for i in st.session_state.estoque]
+            _prod_edit = st.selectbox("Produto", _nomes_est, key="sel_prod_edit_est")
+            _item_edit = next((i for i in st.session_state.estoque if i["Insumo"] == _prod_edit), None)
+            if _item_edit:
+                col_ed1, col_ed2 = st.columns(2)
+                _nova_qtd = col_ed1.number_input("Nova quantidade",
+                                                  min_value=0.0,
+                                                  value=float(_item_edit.get("Quantidade",0)),
+                                                  key="num_nova_qtd_edit")
+                _novo_min = col_ed2.number_input("Novo estoque mínimo",
+                                                  min_value=0.0,
+                                                  value=float(_item_edit.get("Estoque Mínimo",5)),
+                                                  key="num_novo_min_edit")
+                col_btn1, col_btn2 = st.columns(2)
+                if col_btn1.button("💾 Salvar ajuste", key="btn_salvar_edit_est", use_container_width=True):
+                    _item_edit["Quantidade"] = _nova_qtd
+                    _item_edit["Estoque Mínimo"] = _novo_min
+                    _item_edit["Valor Total R$"] = round(_nova_qtd * float(_item_edit.get("Valor Unitário R$",0)), 2)
+                    salvar_dados_iaagro()
+                    success_box(f"✅ {_prod_edit} atualizado: {_nova_qtd} {_item_edit.get('Unidade','')}")
+                    st.rerun()
+                if col_btn2.button("🗑️ Excluir produto", key="btn_excluir_est", use_container_width=True):
+                    st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != _prod_edit]
+                    salvar_dados_iaagro()
+                    success_box(f"{_prod_edit} removido.")
+                    st.rerun()
+    else:
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:12px;padding:30px;text-align:center;
+        border:2px dashed #1e4976;margin:20px 0;'>
+        <div style='font-size:48px;'>📦</div>
+        <div style='color:#94a3b8;font-size:16px;margin-top:8px;'>Estoque vazio</div>
+        <div style='color:#64748b;font-size:13px;'>Use as abas acima para adicionar produtos</div>
+        </div>""", unsafe_allow_html=True)
 
   with _sub_op[1]:
     st.header("🚜 Aplicações Agrícolas")
