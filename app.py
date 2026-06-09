@@ -5769,11 +5769,12 @@ if menu == "💰 Financeiro":
 
         st.divider()
         st.subheader("📦 Insumos do Estoque (automático)")
+        st.caption("Gerado a partir das aplicações registradas. Clique em 🗑️ para remover a aplicação.")
 
         # Calcula custo total de TODAS as aplicações (todas as áreas)
         _custo_insumos = 0.0
         _det_insumos   = []
-        for ap in st.session_state.aplicacoes:
+        for _ap_idx, ap in enumerate(st.session_state.aplicacoes):
             for p in ap.get("Produtos", []):
                 _nome_p  = p.get("Produto","")
                 _total   = p.get("Total usado", 0)
@@ -5789,18 +5790,56 @@ if menu == "💰 Financeiro":
                 _custo_p      = _qtd_base * _preco_u
                 _custo_insumos += _custo_p
                 _det_insumos.append({
+                    "ap_idx":      _ap_idx,
                     "Aplicação":   ap.get("Estádio", ap.get("Aplicação","")),
                     "Produto":     _nome_p,
-                    "Tipo":        p.get("Tipo",""),
+                    "Tipo":        _item_e.get("Categoria","") if _item_e else p.get("Tipo",""),
                     "Qtd":         f"{_qtd_base:.2f} L/kg",
                     "R$ unit":     f"R$ {_preco_u:.2f}",
                     "Custo R$":    f"R$ {_custo_p:.2f}",
                 })
 
         if _det_insumos:
-            import pandas as pd
-            st.dataframe(pd.DataFrame(_det_insumos), use_container_width=True, hide_index=True)
-            st.metric("💰 Total insumos (todas aplicações)", f"R$ {_custo_insumos:,.2f}")
+            # Header
+            _hcols = st.columns([2.5, 2, 1.5, 1.5, 1.2, 1.2, 0.7])
+            for _h, _lbl in zip(_hcols, ["Aplicação","Produto","Tipo","Qtd","R$/un","Custo",""]): 
+                _h.markdown(f"<span style='color:#6ee7b7;font-size:11px;font-weight:800;'>{_lbl}</span>",
+                            unsafe_allow_html=True)
+            st.markdown("<hr style='margin:4px 0;border-color:#1e4976;'>", unsafe_allow_html=True)
+
+            _ap_indices_deletar = set()
+            for _li, _row in enumerate(_det_insumos):
+                _rc = st.columns([2.5, 2, 1.5, 1.5, 1.2, 1.2, 0.7])
+                _rc[0].markdown(f"<span style='color:#f1f5f9;font-size:12px;'>{_row['Aplicação']}</span>",
+                                unsafe_allow_html=True)
+                _rc[1].markdown(f"<span style='color:#6ee7b7;font-size:12px;font-weight:600;'>{_row['Produto']}</span>",
+                                unsafe_allow_html=True)
+                _rc[2].markdown(f"<span style='color:#94a3b8;font-size:11px;'>{_row['Tipo']}</span>",
+                                unsafe_allow_html=True)
+                _rc[3].markdown(f"<span style='color:#f1f5f9;font-size:12px;'>{_row['Qtd']}</span>",
+                                unsafe_allow_html=True)
+                _rc[4].markdown(f"<span style='color:#94a3b8;font-size:12px;'>{_row['R$ unit']}</span>",
+                                unsafe_allow_html=True)
+                _rc[5].markdown(f"<span style='color:#22c55e;font-size:12px;font-weight:700;'>{_row['Custo R$']}</span>",
+                                unsafe_allow_html=True)
+                if _rc[6].button("🗑️", key=f"del_insumo_{_li}_{_row['ap_idx']}",
+                                  help=f"Remover aplicação: {_row['Aplicação']}"):
+                    _ap_indices_deletar.add(_row["ap_idx"])
+
+            if _ap_indices_deletar:
+                st.session_state.aplicacoes = [
+                    a for i, a in enumerate(st.session_state.aplicacoes)
+                    if i not in _ap_indices_deletar
+                ]
+                salvar_dados_iaagro()
+                success_box(f"✅ {len(_ap_indices_deletar)} aplicação(ões) removida(s).")
+                st.rerun()
+
+            st.markdown(f"""
+            <div style='background:#14532d;border-radius:10px;padding:10px 16px;margin-top:8px;'>
+            <span style='color:#6ee7b7;font-size:13px;font-weight:700;'>
+            💰 Total insumos (todas aplicações): R$ {_custo_insumos:,.2f}
+            </span></div>""", unsafe_allow_html=True)
         else:
             st.info("Nenhuma aplicação registrada ainda.")
 
