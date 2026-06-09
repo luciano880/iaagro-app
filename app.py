@@ -1230,6 +1230,7 @@ def salvar_dados_iaagro():
         "safrinha_registros":      st.session_state.get("safrinha_registros", []),
         "fluxo_caixa":             st.session_state.get("fluxo_caixa", []),
         "contratos_troca":         st.session_state.get("contratos_troca", []),
+        "planejamento_safras":     st.session_state.get("planejamento_safras", []),
         "corretivos_aplicados":    st.session_state.get("corretivos_aplicados", []),
     }
     # Lê variáveis globais dinamicamente (podem não existir quando função é definida)
@@ -1952,6 +1953,8 @@ if "corretivos_aplicados" not in st.session_state or (not st.session_state.get("
     st.session_state.corretivos_aplicados = dados_carregados.get("corretivos_aplicados", [])
 if "contratos_troca" not in st.session_state or (not st.session_state.get("contratos_troca") and dados_carregados.get("contratos_troca")):
     st.session_state.contratos_troca = dados_carregados.get("contratos_troca", [])
+if "planejamento_safras" not in st.session_state or (not st.session_state.get("planejamento_safras") and dados_carregados.get("planejamento_safras")):
+    st.session_state.planejamento_safras = dados_carregados.get("planejamento_safras", [])
 if "fluxo_caixa" not in st.session_state or (not st.session_state.get("fluxo_caixa") and dados_carregados.get("fluxo_caixa")):
     st.session_state.fluxo_caixa = dados_carregados.get("fluxo_caixa", [])
 if "harvest_historico" not in st.session_state or (not st.session_state.get("harvest_historico") and dados_carregados.get("harvest_historico")):
@@ -8223,36 +8226,402 @@ if menu == "🌍 Inteligência":
 
 if menu == "🌍 Inteligência":
   with _sub_int[3]:
-    st.header("📅 Calendário Agrícola")
+
+    # ── Header ───────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>📅 Planejamento & Calendário Agrícola</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Rotação inverno/verão, janelas de plantio e eventos da propriedade
+    </p></div>""", unsafe_allow_html=True)
+
     if "calendario_eventos" not in st.session_state:
         st.session_state.calendario_eventos = []
-    st.subheader("➕ Novo Evento")
-    col_ev1, col_ev2 = st.columns(2)
-    _ev_titulo = col_ev1.text_input("Título do evento", key="txt_ev_titulo")
-    _ev_data   = col_ev2.date_input("Data", key="dat_ev_data")
-    _ev_tipo   = st.selectbox("Tipo", ["Plantio","Aplicação","Colheita","Análise de solo","Manutenção","Reunião","Outro"], key="sel_ev_tipo")
-    _ev_obs    = st.text_area("Observação", key="txt_ev_obs", height=60)
-    if st.button("💾 Salvar Evento", key="btn_salvar_evento", use_container_width=True):
-        if _ev_titulo.strip():
-            st.session_state.calendario_eventos.append({
-                "Título": _ev_titulo, "Data": str(_ev_data),
-                "Tipo": _ev_tipo, "Obs": _ev_obs,
-            })
-            salvar_dados_iaagro()
-            success_box(f"✅ Evento '{_ev_titulo}' salvo!")
-            st.rerun()
-    if st.session_state.calendario_eventos:
-        import pandas as pd
-        df_ev_ = pd.DataFrame(sorted(st.session_state.calendario_eventos, key=lambda x: x.get("Data","")))
-        st.dataframe(df_ev_, use_container_width=True)
-        with st.expander("🗑️ Excluir evento"):
-            _opts_ev = [f"{e.get('Data','')} — {e.get('Título','')}" for e in st.session_state.calendario_eventos]
-            _del_ev  = st.selectbox("Selecione", _opts_ev, key="sel_del_ev")
-            if st.button("🗑️ Excluir", key="btn_del_ev"):
-                idx_ev = _opts_ev.index(_del_ev)
-                st.session_state.calendario_eventos.pop(idx_ev)
+    if "planejamento_safras" not in st.session_state:
+        st.session_state.planejamento_safras = []
+
+    # ── ABAS DO MÓDULO ────────────────────────────────────────────────────────
+    _tab_cal, _tab_plan, _tab_rot = st.tabs([
+        "📅 Eventos", "🌾 Planejamento de Safras", "🔄 Rotação de Culturas"
+    ])
+
+    # ════════════════════════════════════════════════════════════════════════
+    # ABA 1 — EVENTOS
+    # ════════════════════════════════════════════════════════════════════════
+    with _tab_cal:
+        st.markdown("#### ➕ Novo Evento Agrícola")
+
+        _tipos_ev = [
+            "🌱 Plantio","🚜 Aplicação de defensivo","🪨 Aplicação de calcário/gesso",
+            "🌾 Colheita","🧪 Análise de solo","💧 Irrigação","🌧️ Registro de chuva",
+            "🔧 Manutenção de máquinas","📋 Vistoria técnica","📦 Recebimento de insumos",
+            "💰 Venda de grãos","🤝 Reunião/Visita técnica","⚠️ Evento climático","📝 Outro"
+        ]
+        _cores_ev = {
+            "🌱 Plantio":"#14532d","🚜 Aplicação de defensivo":"#1e3a5f",
+            "🪨 Aplicação de calcário/gesso":"#3b1f0a","🌾 Colheita":"#713f12",
+            "🧪 Análise de solo":"#1e1b4b","💧 Irrigação":"#0c4a6e",
+            "🌧️ Registro de chuva":"#0f172a","🔧 Manutenção de máquinas":"#1c1917",
+            "📋 Vistoria técnica":"#14532d","📦 Recebimento de insumos":"#064e3b",
+            "💰 Venda de grãos":"#78350f","🤝 Reunião/Visita técnica":"#312e81",
+            "⚠️ Evento climático":"#7f1d1d","📝 Outro":"#1e293b"
+        }
+        _bordas_ev = {
+            "🌱 Plantio":"#22c55e","🚜 Aplicação de defensivo":"#3b82f6",
+            "🪨 Aplicação de calcário/gesso":"#d97706","🌾 Colheita":"#f59e0b",
+            "🧪 Análise de solo":"#818cf8","💧 Irrigação":"#38bdf8",
+            "🌧️ Registro de chuva":"#60a5fa","🔧 Manutenção de máquinas":"#78716c",
+            "📋 Vistoria técnica":"#4ade80","📦 Recebimento de insumos":"#10b981",
+            "💰 Venda de grãos":"#f97316","🤝 Reunião/Visita técnica":"#a78bfa",
+            "⚠️ Evento climático":"#ef4444","📝 Outro":"#64748b"
+        }
+
+        with st.form("form_evento_cal", clear_on_submit=True):
+            col_e1, col_e2 = st.columns(2)
+            _ev_titulo = col_e1.text_input("Título do evento *", placeholder="Ex: Plantio soja talhão A")
+            _ev_data   = col_e2.date_input("Data *", key="dat_ev_data")
+            col_e3, col_e4 = st.columns(2)
+            _ev_tipo   = col_e3.selectbox("Tipo de evento", _tipos_ev, key="sel_ev_tipo")
+            _ev_area   = col_e4.selectbox("Área/Talhão",
+                ["Toda a propriedade"] + [f"{a.get('ID')} - {a.get('Talhão','')}" for a in st.session_state.areas],
+                key="sel_ev_area")
+            _ev_obs    = st.text_area("Observações", key="txt_ev_obs", height=60)
+            _ev_alerta = st.checkbox("🔔 Criar alerta (aparece nos próximos eventos)", value=True, key="chk_ev_alerta")
+            _ev_salvar = st.form_submit_button("💾 Salvar Evento", use_container_width=True)
+
+        if _ev_salvar:
+            if _ev_titulo.strip():
+                st.session_state.calendario_eventos.append({
+                    "Título": _ev_titulo.strip(), "Data": str(_ev_data),
+                    "Tipo": _ev_tipo, "Área": _ev_area,
+                    "Obs": _ev_obs, "Alerta": _ev_alerta,
+                    "Concluído": False,
+                })
                 salvar_dados_iaagro()
+                success_box(f"✅ Evento '{_ev_titulo}' salvo!")
                 st.rerun()
+
+        # Eventos próximos (7 dias)
+        from datetime import date as _date_cal, timedelta as _td_cal
+        _hoje_cal = _date_cal.today()
+        _proximos = []
+        for _ev in st.session_state.calendario_eventos:
+            try:
+                _d = _date_cal.fromisoformat(_ev.get("Data",""))
+                _diff = (_d - _hoje_cal).days
+                if 0 <= _diff <= 7 and not _ev.get("Concluído"):
+                    _proximos.append((_diff, _ev))
+            except Exception:
+                pass
+
+        if _proximos:
+            st.markdown("#### 🔔 Próximos 7 dias")
+            for _diff_d, _ev in sorted(_proximos):
+                _cor  = _cores_ev.get(_ev.get("Tipo","📝 Outro"), "#1e293b")
+                _bord = _bordas_ev.get(_ev.get("Tipo","📝 Outro"), "#64748b")
+                _quando = "Hoje!" if _diff_d == 0 else f"Em {_diff_d} dia{'s' if _diff_d>1 else ''}"
+                st.markdown(f"""
+                <div style='background:{_cor};border-radius:10px;padding:10px 16px;
+                border-left:4px solid {_bord};margin:4px 0;
+                display:flex;justify-content:space-between;align-items:center;'>
+                <div>
+                <span style='color:#fff;font-weight:700;font-size:13px;'>{_ev.get('Tipo','')} {_ev.get('Título','')}</span><br>
+                <span style='color:rgba(255,255,255,0.5);font-size:11px;'>{_ev.get('Área','')} &nbsp;·&nbsp; {_ev.get('Obs','')[:40]}</span>
+                </div>
+                <span style='color:{_bord};font-weight:800;font-size:12px;white-space:nowrap;margin-left:12px;'>{_quando}</span>
+                </div>""", unsafe_allow_html=True)
+
+        # Lista completa
+        st.markdown("#### 📋 Todos os Eventos")
+        if st.session_state.calendario_eventos:
+            _fil_tipo = st.selectbox("Filtrar por tipo", ["Todos"] + _tipos_ev, key="fil_tipo_ev")
+            _fil_area_ev = st.selectbox("Filtrar por área", ["Todas"] +
+                [f"{a.get('ID')} - {a.get('Talhão','')}" for a in st.session_state.areas],
+                key="fil_area_ev")
+
+            _evs_sorted = sorted(st.session_state.calendario_eventos,
+                                  key=lambda x: x.get("Data",""), reverse=True)
+            for _idx_ev, _ev in enumerate(_evs_sorted):
+                if _fil_tipo != "Todos" and _ev.get("Tipo") != _fil_tipo:
+                    continue
+                if _fil_area_ev != "Todas" and _ev.get("Área","") not in ("Toda a propriedade", _fil_area_ev):
+                    continue
+                _cor  = _cores_ev.get(_ev.get("Tipo","📝 Outro"), "#1e293b")
+                _bord = _bordas_ev.get(_ev.get("Tipo","📝 Outro"), "#64748b")
+                _concl = _ev.get("Concluído", False)
+                _opcity = "0.5" if _concl else "1"
+                _c1, _c2, _c3 = st.columns([6, 1, 1])
+                _c1.markdown(f"""
+                <div style='background:{_cor};border-radius:8px;padding:8px 14px;
+                border-left:3px solid {_bord};opacity:{_opcity};'>
+                <span style='color:#fff;font-weight:700;font-size:12px;'>
+                {"~~" if _concl else ""}{_ev.get("Tipo","")} {_ev.get("Título","")}{"~~" if _concl else ""}
+                </span><br>
+                <span style='color:rgba(255,255,255,0.5);font-size:11px;'>
+                📅 {_ev.get("Data","")} &nbsp;·&nbsp; {_ev.get("Área","")}
+                </span></div>""", unsafe_allow_html=True)
+                if not _concl:
+                    if _c2.button("✅", key=f"concl_ev_{_idx_ev}", help="Marcar como concluído"):
+                        _idx_orig = st.session_state.calendario_eventos.index(_ev)
+                        st.session_state.calendario_eventos[_idx_orig]["Concluído"] = True
+                        salvar_dados_iaagro()
+                        st.rerun()
+                if _c3.button("🗑️", key=f"del_ev_{_idx_ev}", help="Excluir"):
+                    _idx_orig = st.session_state.calendario_eventos.index(_ev)
+                    st.session_state.calendario_eventos.pop(_idx_orig)
+                    salvar_dados_iaagro()
+                    st.rerun()
+        else:
+            st.info("Nenhum evento cadastrado ainda.")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # ABA 2 — PLANEJAMENTO DE SAFRAS
+    # ════════════════════════════════════════════════════════════════════════
+    with _tab_plan:
+        st.markdown("#### 🌾 Planejar Safra por Talhão")
+
+        CULTURAS_INVERNO = [
+            "🌾 Trigo","🌿 Aveia Branca","🌿 Aveia Preta","🌾 Cevada","🌻 Canola",
+            "🌿 Azevém (pastagem)","🌱 Ervilhaca (cobertura)","🌱 Nabo Forrageiro (cobertura)",
+            "🌿 Mix de Cobertura (aveia+nabo+ervilhaca)","🌿 Pousio Planejado",
+        ]
+        CULTURAS_VERAO = [
+            "🌱 Soja","🌽 Milho 1ª safra","🌽 Milho 2ª safra (safrinha)",
+            "🌱 Feijão","🌻 Girassol","☕ Café","🍠 Mandioca",
+            "🌾 Sorgo","🍚 Arroz","🏷️ Algodão",
+        ]
+
+        JANELAS_PLANTIO = {
+            "🌾 Trigo":         {"inicio":"Abr","fim":"Jun","colheita":"Set/Out","dias":120},
+            "🌿 Aveia Branca":  {"inicio":"Abr","fim":"Jun","colheita":"Set/Out","dias":110},
+            "🌿 Aveia Preta":   {"inicio":"Mar","fim":"Jun","colheita":"Jul/Ago","dias":90},
+            "🌾 Cevada":        {"inicio":"Mai","fim":"Jun","colheita":"Set/Out","dias":115},
+            "🌻 Canola":        {"inicio":"Abr","fim":"Mai","colheita":"Set/Out","dias":130},
+            "🌿 Azevém (pastagem)": {"inicio":"Mar","fim":"Mai","colheita":"Pastejo","dias":60},
+            "🌿 Mix de Cobertura (aveia+nabo+ervilhaca)": {"inicio":"Mar","fim":"Mai","colheita":"Dessecação","dias":90},
+            "🌱 Soja":          {"inicio":"Out","fim":"Nov","colheita":"Fev/Mar","dias":125},
+            "🌽 Milho 1ª safra":{"inicio":"Set","fim":"Nov","colheita":"Fev/Mar","dias":130},
+            "🌽 Milho 2ª safra (safrinha)": {"inicio":"Jan","fim":"Fev","colheita":"Jun/Jul","dias":120},
+            "🌱 Feijão":        {"inicio":"Out","fim":"Nov","colheita":"Jan/Fev","dias":90},
+        }
+
+        ROTACOES_RECOMENDADAS = {
+            "🌱 Soja":  {"inverno_ideal": ["🌾 Trigo","🌿 Aveia Branca","🌻 Canola"], "motivo": "Trigo/aveia após soja quebra ciclo de doenças"},
+            "🌽 Milho 1ª safra": {"inverno_ideal": ["🌿 Aveia Preta","🌿 Mix de Cobertura (aveia+nabo+ervilhaca)","🌿 Azevém (pastagem)"], "motivo": "Coberturas após milho melhoram MO"},
+            "🌾 Trigo": {"verao_ideal": ["🌱 Soja","🌽 Milho 1ª safra"], "motivo": "Soja/milho após trigo otimiza NPK"},
+            "🌿 Aveia Branca": {"verao_ideal": ["🌱 Soja","🌱 Feijão"], "motivo": "Aveia como antecedente da soja é ideal no PR/SC"},
+        }
+
+        if not st.session_state.areas:
+            st.info("Cadastre áreas para planejar safras.")
+        else:
+            _area_plan = st.selectbox("Selecione o talhão",
+                [f"{a.get('ID')} - {a.get('Talhão','')} ({a.get('Cultura','?')})"
+                 for a in st.session_state.areas], key="sel_area_plan")
+            _id_plan = _area_plan.split(" - ")[0]
+            _area_obj = next((a for a in st.session_state.areas if a.get("ID") == _id_plan), {})
+
+            col_pl1, col_pl2 = st.columns(2)
+
+            with col_pl1:
+                st.markdown("""<div style='background:#1e3a5f;border-radius:10px;padding:10px 14px;
+                border-top:3px solid #38bdf8;margin-bottom:8px;'>
+                <span style='color:#38bdf8;font-weight:800;font-size:12px;letter-spacing:1px;'>
+                ❄️ SAFRA DE INVERNO</span></div>""", unsafe_allow_html=True)
+                _cult_inv = st.selectbox("Cultura de inverno", CULTURAS_INVERNO, key="sel_cult_inv")
+                _ano_inv  = st.selectbox("Ano", [2025,2026,2027], key="sel_ano_inv")
+                _area_inv = st.number_input("Área (ha)", min_value=0.0,
+                    value=float(_area_obj.get("Hectares",0)), key="num_area_inv")
+                _prod_inv = st.number_input("Meta produtividade (sc/ha)", min_value=0.0, key="num_prod_inv")
+                _obs_inv  = st.text_input("Observações", key="txt_obs_inv")
+
+            with col_pl2:
+                st.markdown("""<div style='background:#14532d;border-radius:10px;padding:10px 14px;
+                border-top:3px solid #22c55e;margin-bottom:8px;'>
+                <span style='color:#22c55e;font-weight:800;font-size:12px;letter-spacing:1px;'>
+                ☀️ SAFRA DE VERÃO</span></div>""", unsafe_allow_html=True)
+                _cult_ver = st.selectbox("Cultura de verão", CULTURAS_VERAO, key="sel_cult_ver")
+                _ano_ver  = st.selectbox("Ano", [2025,2026,2027], key="sel_ano_ver",
+                    index=[2025,2026,2027].index(min(2027, _ano_inv + (1 if _ano_inv in [2025,2026,2027] else 0))))
+                _area_ver = st.number_input("Área (ha)", min_value=0.0,
+                    value=float(_area_obj.get("Hectares",0)), key="num_area_ver")
+                _prod_ver = st.number_input("Meta produtividade (sc/ha)", min_value=0.0,
+                    value=float(_area_obj.get("Meta Produtividade",0)), key="num_prod_ver")
+                _obs_ver  = st.text_input("Observações", key="txt_obs_ver")
+
+            # Sugestão de rotação
+            _cult_ver_limpa = _cult_ver.split(" ",1)[1] if " " in _cult_ver else _cult_ver
+            _rot_rec = ROTACOES_RECOMENDADAS.get(_cult_ver)
+            if _rot_rec:
+                _inv_ideais = _rot_rec.get("inverno_ideal",[])
+                _is_ideal = _cult_inv in _inv_ideais
+                _bg_rot = "#14532d" if _is_ideal else "#78350f"
+                _brd_rot = "#22c55e" if _is_ideal else "#f59e0b"
+                _ico_rot = "✅" if _is_ideal else "⚠️"
+                st.markdown(f"""
+                <div style='background:{_bg_rot};border-radius:10px;padding:10px 16px;
+                border-left:4px solid {_brd_rot};margin:12px 0;'>
+                <span style='color:#fff;font-weight:700;font-size:12px;'>
+                {_ico_rot} Rotação: {_rot_rec.get('motivo','')}</span><br>
+                <span style='color:rgba(255,255,255,0.6);font-size:11px;'>
+                Inverno ideal após {_cult_ver}: {", ".join(_inv_ideais[:3])}
+                </span></div>""", unsafe_allow_html=True)
+
+            # Janela de plantio
+            _jan_inv = JANELAS_PLANTIO.get(_cult_inv)
+            _jan_ver = JANELAS_PLANTIO.get(_cult_ver)
+            if _jan_inv or _jan_ver:
+                st.markdown("**📅 Janelas de Plantio — Sul do Brasil (PR/SC/RS)**")
+                _jc1, _jc2 = st.columns(2)
+                if _jan_inv:
+                    _jc1.markdown(f"""
+                    <div style='background:#1e3a5f;border-radius:8px;padding:10px;
+                    border-left:3px solid #38bdf8;font-size:12px;'>
+                    <b style='color:#38bdf8;'>❄️ {_cult_inv}</b><br>
+                    🗓️ Plantio: {_jan_inv['inicio']} a {_jan_inv['fim']}<br>
+                    🌾 Colheita: {_jan_inv['colheita']}<br>
+                    ⏱️ Ciclo: ~{_jan_inv['dias']} dias
+                    </div>""", unsafe_allow_html=True)
+                if _jan_ver:
+                    _jc2.markdown(f"""
+                    <div style='background:#14532d;border-radius:8px;padding:10px;
+                    border-left:3px solid #22c55e;font-size:12px;'>
+                    <b style='color:#22c55e;'>☀️ {_cult_ver}</b><br>
+                    🗓️ Plantio: {_jan_ver['inicio']} a {_jan_ver['fim']}<br>
+                    🌾 Colheita: {_jan_ver['colheita']}<br>
+                    ⏱️ Ciclo: ~{_jan_ver['dias']} dias
+                    </div>""", unsafe_allow_html=True)
+
+            if st.button("💾 Salvar Planejamento", key="btn_salvar_plan",
+                         use_container_width=True, type="primary"):
+                _plan_entry = {
+                    "id_area": _id_plan, "talhao": _area_obj.get("Talhão",""),
+                    "inverno": {"cultura": _cult_inv, "ano": _ano_inv, "area": _area_inv,
+                                "meta": _prod_inv, "obs": _obs_inv},
+                    "verao":   {"cultura": _cult_ver, "ano": _ano_ver, "area": _area_ver,
+                                "meta": _prod_ver, "obs": _obs_ver},
+                    "data_planejamento": str(_date_cal.today()),
+                }
+                # Remove planejamento anterior do mesmo talhão+ano e insere novo
+                st.session_state.planejamento_safras = [
+                    p for p in st.session_state.planejamento_safras
+                    if not (p.get("id_area") == _id_plan and
+                            p.get("inverno",{}).get("ano") == _ano_inv)
+                ]
+                st.session_state.planejamento_safras.append(_plan_entry)
+
+                # Gera eventos automáticos no calendário
+                if _jan_inv:
+                    _mes_inicio = {"Jan":1,"Fev":2,"Mar":3,"Abr":4,"Mai":5,"Jun":6,
+                                    "Jul":7,"Ago":8,"Set":9,"Out":10,"Nov":11,"Dez":12}
+                    _m_ini = _mes_inicio.get(_jan_inv["inicio"],4)
+                    from datetime import date as _d2
+                    _data_plant_inv = _d2(_ano_inv, _m_ini, 1)
+                    st.session_state.calendario_eventos.append({
+                        "Título": f"Plantio {_cult_inv} — {_area_obj.get('Talhão','')}",
+                        "Data": str(_data_plant_inv),
+                        "Tipo": "🌱 Plantio",
+                        "Área": f"{_id_plan} - {_area_obj.get('Talhão','')}",
+                        "Obs": f"Meta: {_prod_inv} sc/ha. {_obs_inv}",
+                        "Alerta": True, "Concluído": False,
+                    })
+
+                salvar_dados_iaagro()
+                success_box(f"✅ Planejamento salvo! Evento de plantio criado no calendário.")
+                st.rerun()
+
+        # Histórico de planejamentos
+        if st.session_state.planejamento_safras:
+            st.markdown("---")
+            st.markdown("#### 📋 Planejamentos Salvos")
+            for _idx_p, _plan in enumerate(st.session_state.planejamento_safras):
+                _c1_p, _c2_p = st.columns([5,1])
+                with _c1_p:
+                    st.markdown(f"""
+                    <div style='background:#0f2d4a;border-radius:10px;padding:12px 16px;
+                    border-left:3px solid #22c55e;margin:4px 0;'>
+                    <span style='color:#6ee7b7;font-weight:700;'>
+                    🌾 {_plan.get('talhao','')} — {_plan.get('inverno',{}).get('ano','')}
+                    </span><br>
+                    <span style='color:#94a3b8;font-size:12px;'>
+                    ❄️ {_plan.get('inverno',{}).get('cultura','')} &nbsp;→&nbsp;
+                    ☀️ {_plan.get('verao',{}).get('cultura','')}
+                    </span>
+                    </div>""", unsafe_allow_html=True)
+                if _c2_p.button("🗑️", key=f"del_plan_{_idx_p}"):
+                    st.session_state.planejamento_safras.pop(_idx_p)
+                    salvar_dados_iaagro()
+                    st.rerun()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # ABA 3 — ROTAÇÃO DE CULTURAS
+    # ════════════════════════════════════════════════════════════════════════
+    with _tab_rot:
+        st.markdown("#### 🔄 Mapa de Rotação por Talhão")
+
+        if not st.session_state.planejamento_safras:
+            st.markdown("""
+            <div style='background:#0f3460;border-radius:12px;padding:24px;text-align:center;
+            border:2px dashed #1e4976;'>
+            <div style='font-size:40px;'>🔄</div>
+            <div style='color:#94a3b8;margin-top:8px;'>
+            Salve planejamentos na aba <b style='color:#6ee7b7;'>🌾 Planejamento de Safras</b>
+            para ver o mapa de rotação.
+            </div></div>""", unsafe_allow_html=True)
+        else:
+            # Agrupa por talhão
+            _by_talhao = {}
+            for _p in st.session_state.planejamento_safras:
+                _t = _p.get("talhao","")
+                if _t not in _by_talhao:
+                    _by_talhao[_t] = []
+                _by_talhao[_t].append(_p)
+
+            for _tal, _plans in _by_talhao.items():
+                st.markdown(f"**🌾 Talhão: {_tal}**")
+                _cols_rot = st.columns(min(len(_plans), 4))
+                for _ci, _p in enumerate(_plans):
+                    with _cols_rot[_ci % 4]:
+                        _inv_c = _p.get("inverno",{}).get("cultura","—")
+                        _ver_c = _p.get("verao",{}).get("cultura","—")
+                        _ano_c = _p.get("inverno",{}).get("ano","")
+                        st.markdown(f"""
+                        <div style='background:#0f2d4a;border-radius:12px;padding:14px;
+                        text-align:center;border:1px solid #1e4976;margin:2px;'>
+                        <div style='color:#94a3b8;font-size:11px;font-weight:700;
+                        letter-spacing:1px;margin-bottom:8px;'>SAFRA {_ano_c}</div>
+                        <div style='background:#1e3a5f;border-radius:8px;padding:8px;
+                        margin-bottom:6px;'>
+                        <div style='color:#38bdf8;font-size:10px;font-weight:700;'>❄️ INVERNO</div>
+                        <div style='color:#f1f5f9;font-size:12px;font-weight:600;margin-top:2px;'>{_inv_c}</div>
+                        </div>
+                        <div style='color:#64748b;font-size:18px;'>↓</div>
+                        <div style='background:#14532d;border-radius:8px;padding:8px;margin-top:6px;'>
+                        <div style='color:#22c55e;font-size:10px;font-weight:700;'>☀️ VERÃO</div>
+                        <div style='color:#f1f5f9;font-size:12px;font-weight:600;margin-top:2px;'>{_ver_c}</div>
+                        </div></div>""", unsafe_allow_html=True)
+
+            # Regras de rotação (EMBRAPA)
+            st.markdown("---")
+            st.markdown("#### 📚 Boas Práticas de Rotação — EMBRAPA Sul")
+            _regras = [
+                ("✅","Soja → Trigo/Aveia → Soja","Rotação clássica do PR/SC/RS. Quebra ciclo de Sclerotinia e ferrugem."),
+                ("✅","Milho → Aveia/Mix Cobertura → Soja","Milho melhora estrutura; cobertura repõe MO; soja fixa N."),
+                ("✅","Soja → Canola → Soja","Canola quebra ciclo de nematoides e melhora P disponível."),
+                ("⚠️","Soja → Soja (monocultura)","Aumenta SCN, ferrugem e podridão radicular. Evitar >2 anos."),
+                ("⚠️","Trigo → Trigo","Aumenta brusone e manchas foliares. Máximo 2 anos seguidos."),
+                ("❌","Soja → Feijão → Soja","Ambas leguminosas. Amplifica patógenos de solo comuns."),
+            ]
+            for _ico_r, _rot_r, _desc_r in _regras:
+                _bg_r = "#14532d" if _ico_r == "✅" else ("#78350f" if _ico_r == "⚠️" else "#7f1d1d")
+                _bd_r = "#22c55e" if _ico_r == "✅" else ("#f59e0b" if _ico_r == "⚠️" else "#ef4444")
+                st.markdown(f"""
+                <div style='background:{_bg_r};border-radius:8px;padding:8px 14px;
+                border-left:3px solid {_bd_r};margin:3px 0;'>
+                <span style='color:#fff;font-weight:700;font-size:12px;'>{_ico_r} {_rot_r}</span><br>
+                <span style='color:rgba(255,255,255,0.6);font-size:11px;'>{_desc_r}</span>
+                </div>""", unsafe_allow_html=True)
 
 if menu == "🌍 Inteligência":
   with _sub_int[4]:
