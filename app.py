@@ -903,7 +903,7 @@ def buscar_precos_cepea_ia():
                 "anthropic-version": "2023-06-01",
             },
             json={
-                "model":      "claude-sonnet-4-20250514",
+                "model":      "claude-sonnet-4-5",
                 "max_tokens": 500,
                 "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages":   [{"role": "user", "content": prompt}]
@@ -7869,41 +7869,44 @@ if menu == "🌍 Inteligência":
         if st.button("🤖 Analisar Mapa com IA", key="btn_analisar_mapa", use_container_width=True):
             with st.spinner("Analisando mapa com IA..."):
                 try:
-                    import anthropic as _anth, base64
-                    _cli = _anth.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY",""))
+                    import requests as _rq_mapa, base64 as _b64_mapa
+                    _api_key_mapa = st.secrets.get("ANTHROPIC_API_KEY","")
 
-                    _msgs_mapa = [{
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (f"Analise este mapa de colheita agrícola. "
-                                         f"Cultura: {cultura_limpa(_cultura_mc)}, Área: {_area_mc} ha. "
-                                         f"Obs: {_obs_mc}. "
-                                         "Identifique: 1) Zonas de alta e baixa produtividade, "
-                                         "2) Variabilidade espacial, "
-                                         "3) Possíveis causas das variações, "
-                                         "4) Recomendações de manejo por zonas. "
-                                         "Responda em português, de forma prática para o produtor.")
-                            }
-                        ]
-                    }]
+                    _txt_mapa = (f"Analise este mapa de colheita agrícola. "
+                                 f"Cultura: {cultura_limpa(_cultura_mc)}, Área: {_area_mc} ha. "
+                                 f"Obs: {_obs_mc}. "
+                                 "Identifique: 1) Zonas de alta e baixa produtividade, "
+                                 "2) Variabilidade espacial, "
+                                 "3) Possíveis causas das variações, "
+                                 "4) Recomendações de manejo por zonas. "
+                                 "Responda em português, de forma prática para o produtor.")
 
+                    _content_mapa = []
                     # Adiciona imagem se for imagem
                     if _arquivo_mapa.type.startswith("image"):
-                        _img_b64 = base64.b64encode(_arquivo_mapa.read()).decode()
+                        _img_b64 = _b64_mapa.b64encode(_arquivo_mapa.read()).decode()
                         _ext = "jpeg" if "jpg" in _arquivo_mapa.type else "png"
-                        _msgs_mapa[0]["content"].insert(0, {
+                        _content_mapa.append({
                             "type": "image",
                             "source": {"type": "base64", "media_type": f"image/{_ext}", "data": _img_b64}
                         })
+                    _content_mapa.append({"type": "text", "text": _txt_mapa})
 
-                    _resp_mapa = _cli.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=1500,
-                        messages=_msgs_mapa
+                    _resp_mapa = _rq_mapa.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": _api_key_mapa,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": "claude-sonnet-4-5",
+                            "max_tokens": 1500,
+                            "messages": [{"role":"user","content":_content_mapa}],
+                        },
+                        timeout=60
                     )
-                    _analise = _resp_mapa.content[0].text
+                    _analise = _resp_mapa.json().get("content",[{}])[0].get("text","Sem resposta.")
                     st.session_state["_analise_mapa"] = _analise
                 except Exception as e:
                     st.error(f"Erro na análise: {e}")
@@ -7967,14 +7970,27 @@ if menu == "🌍 Inteligência":
         with st.chat_message("assistant"):
             with st.spinner("Consultando..."):
                 try:
-                    import anthropic as _anth
-                    _cli = _anth.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY",""))
-                    _resp = _cli.messages.create(
-                        model="claude-sonnet-4-20250514", max_tokens=800,
-                        system=f"Assistente agrícola especialista brasileiro. Responda em português prático. Contexto: {_ctx_ia}",
-                        messages=[{"role":m["role"],"content":m["content"]} for m in st.session_state.assistente_hist]
+                    import requests as _rq_ia
+                    _api_key_ia = st.secrets.get("ANTHROPIC_API_KEY","")
+                    _msgs_ia = [{"role":m["role"],"content":m["content"]}
+                                for m in st.session_state.assistente_hist]
+                    _resp_ia = _rq_ia.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": _api_key_ia,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": "claude-sonnet-4-5",
+                            "max_tokens": 800,
+                            "system": f"Você é um assistente agrícola especialista brasileiro. Responda sempre em português de forma prática e objetiva para produtores rurais. Baseie-se em EMBRAPA, CQFS RS/SC e boas práticas agrícolas. Contexto da propriedade: {_ctx_ia}",
+                            "messages": _msgs_ia,
+                        },
+                        timeout=30
                     )
-                    _ans = _resp.content[0].text
+                    _data_ia = _resp_ia.json()
+                    _ans = _data_ia.get("content",[{}])[0].get("text","Sem resposta.")
                     st.markdown(_ans)
                     st.session_state.assistente_hist.append({"role":"assistant","content":_ans})
                 except Exception as e:
