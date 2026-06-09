@@ -4836,7 +4836,7 @@ if menu == "🌾 Lavoura":
 # MENU: ANÁLISE DE SOLO
 # ─────────────────────────────────────────────
 elif menu == "🧪 Solo & Adubação":
-    _sub_solo = st.tabs(["🧪 Análise de Solo","🔬 Diagnóstico Completo","🌱 Adubação","📄 OCR Laudo de Solo"])
+    _sub_solo = st.tabs(["🧪 Análise de Solo","🔬 Diagnóstico Completo","🌱 Adubação","📄 OCR Laudo de Solo","📊 Evolução da Fertilidade"])
 
 if menu == "🧪 Solo & Adubação":
   with _sub_solo[0]:
@@ -5013,17 +5013,43 @@ if menu == "🧪 Solo & Adubação":
                     "textura": _textura, "porosidade": _porosidade,
                     "saturacao_al": m_calc,
                 })
-                atualizar_area_atual()
-                salvar_dados_iaagro()
-                # Salvar no banco histórico
+                # Calcula score/nota/classe e salva nos dados E na área
                 nota_s  = calcular_nota(st.session_state.dados)
                 score_s, classe_s, _ = score_solo(st.session_state.dados)
+                st.session_state.dados["nota_solo"]   = nota_s
+                st.session_state.dados["score_solo"]  = score_s
+                st.session_state.dados["classe_solo"] = classe_s
+
+                # Salva na área ativa (com chaves padronizadas para Evolução da Fertilidade)
                 id_area_atual = st.session_state.dados.get("id_area","")
+                for i, _a in enumerate(st.session_state.areas):
+                    if _a.get("ID") == id_area_atual:
+                        st.session_state.areas[i]["Dados"]       = st.session_state.dados.copy()
+                        st.session_state.areas[i]["dados"]       = st.session_state.dados.copy()
+                        st.session_state.areas[i]["Nota Solo"]   = nota_s
+                        st.session_state.areas[i]["score_solo"]  = score_s
+                        st.session_state.areas[i]["classe_solo"] = classe_s
+                        # Adiciona ao histórico de análises dentro da área (para Evolução)
+                        import datetime as _dt_solo
+                        _hist_entry = {
+                            "data":             _dt_solo.date.today().isoformat(),
+                            "ph":               ph, "fosforo": fosforo, "potassio": potassio,
+                            "materia_organica": materia_organica, "calcio": calcio,
+                            "magnesio":         magnesio, "aluminio": aluminio,
+                            "ctc":              ctc, "nota": nota_s,
+                            "score":            score_s, "classe": classe_s,
+                        }
+                        _hist_atual = st.session_state.areas[i].get("historico_solo", [])
+                        _hist_atual.append(_hist_entry)
+                        st.session_state.areas[i]["historico_solo"] = _hist_atual
+                        break
+
+                salvar_dados_iaagro()
+                # Tenta salvar no SQLite local também (funciona localmente)
                 if id_area_atual:
                     salvar_analise_solo_db(id_area_atual, st.session_state.dados, nota_s, score_s, classe_s)
-                # Checar alertas de estoque por email
                 checar_alertas_estoque()
-                success_box("Análise salva na área ativa e registrada no histórico!")
+                success_box(f"✅ Análise salva! Score: {score_s}/100 — {classe_s}")
 
         # ── Foto do talhão ──
         st.divider()
@@ -5799,9 +5825,91 @@ if menu == "🧪 Solo & Adubação":
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# MENU: CUSTOS
+# MENU: EVOLUÇÃO DA FERTILIDADE DO SOLO
 # ─────────────────────────────────────────────
-elif menu == "💰 Financeiro":
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[4]:
+    st.header("📊 Evolução da Fertilidade do Solo")
+
+    if not st.session_state.areas:
+        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
+        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;">
+        ℹ️ Cadastre e analise áreas para ver o histórico.</div>''', unsafe_allow_html=True)
+    else:
+        opcoes_area_fert = [f"{a['ID']} - {a.get('Talhão','')}" for a in st.session_state.areas]
+        area_hist_fert   = st.selectbox("Selecione a área", opcoes_area_fert, key="hist_solo_area_fert")
+        id_area_fert     = area_hist_fert.split(" - ")[0]
+
+        # Tenta carregar do SQLite primeiro
+        df_hist_fert = carregar_historico_solo_db(id_area_fert)
+
+        # Se SQLite vazio, usa historico_solo da área (salvo no Supabase via areas[])
+        if df_hist_fert.empty:
+            _area_fert = next((a for a in st.session_state.areas if a.get("ID") == id_area_fert), None)
+            if _area_fert:
+                _hist_sb = _area_fert.get("historico_solo", [])
+                if _hist_sb:
+                    import pandas as _pd_fert
+                    df_hist_fert = _pd_fert.DataFrame(_hist_sb)
+                elif _area_fert.get("Dados",{}).get("ph") or _area_fert.get("dados",{}).get("ph"):
+                    # Fallback: monta de uma entrada a partir dos dados atuais
+                    _d = _area_fert.get("Dados") or _area_fert.get("dados") or {}
+                    if _d and _d.get("ph"):
+                        import pandas as _pd_fert
+                        df_hist_fert = _pd_fert.DataFrame([{
+                            "data":             "Atual",
+                            "ph":               float(_d.get("ph",0)),
+                            "fosforo":          float(_d.get("fosforo",0)),
+                            "potassio":         float(_d.get("potassio",0)),
+                            "materia_organica": float(_d.get("materia_organica",0)),
+                            "calcio":           float(_d.get("calcio",0)),
+                            "magnesio":         float(_d.get("magnesio",0)),
+                            "aluminio":         float(_d.get("aluminio",0)),
+                            "nota":             float(_d.get("nota_solo", _area_fert.get("Nota Solo",0)) or 0),
+                            "score":            float(_d.get("score_solo", _area_fert.get("score_solo",0)) or 0),
+                            "classe":           _d.get("classe_solo", _area_fert.get("classe_solo","—")),
+                        }])
+
+        if df_hist_fert.empty:
+            st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
+            border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">
+            ⚠️ Nenhuma análise salva para esta área ainda.<br>
+            <span style='font-weight:400;font-size:13px;'>
+            Preencha e salve a análise na aba <b>🧪 Análise de Solo</b>.
+            </span></div>''', unsafe_allow_html=True)
+        else:
+            # Tabela de histórico
+            _cols_disp = [c for c in ["data","ph","fosforo","potassio","materia_organica",
+                                       "calcio","magnesio","score","classe"]
+                          if c in df_hist_fert.columns]
+            st.dataframe(df_hist_fert[_cols_disp], use_container_width=True, hide_index=True)
+
+            # Gráficos de evolução
+            st.markdown("#### 📈 Evolução dos Parâmetros")
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.caption("Score de qualidade do solo")
+                _cols_score = [c for c in ["score","nota"] if c in df_hist_fert.columns]
+                if _cols_score:
+                    st.line_chart(df_hist_fert.set_index("data")[_cols_score])
+            with col_g2:
+                st.caption("pH e macronutrientes")
+                _cols_nutr = [c for c in ["ph","fosforo","potassio"] if c in df_hist_fert.columns]
+                if _cols_nutr:
+                    st.line_chart(df_hist_fert.set_index("data")[_cols_nutr])
+
+            col_g3, col_g4 = st.columns(2)
+            with col_g3:
+                st.caption("Bases trocáveis")
+                _cols_bases = [c for c in ["calcio","magnesio","aluminio"] if c in df_hist_fert.columns]
+                if _cols_bases:
+                    st.line_chart(df_hist_fert.set_index("data")[_cols_bases])
+            with col_g4:
+                st.caption("Matéria orgânica")
+                if "materia_organica" in df_hist_fert.columns:
+                    st.line_chart(df_hist_fert.set_index("data")[["materia_organica"]])
+
+
     _sub_fin = st.tabs([
         "🌾 Custos da Lavoura",
         "🔧 Custos Complementares",
@@ -8512,32 +8620,17 @@ elif menu == "⚙️ Configurações":
 
     # ── TAB 3: HISTÓRICO DO SOLO ──
     with tab3:
-        st.subheader("📊 Evolução da Fertilidade do Solo")
-        if not st.session_state.areas:
-            st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-            border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;">
-            ℹ️ Cadastre e analise áreas para ver o histórico.</div>''', unsafe_allow_html=True)
-        else:
-            opcoes_area = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-            area_hist   = st.selectbox("Selecione a área", opcoes_area, key="hist_solo_area")
-            id_area_sel = area_hist.split(" - ")[0]
-
-            df_hist = carregar_historico_solo_db(id_area_sel)
-            if df_hist.empty:
-                st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
-                border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">
-                ⚠️ Nenhuma análise salva no banco ainda. Salve uma análise na aba "Análise de Solo".</div>''',
-                unsafe_allow_html=True)
-            else:
-                st.dataframe(df_hist[["data","ph","fosforo","potassio","materia_organica",
-                                       "calcio","magnesio","nota","score","classe"]],
-                             use_container_width=True)
-                st.subheader("📈 Evolução do Score e Nota")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.line_chart(df_hist.set_index("data")[["score","nota"]])
-                with col2:
-                    st.line_chart(df_hist.set_index("data")[["ph","fosforo","potassio"]])
+        st.markdown("""
+        <div style='background:#14532d;border-radius:12px;padding:20px 24px;
+        border-left:5px solid #22c55e;text-align:center;margin:20px 0;'>
+        <div style='font-size:36px;'>📊</div>
+        <div style='color:#6ee7b7;font-size:16px;font-weight:800;margin:8px 0;'>
+        Evolução da Fertilidade do Solo</div>
+        <div style='color:#f1f5f9;font-size:13px;'>
+        Esta aba foi movida para o menu principal.<br>
+        Acesse em: <b>🧪 Solo & Adubação → 📊 Evolução da Fertilidade</b>
+        </div></div>
+        """, unsafe_allow_html=True)
 
     # ── TAB 4: EXPORTAR EXCEL ──
     with tab4:
