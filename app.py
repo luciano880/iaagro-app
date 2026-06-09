@@ -7761,140 +7761,163 @@ if menu == "🌍 Inteligência":
 
 if menu == "🌍 Inteligência":
   with _sub_int[1]:
-    st.header("💰 Preços de Mercado")
 
-    # Dólar em tempo real
-    _dolar = 0.0
+    # ── Header ────────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>💰 Preços de Mercado</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Cotações CEPEA/ESALQ em tempo real — mercado físico brasileiro
+    </p></div>
+    """, unsafe_allow_html=True)
+
+    # ── Busca dólar (robusto) ─────────────────────────────────────────────────
+    _dolar_val  = 0.0
+    _dolar_fonte = "—"
     try:
-        _dolar = buscar_dolar_awesomeapi()
+        _d_res = buscar_dolar_awesomeapi()
+        if isinstance(_d_res, dict):
+            _dolar_val  = float(_d_res.get("preco", 0) or 0)
+            _dolar_fonte = _d_res.get("fonte", "—")
+        elif isinstance(_d_res, (int, float)):
+            _dolar_val = float(_d_res)
     except Exception:
         pass
+    if _dolar_val <= 0:
+        _dolar_val = 5.80
+        _dolar_fonte = "Offline"
 
-    # Busca preços do cache ou atualiza
+    # ── Card do dólar sempre visível ──────────────────────────────────────────
+    _dol_c1, _dol_c2, _dol_c3 = st.columns([1.5, 1.5, 3])
+    _dol_c1.markdown(f"""
+    <div style='background:linear-gradient(135deg,#1e3a5f,#0f2d4a);border-radius:14px;
+    padding:16px 18px;border:2px solid #3b82f6;text-align:center;'>
+    <div style='color:#93c5fd;font-size:11px;font-weight:800;letter-spacing:2px;'>💵 DÓLAR USD/BRL</div>
+    <div style='color:#fff;font-size:28px;font-weight:900;margin:6px 0;'>
+    R$ {_dolar_val:.4f}</div>
+    <div style='color:#64748b;font-size:10px;'>{_dolar_fonte}</div>
+    </div>""", unsafe_allow_html=True)
+    _dol_c2.markdown(f"""
+    <div style='background:linear-gradient(135deg,#1e1b4b,#0f172a);border-radius:14px;
+    padding:16px 18px;border:2px solid #818cf8;text-align:center;'>
+    <div style='color:#a5b4fc;font-size:11px;font-weight:800;letter-spacing:2px;'>📅 ATUALIZAÇÃO</div>
+    <div style='color:#fff;font-size:16px;font-weight:700;margin:6px 0;'>
+    {datetime.now().strftime("%d/%m/%Y")}</div>
+    <div style='color:#64748b;font-size:10px;'>{datetime.now().strftime("%H:%M")}</div>
+    </div>""", unsafe_allow_html=True)
+
+    # Botão atualizar na terceira coluna
+    with _dol_c3:
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Atualizar Cotações CEPEA", key="btn_buscar_precos",
+                     use_container_width=True, type="primary"):
+            with st.spinner("🌐 Buscando cotações CEPEA via IA..."):
+                try:
+                    _precos_novos = buscar_precos_cepea_ia()
+                    if isinstance(_precos_novos, dict) and _precos_novos:
+                        st.session_state["_precos_mercado"] = _precos_novos
+                        st.session_state["_precos_ts"] = datetime.now().strftime("%H:%M:%S")
+                        st.rerun()
+                    else:
+                        _err = st.session_state.get("_cepea_erro","Sem resposta da IA")
+                        st.warning(f"⚠️ {_err}")
+                except Exception as _ex:
+                    st.error(f"Erro: {_ex}")
+        if st.session_state.get("_precos_ts"):
+            st.caption(f"⏱️ Última atualização: {st.session_state['_precos_ts']}")
+        if st.session_state.get("_cepea_erro"):
+            st.caption(f"ℹ️ {st.session_state['_cepea_erro']}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Cards das commodities ─────────────────────────────────────────────────
     _precos_cache = st.session_state.get("_precos_mercado") or {}
 
-    col_p1, col_p2 = st.columns([3,1])
-    col_p1.markdown("**Preços CEPEA/ESALQ — mercado físico brasileiro**")
-    if col_p2.button("🔄 Atualizar Preços", key="btn_buscar_precos", use_container_width=True):
-        with st.spinner("Consultando preços via IA..."):
-            try:
-                _precos = buscar_precos_cepea_ia()
-                if isinstance(_precos, dict):
-                    st.session_state["_precos_mercado"] = _precos
-                    st.session_state["_precos_ts"]      = datetime.now().strftime("%H:%M:%S")
-                    _precos_cache = _precos
-            except Exception as e:
-                st.error(f"Erro: {e}")
-
-    if st.session_state.get("_precos_ts"):
-        st.caption(f"⏱️ Atualizado às {st.session_state['_precos_ts']}")
-
-    # Monta dólar — garante que é sempre float
-    try:
-        _dolar = float(_dolar) if _dolar else 0.0
-    except (TypeError, ValueError):
-        _dolar = 0.0
-
-    if _dolar > 0:
-        _dolar_str = f"R$ {_dolar:.4f}"
-    else:
-        # tenta pegar do cache de preços
-        try:
-            _dolar = float(_precos_cache.get("dolar", 0.0)) if isinstance(_precos_cache, dict) else 0.0
-        except (TypeError, ValueError):
-            _dolar = 0.0
-        _dolar_str = f"R$ {_dolar:.4f}" if _dolar > 0 else "Indisponível"
-
-    # Cards de commodities
-    COMMODITIES = [
-        {"key": "dolar",   "nome": "💵 Dólar",      "unidade": "USD/BRL",    "emoji": "💵"},
-        {"key": "soja",    "nome": "🌱 Soja",        "unidade": "R$/sc 60kg", "emoji": "🌱"},
-        {"key": "milho",   "nome": "🌽 Milho",       "unidade": "R$/sc 60kg", "emoji": "🌽"},
-        {"key": "trigo",   "nome": "🌾 Trigo",       "unidade": "R$/sc 60kg", "emoji": "🌾"},
-        {"key": "cafe",    "nome": "☕ Café",         "unidade": "R$/sc 60kg", "emoji": "☕"},
-        {"key": "algodao", "nome": "🏷️ Algodão",     "unidade": "R$/@",       "emoji": "🏷️"},
-        {"key": "boi",     "nome": "🐄 Boi Gordo",   "unidade": "R$/@",       "emoji": "🐄"},
-        {"key": "arroz",   "nome": "🍚 Arroz",        "unidade": "R$/sc 50kg", "emoji": "🍚"},
+    COMM_DEF = [
+        {"key":"soja",    "nome":"Soja",     "emoji":"🌱", "unid":"R$/sc 60kg", "cor":"#14532d", "borda":"#22c55e"},
+        {"key":"milho",   "nome":"Milho",    "emoji":"🌽", "unid":"R$/sc 60kg", "cor":"#713f12", "borda":"#f59e0b"},
+        {"key":"trigo",   "nome":"Trigo",    "emoji":"🌾", "unid":"R$/sc 60kg", "cor":"#1e3a5f", "borda":"#38bdf8"},
+        {"key":"cafe",    "nome":"Café",     "emoji":"☕", "unid":"R$/sc 60kg", "cor":"#3b1f0a", "borda":"#d97706"},
+        {"key":"algodao", "nome":"Algodão",  "emoji":"🏷️", "unid":"R$/@",       "cor":"#1e1b4b", "borda":"#818cf8"},
+        {"key":"boi",     "nome":"Boi Gordo","emoji":"🐄", "unid":"R$/@",       "cor":"#3b0f0f", "borda":"#f87171"},
+        {"key":"arroz",   "nome":"Arroz",    "emoji":"🍚", "unid":"R$/sc 50kg", "cor":"#0f3460", "borda":"#60a5fa"},
     ]
 
-    if isinstance(_precos_cache, dict) and len(_precos_cache) > 2:
-        # Injeta dólar separado
-        if isinstance(_dolar, (int, float)) and _dolar > 0:
-            _precos_cache["dolar"] = _dolar
-
-        cols_cards = st.columns(4)
-        for i, comm in enumerate(COMMODITIES):
-            val = _precos_cache.get(comm["key"])
-            if val is None:
+    if isinstance(_precos_cache, dict) and len(_precos_cache) >= 3:
+        _cols_comm = st.columns(4)
+        _comm_count = 0
+        for comm in COMM_DEF:
+            _val_raw = _precos_cache.get(comm["key"])
+            if _val_raw is None:
                 continue
             try:
-                val_f = float(val)
+                _val_f = float(_val_raw)
+                if _val_f <= 0:
+                    continue
             except Exception:
                 continue
-            with cols_cards[i % 4]:
-                st.markdown(f"""
-                <div style='background:#0f3460;border-radius:14px;padding:14px 16px;
-                border:1px solid #1e4976;margin-bottom:10px;'>
-                <div style='color:#94a3b8;font-size:13px;font-weight:600;'>{comm['nome']}</div>
-                <div style='color:#22c55e;font-size:22px;font-weight:800;margin:4px 0;'>
-                R$ {val_f:,.2f}</div>
-                <div style='background:#14532d;color:#6ee7b7;font-size:11px;font-weight:700;
-                padding:2px 8px;border-radius:20px;display:inline-block;'>{comm['unidade']}</div>
-                </div>
-                """, unsafe_allow_html=True)
 
-        # Fonte
-        _fonte = _precos_cache.get("fonte","CEPEA")
-        _data_p = _precos_cache.get("data","")
-        st.caption(f"📊 Fonte: {_fonte} {f'— {_data_p}' if _data_p else ''}")
+            with _cols_comm[_comm_count % 4]:
+                st.markdown(f"""
+                <div style='background:linear-gradient(135deg,{comm["cor"]},{comm["cor"]}cc);
+                border-radius:14px;padding:16px 14px;border:2px solid {comm["borda"]};
+                margin-bottom:10px;text-align:center;'>
+                <div style='font-size:24px;margin-bottom:4px;'>{comm["emoji"]}</div>
+                <div style='color:#94a3b8;font-size:11px;font-weight:800;letter-spacing:1px;'>
+                {comm["nome"].upper()}</div>
+                <div style='color:#fff;font-size:22px;font-weight:900;margin:6px 0;'>
+                R$ {_val_f:,.2f}</div>
+                <div style='background:rgba(0,0,0,0.3);color:{comm["borda"]};font-size:10px;
+                font-weight:700;padding:2px 8px;border-radius:20px;display:inline-block;'>
+                {comm["unid"]}</div>
+                </div>""", unsafe_allow_html=True)
+            _comm_count += 1
+
+        _fonte_p = _precos_cache.get("fonte","CEPEA")
+        _data_p  = _precos_cache.get("data","")
+        st.caption(f"📊 Fonte: {_fonte_p}{f' — {_data_p}' if _data_p else ''}")
 
     else:
-        # Mostra dólar mesmo sem os outros preços
-        if _dolar > 0:
-            st.markdown(f"""
-            <div style='background:#0f3460;border-radius:14px;padding:14px 16px;
-            border:1px solid #1e4976;margin-bottom:10px;display:inline-block;min-width:180px;'>
-            <div style='color:#94a3b8;font-size:13px;font-weight:600;'>💵 Dólar</div>
-            <div style='color:#22c55e;font-size:22px;font-weight:800;margin:4px 0;'>
-            {_dolar_str}</div>
-            <div style='background:#14532d;color:#6ee7b7;font-size:11px;font-weight:700;
-            padding:2px 8px;border-radius:20px;display:inline-block;'>USD/BRL</div>
-            </div>
-            """, unsafe_allow_html=True)
-        st.info("Clique em **🔄 Atualizar Preços** para buscar cotações CEPEA.")
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:12px;padding:24px;text-align:center;
+        border:2px dashed #1e4976;margin:10px 0;'>
+        <div style='font-size:40px;'>📊</div>
+        <div style='color:#94a3b8;font-size:15px;margin-top:8px;'>
+        Clique em <b style='color:#22c55e;'>🔄 Atualizar Cotações CEPEA</b> para carregar os preços.
+        </div>
+        <div style='color:#64748b;font-size:12px;margin-top:6px;'>
+        Dados via IA com web search — CEPEA/ESALQ mercado físico
+        </div></div>""", unsafe_allow_html=True)
 
-    # Acompanhamento manual
+    # ── Acompanhamento manual ─────────────────────────────────────────────────
     st.divider()
-    st.subheader("📈 Acompanhamento de Preços")
-    col_gr1, col_gr2, col_gr3 = st.columns(3)
-    _p_soja  = col_gr1.number_input("Soja R$/sc", min_value=0.0, key="num_p_soja_graf")
-    _p_milho = col_gr2.number_input("Milho R$/sc", min_value=0.0, key="num_p_milho_graf")
-    _p_trigo = col_gr3.number_input("Trigo R$/sc", min_value=0.0, key="num_p_trigo_graf")
-    if st.button("📊 Registrar cotação", key="btn_reg_cotacao"):
-        if "historico_cotacoes" not in st.session_state:
-            st.session_state["historico_cotacoes"] = []
-        st.session_state["historico_cotacoes"].append({
-            "data":  datetime.now().strftime("%d/%m %H:%M"),
-            "Soja":  _p_soja,
-            "Milho": _p_milho,
-            "Trigo": _p_trigo,
-        })
-        st.rerun()
-    if st.session_state.get("historico_cotacoes"):
-        import pandas as pd
-        df_cot = pd.DataFrame(st.session_state["historico_cotacoes"])
-        df_cot = df_cot.set_index("data")
-        st.line_chart(df_cot)
+    with st.expander("📈 Registrar cotação manual para histórico"):
+        col_gr1, col_gr2, col_gr3 = st.columns(3)
+        _p_soja  = col_gr1.number_input("Soja R$/sc",  min_value=0.0, key="num_p_soja_graf")
+        _p_milho = col_gr2.number_input("Milho R$/sc", min_value=0.0, key="num_p_milho_graf")
+        _p_trigo = col_gr3.number_input("Trigo R$/sc", min_value=0.0, key="num_p_trigo_graf")
+        if st.button("📊 Registrar cotação", key="btn_reg_cotacao"):
+            if "historico_cotacoes" not in st.session_state:
+                st.session_state["historico_cotacoes"] = []
+            st.session_state["historico_cotacoes"].append({
+                "data":  datetime.now().strftime("%d/%m %H:%M"),
+                "Soja":  _p_soja, "Milho": _p_milho, "Trigo": _p_trigo,
+            })
+            st.rerun()
+        if st.session_state.get("historico_cotacoes"):
+            import pandas as _pd_cot
+            df_cot = _pd_cot.DataFrame(st.session_state["historico_cotacoes"]).set_index("data")
+            st.line_chart(df_cot)
 
-    st.divider()
     st.markdown("""
     <div style='background:#1e3a5f;border-radius:8px;padding:10px 14px;
-    border-left:4px solid #eab308;'>
-    <b style='color:#eab308;'>⚠️ Aviso importante</b><br>
+    border-left:4px solid #eab308;margin-top:8px;'>
+    <b style='color:#eab308;'>⚠️ Aviso</b>
     <span style='color:#f1f5f9;font-size:12px;'>
-    Os preços CBOT/ICE são referências internacionais convertidos para R$/saca.
-    O preço real de venda depende da base local, prêmio de exportação e câmbio do dia.
-    Consulte sempre seu corretor ou cooperativa antes de fechar negócio.
+    Preços CEPEA/ESALQ são referências do mercado físico brasileiro.
+    O preço real de venda depende da praça, base e câmbio do dia.
+    Consulte seu corretor antes de fechar negócio.
     </span></div>
     """, unsafe_allow_html=True)
 
