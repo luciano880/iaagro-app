@@ -903,7 +903,7 @@ def buscar_precos_cepea_ia():
                 "anthropic-version": "2023-06-01",
             },
             json={
-                "model":      "claude-sonnet-4-5",
+                "model":      "claude-sonnet-4-20250514",
                 "max_tokens": 500,
                 "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages":   [{"role": "user", "content": prompt}]
@@ -7290,65 +7290,127 @@ if menu == "🌍 Inteligência":
     st.header("💰 Preços de Mercado")
 
     # Dólar em tempo real
+    _dolar = 0.0
     try:
         _dolar = buscar_dolar_awesomeapi()
-        col_d1, col_d2 = st.columns(2)
-        col_d1.metric("💵 Dólar (USD/BRL)", f"R$ {_dolar:.4f}", help="Fonte: ExchangeRate — Tempo real")
-        col_d2.metric("📦 Saca 60kg em USD", f"U$ {60/_dolar:.2f}" if _dolar > 0 else "—")
     except Exception:
-        st.info("Dólar indisponível no momento.")
+        pass
 
-    st.divider()
+    # Busca preços do cache ou atualiza
+    _precos_cache = st.session_state.get("_precos_mercado") or {}
 
-    # Preços CEPEA via IA
     col_p1, col_p2 = st.columns([3,1])
     col_p1.markdown("**Preços CEPEA/ESALQ — mercado físico brasileiro**")
     if col_p2.button("🔄 Atualizar Preços", key="btn_buscar_precos", use_container_width=True):
         with st.spinner("Consultando preços via IA..."):
             try:
                 _precos = buscar_precos_cepea_ia()
-                st.session_state["_precos_mercado"] = _precos
-                st.session_state["_precos_ts"]      = datetime.now().strftime("%H:%M:%S")
+                if isinstance(_precos, dict):
+                    st.session_state["_precos_mercado"] = _precos
+                    st.session_state["_precos_ts"]      = datetime.now().strftime("%H:%M:%S")
+                    _precos_cache = _precos
             except Exception as e:
                 st.error(f"Erro: {e}")
 
-    if st.session_state.get("_precos_mercado"):
-        if st.session_state.get("_precos_ts"):
-            st.caption(f"⏱️ Atualizado às {st.session_state['_precos_ts']}")
-        st.markdown(st.session_state["_precos_mercado"])
+    if st.session_state.get("_precos_ts"):
+        st.caption(f"⏱️ Atualizado às {st.session_state['_precos_ts']}")
 
-        # Simulação de gráfico histórico (últimas cotações inseridas manualmente)
-        st.divider()
-        st.subheader("📈 Acompanhamento de Preços")
-        col_gr1, col_gr2, col_gr3 = st.columns(3)
-        _p_soja  = col_gr1.number_input("Soja R$/sc", min_value=0.0, key="num_p_soja_graf")
-        _p_milho = col_gr2.number_input("Milho R$/sc", min_value=0.0, key="num_p_milho_graf")
-        _p_trigo = col_gr3.number_input("Trigo R$/sc", min_value=0.0, key="num_p_trigo_graf")
-        if st.button("📊 Registrar cotação", key="btn_reg_cotacao"):
-            if "historico_cotacoes" not in st.session_state:
-                st.session_state["historico_cotacoes"] = []
-            st.session_state["historico_cotacoes"].append({
-                "data":  datetime.now().strftime("%d/%m %H:%M"),
-                "Soja":  _p_soja,
-                "Milho": _p_milho,
-                "Trigo": _p_trigo,
-            })
-            st.rerun()
-        if st.session_state.get("historico_cotacoes"):
-            import pandas as pd
-            df_cot = pd.DataFrame(st.session_state["historico_cotacoes"])
-            df_cot = df_cot.set_index("data")
-            st.line_chart(df_cot)
+    # Monta dólar
+    if _dolar > 0:
+        _dolar_str = f"R$ {_dolar:.4f}"
     else:
-        st.info("Clique em **Atualizar Preços** para buscar cotações atuais.")
+        # tenta pegar do cache de preços
+        _dolar = _precos_cache.get("dolar", 0.0) if isinstance(_precos_cache, dict) else 0.0
+        _dolar_str = f"R$ {_dolar:.4f}" if _dolar > 0 else "Indisponível"
+
+    # Cards de commodities
+    COMMODITIES = [
+        {"key": "dolar",   "nome": "💵 Dólar",      "unidade": "USD/BRL",    "emoji": "💵"},
+        {"key": "soja",    "nome": "🌱 Soja",        "unidade": "R$/sc 60kg", "emoji": "🌱"},
+        {"key": "milho",   "nome": "🌽 Milho",       "unidade": "R$/sc 60kg", "emoji": "🌽"},
+        {"key": "trigo",   "nome": "🌾 Trigo",       "unidade": "R$/sc 60kg", "emoji": "🌾"},
+        {"key": "cafe",    "nome": "☕ Café",         "unidade": "R$/sc 60kg", "emoji": "☕"},
+        {"key": "algodao", "nome": "🏷️ Algodão",     "unidade": "R$/@",       "emoji": "🏷️"},
+        {"key": "boi",     "nome": "🐄 Boi Gordo",   "unidade": "R$/@",       "emoji": "🐄"},
+        {"key": "arroz",   "nome": "🍚 Arroz",        "unidade": "R$/sc 50kg", "emoji": "🍚"},
+    ]
+
+    if isinstance(_precos_cache, dict) and len(_precos_cache) > 2:
+        # Injeta dólar separado
+        if _dolar > 0:
+            _precos_cache["dolar"] = _dolar
+
+        cols_cards = st.columns(4)
+        for i, comm in enumerate(COMMODITIES):
+            val = _precos_cache.get(comm["key"])
+            if val is None:
+                continue
+            try:
+                val_f = float(val)
+            except Exception:
+                continue
+            with cols_cards[i % 4]:
+                st.markdown(f"""
+                <div style='background:#0f3460;border-radius:14px;padding:14px 16px;
+                border:1px solid #1e4976;margin-bottom:10px;'>
+                <div style='color:#94a3b8;font-size:13px;font-weight:600;'>{comm['nome']}</div>
+                <div style='color:#22c55e;font-size:22px;font-weight:800;margin:4px 0;'>
+                R$ {val_f:,.2f}</div>
+                <div style='background:#14532d;color:#6ee7b7;font-size:11px;font-weight:700;
+                padding:2px 8px;border-radius:20px;display:inline-block;'>{comm['unidade']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Fonte
+        _fonte = _precos_cache.get("fonte","CEPEA")
+        _data_p = _precos_cache.get("data","")
+        st.caption(f"📊 Fonte: {_fonte} {f'— {_data_p}' if _data_p else ''}")
+
+    else:
+        # Mostra dólar mesmo sem os outros preços
+        if _dolar > 0:
+            st.markdown(f"""
+            <div style='background:#0f3460;border-radius:14px;padding:14px 16px;
+            border:1px solid #1e4976;margin-bottom:10px;display:inline-block;min-width:180px;'>
+            <div style='color:#94a3b8;font-size:13px;font-weight:600;'>💵 Dólar</div>
+            <div style='color:#22c55e;font-size:22px;font-weight:800;margin:4px 0;'>
+            {_dolar_str}</div>
+            <div style='background:#14532d;color:#6ee7b7;font-size:11px;font-weight:700;
+            padding:2px 8px;border-radius:20px;display:inline-block;'>USD/BRL</div>
+            </div>
+            """, unsafe_allow_html=True)
+        st.info("Clique em **🔄 Atualizar Preços** para buscar cotações CEPEA.")
+
+    # Acompanhamento manual
+    st.divider()
+    st.subheader("📈 Acompanhamento de Preços")
+    col_gr1, col_gr2, col_gr3 = st.columns(3)
+    _p_soja  = col_gr1.number_input("Soja R$/sc", min_value=0.0, key="num_p_soja_graf")
+    _p_milho = col_gr2.number_input("Milho R$/sc", min_value=0.0, key="num_p_milho_graf")
+    _p_trigo = col_gr3.number_input("Trigo R$/sc", min_value=0.0, key="num_p_trigo_graf")
+    if st.button("📊 Registrar cotação", key="btn_reg_cotacao"):
+        if "historico_cotacoes" not in st.session_state:
+            st.session_state["historico_cotacoes"] = []
+        st.session_state["historico_cotacoes"].append({
+            "data":  datetime.now().strftime("%d/%m %H:%M"),
+            "Soja":  _p_soja,
+            "Milho": _p_milho,
+            "Trigo": _p_trigo,
+        })
+        st.rerun()
+    if st.session_state.get("historico_cotacoes"):
+        import pandas as pd
+        df_cot = pd.DataFrame(st.session_state["historico_cotacoes"])
+        df_cot = df_cot.set_index("data")
+        st.line_chart(df_cot)
 
     st.divider()
     st.markdown("""
     <div style='background:#1e3a5f;border-radius:8px;padding:10px 14px;
     border-left:4px solid #eab308;'>
-    <b style='color:#eab308;'>⚠️ Preços da Bolsa Internacional (CBOT/ICE)</b><br>
+    <b style='color:#eab308;'>⚠️ Aviso importante</b><br>
     <span style='color:#f1f5f9;font-size:12px;'>
-    Os preços CBOT são referências internacionais convertidos para R$/saca.
+    Os preços CBOT/ICE são referências internacionais convertidos para R$/saca.
     O preço real de venda depende da base local, prêmio de exportação e câmbio do dia.
     Consulte sempre seu corretor ou cooperativa antes de fechar negócio.
     </span></div>
@@ -7420,7 +7482,7 @@ if menu == "🌍 Inteligência":
                         })
 
                     _resp_mapa = _cli.messages.create(
-                        model="claude-sonnet-4-5",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1500,
                         messages=_msgs_mapa
                     )
@@ -7491,7 +7553,7 @@ if menu == "🌍 Inteligência":
                     import anthropic as _anth
                     _cli = _anth.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY",""))
                     _resp = _cli.messages.create(
-                        model="claude-sonnet-4-5", max_tokens=800,
+                        model="claude-sonnet-4-20250514", max_tokens=800,
                         system=f"Assistente agrícola especialista brasileiro. Responda em português prático. Contexto: {_ctx_ia}",
                         messages=[{"role":m["role"],"content":m["content"]} for m in st.session_state.assistente_hist]
                     )
