@@ -1,6 +1,6 @@
 streamlit>=1.28.0
 pandas>=2.0.0
-plotly>=5.18.0
+plotly>=5.15.0
 reportlab>=4.0.0
 openpyxl>=3.1.0
 folium>=0.14.0
@@ -12,5 +12,5 @@ requests>=2.31.0
 Pillow>=10.0.0
 pytesseract>=0.3.10
 shapely>=2.0.0
-pyzbar>=0.1.9
 pdfplumber>=0.10.0
+anthropic>=0.25.0
