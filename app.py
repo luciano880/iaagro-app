@@ -7467,77 +7467,228 @@ elif menu == "🌍 Inteligência":
 
 if menu == "🌍 Inteligência":
   with _sub_int[0]:
-    st.header("🌤️ Clima & Alertas Agrícolas")
+    # Header profissional
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🌤️ Clima & Alertas Agrícolas</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Condições meteorológicas em tempo real e janela de aplicação de defensivos
+    </p></div>
+    """, unsafe_allow_html=True)
+
     d = st.session_state.dados
     cidade = d.get("cidade","")
     if not cidade:
-        warning_box("Preencha a cidade no Cadastro da Área para ver o clima.")
+        st.markdown("""
+        <div style='background:#1e3a5f;border-radius:12px;padding:20px;text-align:center;
+        border:2px dashed #3b82f6;'>
+        <div style='font-size:40px;'>🏙️</div>
+        <div style='color:#94a3b8;margin-top:8px;'>
+        Preencha a <b style='color:#6ee7b7;'>cidade</b> no Cadastro da Área para ver o clima em tempo real.
+        </div></div>""", unsafe_allow_html=True)
     else:
         try:
             import requests as rq_
             _r = rq_.get(f"https://wttr.in/{cidade}?format=j1", timeout=10)
             if _r.status_code == 200:
-                _w = _r.json()
+                _w   = _r.json()
                 _cur = _w["current_condition"][0]
+                _temp_c    = int(_cur.get("temp_C", 0))
+                _feels     = int(_cur.get("FeelsLikeC", 0))
+                _umid      = int(_cur.get("humidity", 0))
+                _vento_kmh = int(_cur.get("windspeedKmph", 0))
+                _dir_vento = _cur.get("winddir16Point","—")
+                _cond_desc = _cur.get("weatherDesc",[{}])[0].get("value","—")
+                _chuva_cur = float(_cur.get("precipMM","0") or 0)
+                _uv        = int(_cur.get("uvIndex","0") or 0)
+                _visib     = _cur.get("visibility","—")
 
-                # Condição atual
-                col_c1, col_c2, col_c3, col_c4 = st.columns(4)
-                col_c1.metric("🌡️ Temperatura",  f"{_cur['temp_C']}°C",
-                              delta=f"Sens. térm. {_cur['FeelsLikeC']}°C")
-                col_c2.metric("💧 Umidade",       f"{_cur['humidity']}%")
-                col_c3.metric("💨 Vento",          f"{_cur['windspeedKmph']} km/h",
-                              delta=_cur['winddir16Point'])
-                col_c4.metric("☁️ Condição",      _cur['weatherDesc'][0]['value'])
+                # Emoji condição
+                _cond_lower = _cond_desc.lower()
+                if "thunder" in _cond_lower:       _cond_emoji = "⛈️"
+                elif "heavy rain" in _cond_lower:  _cond_emoji = "🌧️"
+                elif "rain" in _cond_lower or "drizzle" in _cond_lower: _cond_emoji = "🌦️"
+                elif "cloud" in _cond_lower or "overcast" in _cond_lower: _cond_emoji = "☁️"
+                elif "fog" in _cond_lower or "mist" in _cond_lower: _cond_emoji = "🌫️"
+                elif "snow" in _cond_lower:        _cond_emoji = "❄️"
+                elif "sunny" in _cond_lower or "clear" in _cond_lower: _cond_emoji = "☀️"
+                else:                              _cond_emoji = "🌤️"
 
-                # Previsão 3 dias
-                st.subheader("📅 Previsão 7 dias")
-                _weather_days = _w.get("weather", [])
-                _prev_data = []
-                for day in _weather_days:
-                    _prev_data.append({
-                        "Data":       day["date"],
-                        "Máx °C":     day["maxtempC"],
-                        "Mín °C":     day["mintempC"],
-                        "Chuva mm":   day.get("hourly",[{}])[3].get("precipMM","0"),
-                        "Umidade %":  day.get("hourly",[{}])[3].get("humidity","0"),
-                        "Condição":   day.get("hourly",[{}])[3].get("weatherDesc",[{}])[0].get("value","—"),
-                    })
-                import pandas as pd
-                df_prev = pd.DataFrame(_prev_data)
-                st.dataframe(df_prev, use_container_width=True, hide_index=True)
+                # Traduz condição
+                _trad = {
+                    "sunny":"Ensolarado","clear":"Céu limpo","partly cloudy":"Parcialmente nublado",
+                    "cloudy":"Nublado","overcast":"Encoberto","light rain":"Chuva fraca",
+                    "moderate rain":"Chuva moderada","heavy rain":"Chuva forte",
+                    "light drizzle":"Garoa","drizzle":"Garoa","light rain shower":"Pancada fraca",
+                    "patchy rain possible":"Chuva possível","thundery outbreaks":"Trovoadas",
+                    "blizzard":"Nevasca","fog":"Neblina","mist":"Névoa",
+                }
+                _cond_pt = next((v for k,v in _trad.items() if k in _cond_lower), _cond_desc)
 
-                # Gráfico temperatura
-                if not df_prev.empty:
-                    df_temp = df_prev[["Data","Máx °C","Mín °C"]].copy()
-                    df_temp = df_temp.set_index("Data")
-                    df_temp["Máx °C"] = pd.to_numeric(df_temp["Máx °C"], errors="coerce")
-                    df_temp["Mín °C"] = pd.to_numeric(df_temp["Mín °C"], errors="coerce")
-                    st.line_chart(df_temp)
+                # ── Cards clima atual ──────────────────────────────────────────
+                _cc1, _cc2, _cc3, _cc4, _cc5 = st.columns(5)
+                def _clima_card(col, ico, label, valor, sub="", cor="#22c55e"):
+                    col.markdown(f"""
+                    <div style='background:#0f3460;border-radius:14px;padding:14px 12px;
+                    text-align:center;border:1px solid #1e4976;height:110px;'>
+                    <div style='color:#94a3b8;font-size:11px;font-weight:700;letter-spacing:1px;'>{ico} {label}</div>
+                    <div style='color:{cor};font-size:26px;font-weight:800;margin:4px 0;'>{valor}</div>
+                    <div style='color:#64748b;font-size:11px;'>{sub}</div>
+                    </div>""", unsafe_allow_html=True)
 
-                # Janela de aplicação
-                st.divider()
-                st.subheader("🚜 Janela de Aplicação")
-                _vento     = int(_cur.get("windspeedKmph", 99))
-                _umidade   = int(_cur.get("humidity", 0))
-                _temp      = int(_cur.get("temp_C", 30))
-                _ok_vento  = _vento <= 15
-                _ok_umid   = 40 <= _umidade <= 85
-                _ok_temp   = _temp <= 30
+                _clima_card(_cc1,"🌡️","TEMPERATURA",f"{_temp_c}°C",f"Sens. {_feels}°C","#f59e0b")
+                _clima_card(_cc2,"💧","UMIDADE",f"{_umid}%","","#38bdf8")
+                _clima_card(_cc3,"💨","VENTO",f"{_vento_kmh}km/h",f"Dir: {_dir_vento}",
+                            "#22c55e" if _vento_kmh<=15 else "#ef4444")
+                _clima_card(_cc4,"🌧️","CHUVA",f"{_chuva_cur}mm","Agora","#818cf8")
+                _clima_card(_cc5,_cond_emoji,"CONDIÇÃO",_cond_pt,"","#6ee7b7")
 
-                col_j1, col_j2, col_j3 = st.columns(3)
-                col_j1.metric("💨 Vento",   f"{_vento} km/h",
-                              delta="✅ Adequado" if _ok_vento else "❌ Alto (>15 km/h)")
-                col_j2.metric("💧 Umidade", f"{_umidade}%",
-                              delta="✅ Adequada" if _ok_umid else "❌ Fora da faixa (40-85%)")
-                col_j3.metric("🌡️ Temp",   f"{_temp}°C",
-                              delta="✅ Adequada" if _ok_temp else "❌ Alta (>30°C)")
+                st.markdown("<br>", unsafe_allow_html=True)
 
-                if _ok_vento and _ok_umid and _ok_temp:
-                    success_box("🟢 JANELA ABERTA — Condições favoráveis para aplicação agora!")
-                elif sum([_ok_vento, _ok_umid, _ok_temp]) >= 2:
-                    warning_box("🟡 JANELA PARCIAL — Monitore as condições antes de aplicar.")
+                # ── Janela de aplicação — card grande ─────────────────────────
+                _ok_vento = _vento_kmh <= 15
+                _ok_umid  = 40 <= _umid <= 85
+                _ok_temp  = _temp_c <= 30
+                _ok_chuva = _chuva_cur == 0
+                _score    = sum([_ok_vento, _ok_umid, _ok_temp, _ok_chuva])
+
+                if _score == 4:
+                    _jan_cor = "#14532d"; _jan_borda = "#22c55e"
+                    _jan_ico = "🟢"; _jan_msg = "JANELA ABERTA"
+                    _jan_sub = "Condições ideais para aplicação de defensivos agora!"
+                elif _score >= 2:
+                    _jan_cor = "#78350f"; _jan_borda = "#f59e0b"
+                    _jan_ico = "🟡"; _jan_msg = "JANELA PARCIAL"
+                    _jan_sub = "Monitore as condições antes de iniciar a aplicação."
                 else:
-                    error_box("🔴 JANELA FECHADA — Condições desfavoráveis para aplicação.")
+                    _jan_cor = "#7f1d1d"; _jan_borda = "#ef4444"
+                    _jan_ico = "🔴"; _jan_msg = "JANELA FECHADA"
+                    _jan_sub = "Condições desfavoráveis — evite aplicações agora."
+
+                st.markdown(f"""
+                <div style='background:{_jan_cor};border-radius:16px;padding:18px 24px;
+                border:2px solid {_jan_borda};margin:8px 0 16px;'>
+                <div style='display:flex;align-items:center;gap:12px;'>
+                <div style='font-size:36px;'>{_jan_ico}</div>
+                <div>
+                <div style='color:#fff;font-size:18px;font-weight:800;letter-spacing:1px;'>
+                🚜 JANELA DE APLICAÇÃO — {_jan_msg}</div>
+                <div style='color:#fde68a;font-size:13px;margin-top:2px;'>{_jan_sub}</div>
+                </div></div>
+                <div style='display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;'>
+                {"".join([
+                    f"<span style='background:rgba(0,0,0,0.3);border-radius:8px;padding:4px 12px;"
+                    f"color:{'#6ee7b7' if ok else '#fca5a5'};font-size:12px;font-weight:700;'>"
+                    f"{'✅' if ok else '❌'} {lbl}</span>"
+                    for ok, lbl in [
+                        (_ok_vento, f"Vento {_vento_kmh}km/h ≤15"),
+                        (_ok_umid,  f"Umidade {_umid}% 40-85%"),
+                        (_ok_temp,  f"Temp {_temp_c}°C ≤30°C"),
+                        (_ok_chuva, "Sem chuva agora"),
+                    ]
+                ])}
+                </div></div>
+                """, unsafe_allow_html=True)
+
+                # ── Previsão 7 dias — cards por dia ───────────────────────────
+                st.markdown("### 📅 Previsão dos próximos dias")
+                _weather_days = _w.get("weather", [])
+
+                # Dias da semana em PT
+                from datetime import datetime as _dt_c, timedelta as _td
+                _dias_pt = ["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"]
+
+                _cols_prev = st.columns(min(len(_weather_days), 7))
+                for _di, day in enumerate(_weather_days):
+                    _d_max  = int(day.get("maxtempC",0))
+                    _d_min  = int(day.get("mintempC",0))
+                    _d_data = day.get("date","")
+                    try:
+                        _dt_obj  = _dt_c.strptime(_d_data, "%Y-%m-%d")
+                        _dia_sem = _dias_pt[_dt_obj.weekday()]
+                        _d_fmt   = f"{_dt_obj.day:02d}/{_dt_obj.month:02d}"
+                    except Exception:
+                        _dia_sem = ""; _d_fmt = _d_data
+
+                    # Chuva acumulada do dia
+                    _d_chuva = sum(
+                        float(h.get("precipMM","0") or 0)
+                        for h in day.get("hourly",[])
+                    )
+                    _d_umid  = int(day.get("hourly",[{}])[3].get("humidity","0") or 0)
+                    _d_cond  = day.get("hourly",[{}])[3].get("weatherDesc",[{}])[0].get("value","—")
+                    _d_cond_l = _d_cond.lower()
+
+                    # Define cor do card por chuva
+                    if _d_chuva > 15 or "thunder" in _d_cond_l:
+                        _d_bg = "#1e1b4b"; _d_borda = "#818cf8"; _d_alerta = "⛈️ Chuva forte"
+                        _d_cor_txt = "#a5b4fc"
+                    elif _d_chuva > 5 or "heavy rain" in _d_cond_l:
+                        _d_bg = "#1e3a5f"; _d_borda = "#3b82f6"; _d_alerta = "🌧️ Chuva"
+                        _d_cor_txt = "#93c5fd"
+                    elif _d_chuva > 0.5 or "rain" in _d_cond_l or "drizzle" in _d_cond_l:
+                        _d_bg = "#0f2d4a"; _d_borda = "#0ea5e9"; _d_alerta = "🌦️ Chuva fraca"
+                        _d_cor_txt = "#7dd3fc"
+                    elif "cloud" in _d_cond_l or "overcast" in _d_cond_l:
+                        _d_bg = "#1e293b"; _d_borda = "#475569"; _d_alerta = "☁️ Nublado"
+                        _d_cor_txt = "#94a3b8"
+                    else:
+                        _d_bg = "#14532d"; _d_borda = "#22c55e"; _d_alerta = "☀️ Bom dia"
+                        _d_cor_txt = "#6ee7b7"
+
+                    with _cols_prev[_di]:
+                        st.markdown(f"""
+                        <div style='background:{_d_bg};border-radius:14px;padding:14px 10px;
+                        text-align:center;border:2px solid {_d_borda};margin:2px;'>
+                        <div style='color:{_d_cor_txt};font-size:12px;font-weight:800;
+                        letter-spacing:1px;'>{_dia_sem}</div>
+                        <div style='color:#94a3b8;font-size:11px;'>{_d_fmt}</div>
+                        <div style='font-size:22px;margin:6px 0;'>
+                        {"⛈️" if "thunder" in _d_cond_l else "🌧️" if _d_chuva>5 else "🌦️" if _d_chuva>0.5 else "☁️" if "cloud" in _d_cond_l else "☀️"}
+                        </div>
+                        <div style='color:#f1f5f9;font-size:15px;font-weight:800;'>{_d_max}°</div>
+                        <div style='color:#64748b;font-size:12px;'>{_d_min}°</div>
+                        <div style='color:{_d_cor_txt};font-size:11px;font-weight:700;
+                        margin-top:6px;'>{_d_alerta}</div>
+                        <div style='color:#94a3b8;font-size:11px;margin-top:2px;'>
+                        💧{_d_chuva:.1f}mm</div>
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Alertas automáticos para os próximos dias ─────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                _alertas_clima = []
+                for _di, day in enumerate(_weather_days):
+                    _d_chuva_t = sum(float(h.get("precipMM","0") or 0) for h in day.get("hourly",[]))
+                    _d_cond_t  = day.get("hourly",[{}])[3].get("weatherDesc",[{}])[0].get("value","").lower()
+                    _d_data_t  = day.get("date","")
+                    try:
+                        _dt_t = _dt_c.strptime(_d_data_t,"%Y-%m-%d")
+                        _d_str = f"{_dt_t.day:02d}/{_dt_t.month:02d}"
+                    except: _d_str = _d_data_t
+                    if "thunder" in _d_cond_t:
+                        _alertas_clima.append(("🔴","#7f1d1d","#ef4444",f"{_d_str} — Risco de trovoadas! Não aplique defensivos."))
+                    elif _d_chuva_t > 10:
+                        _alertas_clima.append(("🟠","#78350f","#f97316",f"{_d_str} — Chuva prevista {_d_chuva_t:.0f}mm. Aguarde janela seca."))
+                    elif _d_chuva_t > 2:
+                        _alertas_clima.append(("🟡","#713f12","#fbbf24",f"{_d_str} — Chuva leve {_d_chuva_t:.1f}mm. Monitore antes de aplicar."))
+
+                if _alertas_clima:
+                    st.markdown("#### 🔔 Alertas Agrícolas")
+                    for _ico_a, _bg_a, _bd_a, _msg_a in _alertas_clima:
+                        st.markdown(f"""
+                        <div style='background:{_bg_a};border-radius:10px;padding:10px 16px;
+                        border-left:4px solid {_bd_a};margin:4px 0;'>
+                        <span style='color:#fff;font-weight:600;font-size:13px;'>
+                        {_ico_a} {_msg_a}</span></div>""", unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style='background:#14532d;border-radius:10px;padding:10px 16px;
+                    border-left:4px solid #22c55e;margin:4px 0;'>
+                    <span style='color:#fff;font-weight:600;font-size:13px;'>
+                    ✅ Sem alertas para os próximos dias — clima favorável para operações agrícolas!
+                    </span></div>""", unsafe_allow_html=True)
+
             else:
                 st.info(f"Clima para '{cidade}' indisponível no momento.")
         except Exception as e:
