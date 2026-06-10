@@ -6180,6 +6180,7 @@ if menu == "💰 Financeiro":
             })
             salvar_dados_iaagro()
             success_box(f"✅ {_qtd_sacs:.0f} sc × R$ {_preco_sc:.2f} = R$ {_valor_troca:,.2f}")
+            st.rerun()
         else:
             warning_box("Informe quantidade e valor.")
 
@@ -6347,527 +6348,183 @@ if menu == "💰 Financeiro":
 # ── ABA 5: IR RURAL ──────────────────────────────────────────────────────
 if menu == "💰 Financeiro":
   with _sub_fin[5]:
-    import io
-    st.header("🧾 Imposto de Renda — Produtor Rural")
-
     st.markdown("""
-    <div style='background:#0f3460;border-radius:12px;padding:14px 18px;border-left:5px solid #22c55e;margin-bottom:16px;'>
-    <b style='color:#22c55e'>📌 Sobre este módulo</b><br>
-    <span style='color:#f1f5f9;font-size:13px;'>
-    Calcula o Imposto de Renda da atividade rural conforme a legislação brasileira (Lei 8.023/90 e IN RFB 1.700/17).
-    Preencha as receitas e despesas para gerar o relatório completo em PDF pronto para seu contador.
-    </span>
-    </div>
-    """, unsafe_allow_html=True)
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🧾 Imposto de Renda Rural</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Apuração simplificada — Lei 8.023/90 | Valores salvos automaticamente
+    </p></div>""", unsafe_allow_html=True)
 
-    tab_ir1, tab_ir2, tab_ir3 = st.tabs([
-        "📥 Receitas & Despesas",
-        "📊 Resultado & Cálculo",
-        "📄 Gerar Relatório PDF"
-    ])
+    # ── Init session_state IR ──────────────────────────────────────────────
+    for _k, _v in [("ir_ano",2025),("ir_nome",""),("ir_cpf",""),
+                    ("ir_cidade",""),("ir_area_total",0.0),
+                    ("ir_receitas",{}),("ir_despesas",{})]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
-    # ── Inicializa session_state IR ──
-    if "ir_ano"        not in st.session_state: st.session_state.ir_ano        = 2025
-    if "ir_receitas"   not in st.session_state: st.session_state.ir_receitas   = {}
-    if "ir_despesas"   not in st.session_state: st.session_state.ir_despesas   = {}
-    if "ir_nome"       not in st.session_state: st.session_state.ir_nome       = ""
-    if "ir_cpf"        not in st.session_state: st.session_state.ir_cpf        = ""
-    if "ir_cidade"     not in st.session_state: st.session_state.ir_cidade     = ""
-    if "ir_area_total" not in st.session_state: st.session_state.ir_area_total = 0.0
-    if "ir_producao"   not in st.session_state: st.session_state.ir_producao   = {}
+    # ── Dados do produtor ──────────────────────────────────────────────────
+    with st.expander("👤 Dados do Produtor", expanded=False):
+        _ci1, _ci2, _ci3 = st.columns(3)
+        st.session_state.ir_nome       = _ci1.text_input("Nome", value=st.session_state.ir_nome, key="ir_nome_inp")
+        st.session_state.ir_cpf        = _ci1.text_input("CPF", value=st.session_state.ir_cpf, key="ir_cpf_inp")
+        st.session_state.ir_cidade     = _ci2.text_input("Cidade/UF", value=st.session_state.ir_cidade, key="ir_cid_inp")
+        st.session_state.ir_area_total = _ci2.number_input("Área total (ha)", min_value=0.0, value=float(st.session_state.ir_area_total), key="ir_area_inp")
+        st.session_state.ir_ano        = _ci3.selectbox("Ano-calendário", [2025,2024,2023,2022], key="ir_ano_sel")
 
-    # ════════════════════════════════════════════════════════════
-    # TAB 1 — RECEITAS & DESPESAS
-    # ════════════════════════════════════════════════════════════
-    with tab_ir1:
-        st.subheader("👤 Dados do Produtor")
-        col_id1, col_id2, col_id3 = st.columns(3)
-        with col_id1:
-            st.session_state.ir_nome  = st.text_input("Nome completo", value=st.session_state.ir_nome, key="ir_nome_input")
-            st.session_state.ir_cpf   = st.text_input("CPF", value=st.session_state.ir_cpf, key="ir_cpf_input", placeholder="000.000.000-00")
-        with col_id2:
-            st.session_state.ir_cidade     = st.text_input("Cidade/UF", value=st.session_state.ir_cidade, key="ir_cidade_input")
-            st.session_state.ir_area_total = st.number_input("Área total (ha)", min_value=0.0, value=st.session_state.ir_area_total, key="ir_area_input")
-        with col_id3:
-            st.session_state.ir_ano = st.selectbox("Ano-calendário", [2025, 2024, 2023, 2022], key="ir_ano_sel")
+    # ── Auto-importação dos lançamentos do DRE ─────────────────────────────
+    _dre_all = st.session_state.get("dre_registros", [])
+    _dre_ano = [r for r in _dre_all if str(r.get("Safra","")).startswith(str(st.session_state.ir_ano)[:4])]
 
-        st.divider()
-        st.subheader("📈 Receitas da Atividade Rural")
-        st.caption("Informe todas as receitas brutas recebidas no ano")
+    _rec_dre  = sum(r["Valor R$"] for r in _dre_ano if r.get("Tipo") == "Receita")
+    _desp_dre = sum(r["Valor R$"] for r in _dre_ano if r.get("Tipo") in ("Custo Variável","Custo Fixo","Custo"))
 
-        # ── Importação automática da Safrinha ──────────────────────
-        safrinha_regs = st.session_state.get("safrinha_registros", [])
-        if safrinha_regs:
-            receita_safrinha = sum(r.get("receita_1a", 0) + r.get("receita_2a", 0) for r in safrinha_regs)
-            custo_safrinha   = sum(
-                r.get("custo_1a", 0) * r.get("area_1a", 0) +
-                r.get("custo_2a", 0) * r.get("area_2a", 0)
-                for r in safrinha_regs
-            )
-            st.markdown(f"""
-            <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
-            border:1px solid #22c55e;margin-bottom:12px;'>
-            <b style='color:#22c55e;'>📥 Dados da Safrinha disponíveis para importar</b><br>
-            <span style='color:#f1f5f9;font-size:13px;'>
-            {len(safrinha_regs)} rotação(ões) planejada(s) &nbsp;|&nbsp;
-            Receita total: <b>R$ {receita_safrinha:,.2f}</b> &nbsp;|&nbsp;
-            Custos: <b>R$ {custo_safrinha:,.2f}</b>
-            </span>
-            </div>
-            """, unsafe_allow_html=True)
+    # Também soma custos da lavoura
+    _custos_lavoura = sum(r["Valor R$"] for r in _dre_all
+                          if r.get("Origem") == "lavoura")
+    _custos_comp    = sum(r["Valor R$"] for r in _dre_all
+                          if r.get("Origem") == "complementar")
 
-            col_imp1, col_imp2 = st.columns(2)
-            with col_imp1:
-                if st.button("📥 Importar receitas da safrinha", key="btn_imp_rec_safrinha", use_container_width=True):
-                    atual = float(st.session_state.ir_receitas.get("venda_graos", 0.0))
-                    st.session_state.ir_receitas["venda_graos"] = round(atual + receita_safrinha, 2)
-                    st.success(f"✅ R$ {receita_safrinha:,.2f} adicionados às receitas de grãos!")
-                    st.rerun()
-            with col_imp2:
-                if st.button("📥 Importar custos da safrinha", key="btn_imp_desp_safrinha", use_container_width=True):
-                    # Distribui nos campos de despesa correspondentes
-                    atual_sem = float(st.session_state.ir_despesas.get("sementes", 0.0))
-                    atual_def = float(st.session_state.ir_despesas.get("fertilizantes", 0.0))
-                    # 30% sementes, 70% fertilizantes/defensivos como estimativa
-                    st.session_state.ir_despesas["sementes"]      = round(atual_sem + custo_safrinha * 0.30, 2)
-                    st.session_state.ir_despesas["fertilizantes"] = round(atual_def + custo_safrinha * 0.70, 2)
-                    st.success(f"✅ R$ {custo_safrinha:,.2f} distribuídos nas despesas!")
-                    st.rerun()
+    _total_despesas_auto = _desp_dre + _custos_lavoura + _custos_comp
 
-        rec_items = [
-            ("venda_graos",      "🌾 Venda de grãos e cereais (R$)"),
-            ("venda_animais",    "🐄 Venda de animais e produtos pecuários (R$)"),
-            ("arrendamento",     "🏡 Arrendamento recebido (R$)"),
-            ("subvencoes",       "💰 Subvenções e incentivos governamentais (R$)"),
-            ("indenizacoes",     "🛡️ Indenizações de seguro agrícola (R$)"),
-            ("outras_receitas",  "➕ Outras receitas rurais (R$)"),
+    if _rec_dre > 0 or _total_despesas_auto > 0:
+        st.markdown(f"""
+        <div style='background:#14532d;border-radius:10px;padding:12px 16px;
+        border-left:4px solid #22c55e;margin-bottom:12px;'>
+        <b style='color:#6ee7b7;'>✅ Valores importados automaticamente dos seus lançamentos</b><br>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        💰 Receitas lançadas: <b>R$ {_rec_dre:,.2f}</b> &nbsp;|&nbsp;
+        📉 Despesas/custos: <b>R$ {_total_despesas_auto:,.2f}</b>
+        </span></div>""", unsafe_allow_html=True)
+        if st.button("🔄 Sincronizar com lançamentos do Financeiro", key="btn_sync_ir"):
+            # Receitas
+            if _rec_dre > 0:
+                st.session_state.ir_receitas["venda_graos"] = round(
+                    float(st.session_state.ir_receitas.get("venda_graos",0)) + _rec_dre, 2)
+            # Despesas por categoria do DRE
+            _mapa_cat = {
+                "Semente":"sementes","Fertilizante":"fertilizantes",
+                "Defensivo":"fertilizantes","Diesel":"combustivel",
+                "Combustível":"combustivel","Mão de obra":"mao_de_obra",
+                "Maquinário":"manutencao","Frete":"frete","Seguro":"seguro",
+                "Arrendamento":"arrendamento_pg",
+            }
+            for _r in _dre_ano:
+                if _r.get("Tipo") in ("Custo Variável","Custo Fixo","Custo"):
+                    _chave = _mapa_cat.get(_r.get("Categoria",""), "outras_despesas")
+                    st.session_state.ir_despesas[_chave] = round(
+                        float(st.session_state.ir_despesas.get(_chave,0)) + _r["Valor R$"], 2)
+            # Custos lavoura e complementares → fertilizantes e outros
+            if _custos_lavoura > 0:
+                st.session_state.ir_despesas["fertilizantes"] = round(
+                    float(st.session_state.ir_despesas.get("fertilizantes",0)) + _custos_lavoura, 2)
+            if _custos_comp > 0:
+                st.session_state.ir_despesas["outras_despesas"] = round(
+                    float(st.session_state.ir_despesas.get("outras_despesas",0)) + _custos_comp, 2)
+            salvar_dados_iaagro()
+            success_box("✅ Valores sincronizados!")
+            st.rerun()
+
+    # ── Receitas manuais ────────────────────────────────────────────────────
+    st.markdown("#### 💰 Receitas da Atividade Rural")
+    _rec_items = [
+        ("venda_graos","🌾 Venda de grãos (R$)"),
+        ("venda_animais","🐄 Venda de animais (R$)"),
+        ("arrendamento","🏡 Arrendamento recebido (R$)"),
+        ("subvencoes","💰 Subvenções/PAA (R$)"),
+        ("indenizacoes","🛡️ Seguro agrícola (R$)"),
+        ("outras_receitas","➕ Outras receitas (R$)"),
+    ]
+    _rc1, _rc2 = st.columns(2)
+    for i, (k, lbl) in enumerate(_rec_items):
+        with (_rc1 if i%2==0 else _rc2):
+            st.session_state.ir_receitas[k] = st.number_input(
+                lbl, min_value=0.0, value=float(st.session_state.ir_receitas.get(k,0)),
+                key=f"ir_r_{k}", format="%.2f")
+
+    st.markdown("#### 📉 Despesas Dedutíveis")
+    _desp_items = [
+        ("sementes","🌱 Sementes e mudas (R$)"),
+        ("fertilizantes","🧪 Fertilizantes e defensivos (R$)"),
+        ("mao_de_obra","👷 Mão de obra (R$)"),
+        ("combustivel","⛽ Combustível (R$)"),
+        ("manutencao","🔧 Manutenção de máquinas (R$)"),
+        ("arrendamento_pg","🏡 Arrendamento pago (R$)"),
+        ("frete","🚛 Fretes (R$)"),
+        ("seguro","🛡️ Seguros rurais (R$)"),
+        ("assistencia_tec","👨‍🔬 Assistência técnica (R$)"),
+        ("juros","💳 Juros de financiamentos (R$)"),
+        ("outras_despesas","➕ Outras despesas (R$)"),
+    ]
+    _dc1, _dc2 = st.columns(2)
+    for i, (k, lbl) in enumerate(_desp_items):
+        with (_dc1 if i%2==0 else _dc2):
+            st.session_state.ir_despesas[k] = st.number_input(
+                lbl, min_value=0.0, value=float(st.session_state.ir_despesas.get(k,0)),
+                key=f"ir_d_{k}", format="%.2f")
+
+    if st.button("💾 Salvar dados do IR", key="btn_salvar_ir", use_container_width=True):
+        salvar_dados_iaagro()
+        success_box("✅ Dados do IR salvos!")
+
+    # ── Cálculo ─────────────────────────────────────────────────────────────
+    st.divider()
+    _rec_total  = sum(st.session_state.ir_receitas.values())
+    _desp_total = sum(st.session_state.ir_despesas.values())
+    _resultado  = _rec_total - _desp_total
+    _ISENCAO    = 142798.50
+    _BASE       = max(_resultado, 0.0)
+
+    _tabela_ir = [
+        (27110.40, 0.000, 0.00),
+        (33919.80, 0.075, 2033.28),
+        (45012.60, 0.150, 4576.08),
+        (55976.16, 0.225, 7947.24),
+        (float("inf"), 0.275, 10752.00),
+    ]
+    _ir = 0.0; _aliq = 0.0
+    if _BASE > _ISENCAO:
+        for _lim, _a, _ded in _tabela_ir:
+            if _BASE <= _lim:
+                _ir = _BASE * _a - _ded
+                _aliq = _a; break
+
+    _ir = max(_ir, 0.0)
+
+    # Cards resultado
+    _kc = st.columns(4)
+    _kc[0].metric("💰 Receita Bruta",    f"R$ {_rec_total:,.2f}")
+    _kc[1].metric("📉 Despesas Dedut.", f"R$ {_desp_total:,.2f}")
+    _kc[2].metric("📊 Resultado Líquido", f"R$ {_resultado:,.2f}",
+                   delta="Lucro" if _resultado >= 0 else "Prejuízo")
+    _kc[3].metric("🧾 IR Estimado",       f"R$ {_ir:,.2f}",
+                   delta=f"Alíquota {_aliq*100:.1f}%" if _ir > 0 else "Isento")
+
+    # Status fiscal
+    if _resultado <= 0:
+        st.success("✅ Resultado negativo — não há IR a pagar. O prejuízo pode ser compensado.")
+    elif _BASE <= _ISENCAO:
+        st.success(f"✅ Resultado abaixo do limite de isenção (R$ {_ISENCAO:,.2f}) — não há IR a pagar.")
+    else:
+        st.warning(f"⚠️ IR estimado: **R$ {_ir:,.2f}** — consulte seu contador.")
+
+    # Tabela resumo
+    with st.expander("📋 Detalhamento completo"):
+        import pandas as _pd_ir
+        _rows_ir = [
+            {"Item":"(+) Receita Bruta",         "Valor R$": _rec_total},
+            {"Item":"(-) Despesas Dedutíveis",    "Valor R$":-_desp_total},
+            {"Item":"= Resultado Líquido",        "Valor R$": _resultado},
+            {"Item":"Limite de Isenção",          "Valor R$": _ISENCAO},
+            {"Item":"Base de Cálculo IR",         "Valor R$": _BASE},
+            {"Item":f"Alíquota {_aliq*100:.1f}%","Valor R$": _ir},
         ]
-        col_r1, col_r2 = st.columns(2)
-        for i, (key, label) in enumerate(rec_items):
-            with (col_r1 if i % 2 == 0 else col_r2):
-                st.session_state.ir_receitas[key] = st.number_input(
-                    label, min_value=0.0,
-                    value=float(st.session_state.ir_receitas.get(key, 0.0)),
-                    key=f"ir_rec_{key}", format="%.2f"
-                )
+        st.dataframe(_pd_ir.DataFrame(_rows_ir), use_container_width=True, hide_index=True)
+        st.caption("⚠️ Estimativa para planejamento. Declare com contador habilitado.")
 
-        st.divider()
-        st.subheader("📉 Despesas da Atividade Rural")
-        st.caption("Despesas dedutíveis conforme art. 61 do RIR/2018")
-
-        desp_items = [
-            ("sementes",         "🌱 Sementes e mudas (R$)"),
-            ("fertilizantes",    "🧪 Fertilizantes e defensivos (R$)"),
-            ("mao_de_obra",      "👷 Mão de obra (folha + encargos) (R$)"),
-            ("combustivel",      "⛽ Combustível e lubrificantes (R$)"),
-            ("energia",          "⚡ Energia elétrica rural (R$)"),
-            ("arrendamento_pg",  "🏡 Arrendamento pago (R$)"),
-            ("manutencao",       "🔧 Manutenção de máquinas e benfeitorias (R$)"),
-            ("depreciacao",      "📉 Depreciação de bens (R$)"),
-            ("frete",            "🚛 Fretes e carretos (R$)"),
-            ("seguro",           "🛡️ Seguros rurais (R$)"),
-            ("assistencia_tec",  "👨‍🔬 Assistência técnica e agronômica (R$)"),
-            ("juros",            "💳 Juros de financiamentos rurais (R$)"),
-            ("outras_despesas",  "➕ Outras despesas dedutíveis (R$)"),
-        ]
-        col_d1, col_d2 = st.columns(2)
-        for i, (key, label) in enumerate(desp_items):
-            with (col_d1 if i % 2 == 0 else col_d2):
-                st.session_state.ir_despesas[key] = st.number_input(
-                    label, min_value=0.0,
-                    value=float(st.session_state.ir_despesas.get(key, 0.0)),
-                    key=f"ir_desp_{key}", format="%.2f"
-                )
-
-        st.divider()
-        st.subheader("🌾 Produção por Cultura (opcional)")
-        st.caption("Para o memorial descritivo do relatório")
-        culturas_ir = get_culturas() + (["Outro"] if "Outro" not in get_culturas() else [])
-        col_p1, col_p2 = st.columns(2)
-        for i, cult in enumerate(culturas_ir):
-            with (col_p1 if i % 2 == 0 else col_p2):
-                st.session_state.ir_producao[cult] = st.number_input(
-                    f"{cult} (sacas/kg produzidas)",
-                    min_value=0.0,
-                    value=float(st.session_state.ir_producao.get(cult, 0.0)),
-                    key=f"ir_prod_{cult}", format="%.1f"
-                )
-
-    # ════════════════════════════════════════════════════════════
-    # TAB 2 — RESULTADO & CÁLCULO
-    # ════════════════════════════════════════════════════════════
-    with tab_ir2:
-        receita_bruta  = sum(st.session_state.ir_receitas.values())
-        despesa_total  = sum(st.session_state.ir_despesas.values())
-        resultado_liq  = receita_bruta - despesa_total
-
-        # Resumo da safrinha na base do cálculo
-        safrinha_regs2 = st.session_state.get("safrinha_registros", [])
-        if safrinha_regs2:
-            rec_sf  = sum(r.get("receita_1a",0)+r.get("receita_2a",0) for r in safrinha_regs2)
-            luc_sf  = sum(r.get("lucro_total",0) for r in safrinha_regs2)
-            cus_sf  = sum(r.get("custo_1a",0)*r.get("area_1a",0)+r.get("custo_2a",0)*r.get("area_2a",0) for r in safrinha_regs2)
-            importado = float(st.session_state.ir_receitas.get("venda_graos",0)) >= rec_sf * 0.9
-            st.markdown(f"""
-            <div style='background:#1e3a5f;border-radius:10px;padding:12px 16px;
-            border:1px solid #3b82f6;margin-bottom:12px;'>
-            <b style='color:#3b82f6;'>📊 Safrinha</b>
-            {"&nbsp;<span style='color:#22c55e;font-size:12px;'>✅ Dados importados</span>" if importado else "&nbsp;<span style='color:#f59e0b;font-size:12px;'>⚠️ Use o botão Importar na aba anterior</span>"}<br>
-            <span style='color:#f1f5f9;font-size:13px;'>
-            Receita total safras: <b>R$ {rec_sf:,.2f}</b> &nbsp;|&nbsp;
-            Custos: <b>R$ {cus_sf:,.2f}</b> &nbsp;|&nbsp;
-            Lucro líquido safras: <b>R$ {luc_sf:,.2f}</b>
-            </span>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # Resultado presumido (20% da receita bruta — opcional ao resultado real)
-        resultado_pres = receita_bruta * 0.20
-
-        # Limite de isenção: R$ 142.798,50 (2025) — resultado líquido
-        LIMITE_ISENCAO = 142798.50
-        BASE_CALCULO   = max(resultado_liq, 0.0)
-
-        # Tabela progressiva IRPF 2025 (resultado líquido rural entra na base do IRPF)
-        tabela_ir = [
-            (2259.20  * 12, 0.000, 0.00),
-            (2826.65  * 12, 0.075, 169.44 * 12),
-            (3751.05  * 12, 0.150, 381.44 * 12),
-            (4664.68  * 12, 0.225, 662.77 * 12),
-            (float("inf"),  0.275, 896.00 * 12),
-        ]
-        ir_devido = 0.0
-        aliquota_efetiva = 0.0
-        if BASE_CALCULO > LIMITE_ISENCAO:
-            base_tributavel = BASE_CALCULO
-            for limite, aliq, deducao in tabela_ir:
-                if base_tributavel <= limite:
-                    ir_devido = base_tributavel * aliq - deducao
-                    aliquota_efetiva = aliq
-                    break
-
-        ir_devido = max(ir_devido, 0.0)
-
-        # Cards de resultado
-        st.markdown("### 📊 Demonstrativo de Resultado")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("💰 Receita Bruta", f"R$ {receita_bruta:,.2f}")
-        c2.metric("📉 Despesas Dedutíveis", f"R$ {despesa_total:,.2f}")
-        cor_res = "normal" if resultado_liq >= 0 else "inverse"
-        c3.metric("📊 Resultado Líquido", f"R$ {resultado_liq:,.2f}", delta=f"{'Lucro' if resultado_liq >= 0 else 'Prejuízo'}")
-
-        st.divider()
-        st.markdown("### 🧮 Cálculo do Imposto")
-
-        col_calc1, col_calc2 = st.columns(2)
-        with col_calc1:
-            st.markdown(f"""
-            <div style='background:#0f3460;border-radius:12px;padding:16px 20px;border:1px solid #22c55e;'>
-            <b style='color:#22c55e;font-size:15px;'>📋 Resultado Real</b><br><br>
-            <table style='width:100%;color:#f1f5f9;font-size:13px;'>
-            <tr><td>Receita Bruta</td><td align='right'><b>R$ {receita_bruta:,.2f}</b></td></tr>
-            <tr><td>(-) Despesas Dedutíveis</td><td align='right'><b>R$ {despesa_total:,.2f}</b></td></tr>
-            <tr style='border-top:1px solid #22c55e;'><td><b>= Resultado Líquido</b></td><td align='right'><b>R$ {resultado_liq:,.2f}</b></td></tr>
-            <tr><td>Limite de isenção</td><td align='right'>R$ {LIMITE_ISENCAO:,.2f}</td></tr>
-            <tr><td>Base de cálculo IR</td><td align='right'><b>R$ {BASE_CALCULO:,.2f}</b></td></tr>
-            <tr><td>Alíquota aplicada</td><td align='right'>{aliquota_efetiva*100:.1f}%</td></tr>
-            <tr style='border-top:1px solid #22c55e;'><td><b>IR Devido (estimado)</b></td><td align='right'><b style='color:#f59e0b;'>R$ {ir_devido:,.2f}</b></td></tr>
-            </table>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_calc2:
-            st.markdown(f"""
-            <div style='background:#0f3460;border-radius:12px;padding:16px 20px;border:1px solid #3b82f6;'>
-            <b style='color:#3b82f6;font-size:15px;'>📋 Resultado Presumido (20%)</b><br><br>
-            <table style='width:100%;color:#f1f5f9;font-size:13px;'>
-            <tr><td>Receita Bruta</td><td align='right'><b>R$ {receita_bruta:,.2f}</b></td></tr>
-            <tr><td>Base presumida (20%)</td><td align='right'><b>R$ {resultado_pres:,.2f}</b></td></tr>
-            <tr><td colspan='2' style='color:#94a3b8;font-size:11px;padding-top:6px;'>
-            Opção pelo resultado presumido é válida quando a receita bruta anual não ultrapassar R$ 130.000,00 (art. 4º Lei 8.023/90).
-            </td></tr>
-            </table>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.divider()
-
-        # Situação fiscal
-        if receita_bruta == 0:
-            st.info("ℹ️ Preencha as receitas na aba anterior para calcular.")
-        elif resultado_liq <= 0:
-            st.success("✅ Resultado negativo (prejuízo) — não há IR a pagar. O prejuízo pode ser compensado nos próximos anos.")
-        elif BASE_CALCULO <= LIMITE_ISENCAO:
-            st.success(f"✅ Resultado abaixo do limite de isenção (R$ {LIMITE_ISENCAO:,.2f}) — não há IR a pagar.")
-        else:
-            st.warning(f"⚠️ IR estimado: **R$ {ir_devido:,.2f}** — consulte seu contador para a declaração oficial.")
-
-        st.markdown("""
-        <div style='background:#1e293b;border-radius:8px;padding:10px 14px;margin-top:12px;border-left:3px solid #f59e0b;'>
-        <span style='color:#fbbf24;font-size:12px;'>⚠️ <b>Aviso legal:</b> Este cálculo é uma estimativa para fins de planejamento.
-        A declaração oficial deve ser feita por contador habilitado com base nos documentos fiscais originais.</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ════════════════════════════════════════════════════════════
-    # TAB 3 — GERAR RELATÓRIO PDF
-    # ════════════════════════════════════════════════════════════
-    with tab_ir3:
-        st.subheader("📄 Relatório para o Contador")
-        st.info("Gera um PDF profissional com todos os dados, pronto para entregar ao seu contador.")
-
-        receita_bruta  = sum(st.session_state.ir_receitas.values())
-        despesa_total  = sum(st.session_state.ir_despesas.values())
-        resultado_liq  = receita_bruta - despesa_total
-        LIMITE_ISENCAO = 142798.50
-        BASE_CALCULO   = max(resultado_liq, 0.0)
-        tabela_ir = [
-            (2259.20*12, 0.000, 0.00),
-            (2826.65*12, 0.075, 169.44*12),
-            (3751.05*12, 0.150, 381.44*12),
-            (4664.68*12, 0.225, 662.77*12),
-            (float("inf"), 0.275, 896.00*12),
-        ]
-        ir_devido = 0.0
-        aliquota_ef = 0.0
-        if BASE_CALCULO > LIMITE_ISENCAO:
-            for limite, aliq, ded in tabela_ir:
-                if BASE_CALCULO <= limite:
-                    ir_devido    = BASE_CALCULO * aliq - ded
-                    aliquota_ef  = aliq
-                    break
-        ir_devido = max(ir_devido, 0.0)
-
-        if st.button("📄 Gerar PDF do Relatório", use_container_width=True, key="btn_gerar_ir_pdf"):
-            try:
-                from reportlab.lib.pagesizes import A4
-                from reportlab.lib import colors
-                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-                from reportlab.lib.units import cm
-                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-                from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-
-                buffer = io.BytesIO()
-                doc    = SimpleDocTemplate(buffer, pagesize=A4,
-                                           leftMargin=2*cm, rightMargin=2*cm,
-                                           topMargin=2*cm, bottomMargin=2*cm)
-
-                styles  = getSampleStyleSheet()
-                VERDE   = colors.HexColor("#16a34a")
-                AZUL_E  = colors.HexColor("#0f3460")
-                CINZA   = colors.HexColor("#64748b")
-                BRANCO  = colors.white
-                AMARELO = colors.HexColor("#f59e0b")
-
-                s_title  = ParagraphStyle("titulo",  parent=styles["Title"],  fontSize=18, textColor=VERDE,   spaceAfter=4,  alignment=TA_CENTER)
-                s_sub    = ParagraphStyle("sub",     parent=styles["Normal"], fontSize=11, textColor=AZUL_E,  spaceAfter=2,  alignment=TA_CENTER)
-                s_sec    = ParagraphStyle("sec",     parent=styles["Normal"], fontSize=12, textColor=VERDE,   spaceBefore=14, spaceAfter=4, fontName="Helvetica-Bold")
-                s_body   = ParagraphStyle("body",    parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#1e293b"), spaceAfter=3)
-                s_aviso  = ParagraphStyle("aviso",   parent=styles["Normal"], fontSize=8,  textColor=CINZA,   spaceAfter=3,  alignment=TA_CENTER)
-                s_bold   = ParagraphStyle("bold",    parent=styles["Normal"], fontSize=10, fontName="Helvetica-Bold")
-
-                story = []
-
-                # Cabeçalho
-                story.append(Paragraph("IAAGRO — INTELIGÊNCIA AGRÍCOLA", s_title))
-                story.append(Paragraph("Relatório de Apuração do Imposto de Renda — Atividade Rural", s_sub))
-                story.append(Paragraph(f"Ano-Calendário: {st.session_state.ir_ano} | Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", s_aviso))
-                story.append(HRFlowable(width="100%", thickness=2, color=VERDE, spaceAfter=10))
-
-                # Dados do produtor
-                story.append(Paragraph("1. IDENTIFICAÇÃO DO CONTRIBUINTE", s_sec))
-                dados_prod = [
-                    ["Nome completo:", st.session_state.ir_nome or "—"],
-                    ["CPF:", st.session_state.ir_cpf or "—"],
-                    ["Cidade/UF:", st.session_state.ir_cidade or "—"],
-                    ["Área total declarada:", f"{st.session_state.ir_area_total:.2f} ha"],
-                    ["Atividade:", "Produtor Rural — Pessoa Física"],
-                    ["Base legal:", "Lei 8.023/90 | IN RFB 1.700/17 | RIR/2018"],
-                ]
-                t_prod = Table(dados_prod, colWidths=[5.5*cm, 11*cm])
-                t_prod.setStyle(TableStyle([
-                    ("FONTNAME",    (0,0),(-1,-1), "Helvetica"),
-                    ("FONTNAME",    (0,0),(0,-1),  "Helvetica-Bold"),
-                    ("FONTSIZE",    (0,0),(-1,-1), 10),
-                    ("TEXTCOLOR",   (0,0),(0,-1),  AZUL_E),
-                    ("ROWBACKGROUNDS", (0,0),(-1,-1), [colors.HexColor("#f8fafc"), BRANCO]),
-                    ("GRID",        (0,0),(-1,-1), 0.3, CINZA),
-                    ("PADDING",     (0,0),(-1,-1), 5),
-                ]))
-                story.append(t_prod)
-                story.append(Spacer(1, 10))
-
-                # Receitas
-                story.append(Paragraph("2. RECEITAS DA ATIVIDADE RURAL", s_sec))
-                rec_labels = {
-                    "venda_graos":     "Venda de grãos e cereais",
-                    "venda_animais":   "Venda de animais e produtos pecuários",
-                    "arrendamento":    "Arrendamento recebido",
-                    "subvencoes":      "Subvenções e incentivos governamentais",
-                    "indenizacoes":    "Indenizações de seguro agrícola",
-                    "outras_receitas": "Outras receitas rurais",
-                }
-                rows_rec = [["Descrição", "Valor (R$)"]]
-                for k, label in rec_labels.items():
-                    val = st.session_state.ir_receitas.get(k, 0.0)
-                    if val > 0:
-                        rows_rec.append([label, f"R$ {val:,.2f}"])
-                rows_rec.append(["TOTAL RECEITA BRUTA", f"R$ {receita_bruta:,.2f}"])
-
-                t_rec = Table(rows_rec, colWidths=[12*cm, 4.5*cm])
-                t_rec.setStyle(TableStyle([
-                    ("BACKGROUND",  (0,0),(-1,0),  VERDE),
-                    ("TEXTCOLOR",   (0,0),(-1,0),  BRANCO),
-                    ("FONTNAME",    (0,0),(-1,0),  "Helvetica-Bold"),
-                    ("FONTNAME",    (0,1),(-1,-2), "Helvetica"),
-                    ("FONTNAME",    (0,-1),(-1,-1),"Helvetica-Bold"),
-                    ("BACKGROUND",  (0,-1),(-1,-1), colors.HexColor("#dcfce7")),
-                    ("FONTSIZE",    (0,0),(-1,-1), 10),
-                    ("ALIGN",       (1,0),(-1,-1), "RIGHT"),
-                    ("ROWBACKGROUNDS", (0,1),(-1,-2), [colors.HexColor("#f8fafc"), BRANCO]),
-                    ("GRID",        (0,0),(-1,-1), 0.3, CINZA),
-                    ("PADDING",     (0,0),(-1,-1), 6),
-                ]))
-                story.append(t_rec)
-                story.append(Spacer(1, 10))
-
-                # Despesas
-                story.append(Paragraph("3. DESPESAS DEDUTÍVEIS (art. 61 RIR/2018)", s_sec))
-                desp_labels = {
-                    "sementes":        "Sementes e mudas",
-                    "fertilizantes":   "Fertilizantes e defensivos agrícolas",
-                    "mao_de_obra":     "Mão de obra (salários + encargos sociais)",
-                    "combustivel":     "Combustível e lubrificantes",
-                    "energia":         "Energia elétrica rural",
-                    "arrendamento_pg": "Arrendamento pago",
-                    "manutencao":      "Manutenção de máquinas e benfeitorias",
-                    "depreciacao":     "Depreciação de bens do ativo imobilizado",
-                    "frete":           "Fretes e carretos",
-                    "seguro":          "Seguros rurais",
-                    "assistencia_tec": "Assistência técnica e agronômica",
-                    "juros":           "Juros de financiamentos rurais",
-                    "outras_despesas": "Outras despesas dedutíveis",
-                }
-                rows_desp = [["Descrição", "Valor (R$)"]]
-                for k, label in desp_labels.items():
-                    val = st.session_state.ir_despesas.get(k, 0.0)
-                    if val > 0:
-                        rows_desp.append([label, f"R$ {val:,.2f}"])
-                rows_desp.append(["TOTAL DESPESAS DEDUTÍVEIS", f"R$ {despesa_total:,.2f}"])
-
-                t_desp = Table(rows_desp, colWidths=[12*cm, 4.5*cm])
-                t_desp.setStyle(TableStyle([
-                    ("BACKGROUND",  (0,0),(-1,0),  AZUL_E),
-                    ("TEXTCOLOR",   (0,0),(-1,0),  BRANCO),
-                    ("FONTNAME",    (0,0),(-1,0),  "Helvetica-Bold"),
-                    ("FONTNAME",    (0,1),(-1,-2), "Helvetica"),
-                    ("FONTNAME",    (0,-1),(-1,-1),"Helvetica-Bold"),
-                    ("BACKGROUND",  (0,-1),(-1,-1), colors.HexColor("#dbeafe")),
-                    ("FONTSIZE",    (0,0),(-1,-1), 10),
-                    ("ALIGN",       (1,0),(-1,-1), "RIGHT"),
-                    ("ROWBACKGROUNDS", (0,1),(-1,-2), [colors.HexColor("#f8fafc"), BRANCO]),
-                    ("GRID",        (0,0),(-1,-1), 0.3, CINZA),
-                    ("PADDING",     (0,0),(-1,-1), 6),
-                ]))
-                story.append(t_desp)
-                story.append(Spacer(1, 10))
-
-                # Apuração IR
-                story.append(Paragraph("4. APURAÇÃO DO IMPOSTO DE RENDA", s_sec))
-                sit = "Não há IR a pagar (resultado negativo ou abaixo do limite de isenção)" if ir_devido == 0 else f"IR estimado devido: R$ {ir_devido:,.2f}"
-                rows_ir = [
-                    ["Descrição", "Valor (R$)"],
-                    ["Receita Bruta Total",                  f"R$ {receita_bruta:,.2f}"],
-                    ["(-) Despesas Dedutíveis",               f"R$ {despesa_total:,.2f}"],
-                    ["= Resultado Líquido da Atividade Rural",f"R$ {resultado_liq:,.2f}"],
-                    ["Limite de isenção (ano-calendário)",    f"R$ {LIMITE_ISENCAO:,.2f}"],
-                    ["Base de Cálculo do IR",                 f"R$ {BASE_CALCULO:,.2f}"],
-                    ["Alíquota aplicada (tabela progressiva)",f"{aliquota_ef*100:.1f}%"],
-                    ["IR ESTIMADO DEVIDO",                    f"R$ {ir_devido:,.2f}"],
-                ]
-                t_ir = Table(rows_ir, colWidths=[12*cm, 4.5*cm])
-                t_ir.setStyle(TableStyle([
-                    ("BACKGROUND",  (0,0),(-1,0),  colors.HexColor("#1e293b")),
-                    ("TEXTCOLOR",   (0,0),(-1,0),  BRANCO),
-                    ("FONTNAME",    (0,0),(-1,0),  "Helvetica-Bold"),
-                    ("FONTNAME",    (0,1),(-1,-2), "Helvetica"),
-                    ("FONTNAME",    (0,-1),(-1,-1),"Helvetica-Bold"),
-                    ("BACKGROUND",  (0,-1),(-1,-1), colors.HexColor("#fef3c7")),
-                    ("TEXTCOLOR",   (0,-1),(-1,-1), colors.HexColor("#92400e")),
-                    ("FONTSIZE",    (0,0),(-1,-1), 10),
-                    ("ALIGN",       (1,0),(-1,-1), "RIGHT"),
-                    ("ROWBACKGROUNDS", (0,1),(-1,-2), [colors.HexColor("#f8fafc"), BRANCO]),
-                    ("GRID",        (0,0),(-1,-1), 0.3, CINZA),
-                    ("PADDING",     (0,0),(-1,-1), 6),
-                ]))
-                story.append(t_ir)
-                story.append(Spacer(1, 12))
-
-                # Produção (se preenchida)
-                prod_preench = {k:v for k,v in st.session_state.ir_producao.items() if v > 0}
-                if prod_preench:
-                    story.append(Paragraph("5. MEMORIAL DESCRITIVO — PRODUÇÃO", s_sec))
-                    rows_prod = [["Cultura", "Quantidade produzida"]]
-                    for cult, qtd in prod_preench.items():
-                        rows_prod.append([cult, f"{qtd:,.1f} sc/kg"])
-                    t_prod2 = Table(rows_prod, colWidths=[8*cm, 8.5*cm])
-                    t_prod2.setStyle(TableStyle([
-                        ("BACKGROUND",  (0,0),(-1,0),  VERDE),
-                        ("TEXTCOLOR",   (0,0),(-1,0),  BRANCO),
-                        ("FONTNAME",    (0,0),(-1,0),  "Helvetica-Bold"),
-                        ("FONTNAME",    (0,1),(-1,-1), "Helvetica"),
-                        ("FONTSIZE",    (0,0),(-1,-1), 10),
-                        ("ROWBACKGROUNDS", (0,1),(-1,-1), [colors.HexColor("#f8fafc"), BRANCO]),
-                        ("GRID",        (0,0),(-1,-1), 0.3, CINZA),
-                        ("PADDING",     (0,0),(-1,-1), 6),
-                    ]))
-                    story.append(t_prod2)
-                    story.append(Spacer(1, 10))
-
-                # Rodapé / aviso legal
-                story.append(HRFlowable(width="100%", thickness=1, color=CINZA, spaceAfter=6))
-                story.append(Paragraph(
-                    "⚠️ Este relatório é um auxílio ao planejamento tributário gerado pelo sistema IAAGRO. "
-                    "Não substitui a declaração oficial do IRPF nem a orientação de contador habilitado. "
-                    "Base legal: Lei 8.023/1990, IN RFB 1.700/2017, Decreto 9.580/2018 (RIR/2018).",
-                    s_aviso
-                ))
-                story.append(Spacer(1, 4))
-                story.append(Paragraph(
-                    f"Gerado por IAAGRO • {datetime.now().strftime('%d/%m/%Y às %H:%M')} • www.iaagro.com.br",
-                    s_aviso
-                ))
-
-                doc.build(story)
-                pdf_bytes = buffer.getvalue()
-
-                nome_arq = f"IR_Rural_{st.session_state.ir_nome.replace(' ','_') or 'produtor'}_{st.session_state.ir_ano}.pdf"
-                st.success("✅ Relatório gerado com sucesso!")
-                st.download_button(
-                    label="📥 Baixar Relatório PDF",
-                    data=pdf_bytes,
-                    file_name=nome_arq,
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="btn_download_ir_pdf"
-                )
-
-            except Exception as e:
-                st.error(f"❌ Erro ao gerar PDF: {e}")
-
-        st.markdown("""
-        <div style='background:#0f3460;border-radius:10px;padding:14px 18px;margin-top:16px;border:1px solid #22c55e;'>
-        <b style='color:#22c55e;'>📋 O relatório contém:</b>
-        <ul style='color:#f1f5f9;font-size:13px;margin-top:8px;'>
-        <li>Identificação completa do produtor</li>
-        <li>Demonstrativo de receitas por categoria</li>
-        <li>Demonstrativo de despesas dedutíveis (art. 61 RIR/2018)</li>
-        <li>Apuração do IR com tabela progressiva 2025</li>
-        <li>Memorial descritivo de produção por cultura</li>
-        <li>Base legal completa para o contador</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
+# ─────────────────────────────────────────────
+# MENU: OPERACIONAL
+# ─────────────────────────────────────────────
 
 # ─────────────────────────────────────────────
 # MENU: OPERACIONAL
