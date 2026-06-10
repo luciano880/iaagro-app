@@ -1,16 +1,20 @@
-﻿{
-  "name": "IAAGRO — Inteligência Agrícola de Precisão",
-  "short_name": "IAAGRO",
-  "description": "Sistema de gestão agrícola de precisão com IA",
-  "start_url": "https://iaagro-app-kvrwxtkugla8pqe7dgqueue.streamlit.app",
+{
+  "name": "IAAgro Pro",
+  "short_name": "IAAgro",
+  "start_url": "/",
   "display": "standalone",
-  "background_color": "#0d1b2a",
+  "background_color": "#0d2137",
   "theme_color": "#22c55e",
-  "orientation": "portrait-primary",
-  "lang": "pt-BR",
   "icons": [
-    {"src": "IAAgrologo.jpeg", "sizes": "192x192", "type": "image/jpeg", "purpose": "any maskable"},
-    {"src": "IAAgrologo.jpeg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any maskable"}
-  ],
-  "categories": ["productivity", "business"]
+    {
+      "src": "/app/static/IAAgrologo.jpeg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/app/static/IAAgrologo.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
 }
