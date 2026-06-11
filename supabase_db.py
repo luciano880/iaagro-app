@@ -125,7 +125,9 @@ def sb_carregar(url, api_key, token, user_id):
             "receituarios":            json.loads(row.get("receituarios", "[]")),
             "safrinha_registros":      json.loads(row.get("safrinha_registros", "[]")),
             "fluxo_caixa":             json.loads(row.get("fluxo_caixa", "[]")),
+            "contratos_troca":         json.loads(row.get("contratos_troca", "[]")),
             "corretivos_aplicados":    json.loads(row.get("corretivos_aplicados", "[]")),
+            "planejamento_safras":     json.loads(row.get("planejamento_safras", "[]")),
             "segmento":                row.get("segmento", None),
         }
     return None
@@ -148,7 +150,9 @@ def sb_salvar(url, api_key, token, user_id, session):
         "receituarios":            json.dumps(session.get("receituarios", []), ensure_ascii=False),
         "safrinha_registros":      json.dumps(session.get("safrinha_registros", []), ensure_ascii=False),
         "fluxo_caixa":             json.dumps(session.get("fluxo_caixa", []), ensure_ascii=False),
+        "contratos_troca":         json.dumps(session.get("contratos_troca", []), ensure_ascii=False),
         "corretivos_aplicados":    json.dumps(session.get("corretivos_aplicados", []), ensure_ascii=False),
+        "planejamento_safras":     json.dumps(session.get("planejamento_safras", []), ensure_ascii=False),
         "segmento":                session.get("segmento", None),
         "atualizado_em":           datetime.now().isoformat(),
     }
