@@ -1775,7 +1775,7 @@ PLANOS = {
     },
     "pro": {
         "nome":    "💎 Pro",
-        "preco":   49.90,
+        "preco":   39.90,
         "areas":   10,
         "estoque": 100,
         "cor":     "#1e3a5f",
@@ -1802,7 +1802,7 @@ PLANOS = {
     },
     "premium": {
         "nome":    "🚀 Premium",
-        "preco":   119.90,
+        "preco":   99.90,
         "areas":   -1,   # ilimitado
         "estoque": -1,   # ilimitado
         "cor":     "#14532d",
@@ -3772,7 +3772,7 @@ def bloco_upgrade(recurso: str, usado: int, limite: int):
     if prox_key == "premium":
         link_mes = MP_LINK_PREMIUM_MES
         link_ano = MP_LINK_PREMIUM_ANO
-        preco_ano = 149.90 * 12 * 0.85  # 15% desconto anual
+        preco_ano = 99.90 * 12 * 0.85   # 15% desconto anual
     else:
         link_mes = MP_LINK_PRO_MES
         link_ano = MP_LINK_PRO_ANO
