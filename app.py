@@ -73,7 +73,7 @@ CULTURAS_POR_SEGMENTO = {
     "🌾 Grãos":        ["🌱 Soja","🌽 Milho","🌾 Trigo","🌱 Feijão","🌻 Canola","🌿 Aveia","🍚 Arroz","🌾 Sorgo","🌾 Cevada","🌻 Girassol"],
     "🌿 Horticultura": ["🍅 Tomate","🥔 Batata","🧅 Cebola","🧄 Alho","🍠 Mandioca","🥬 Alface","🥕 Cenoura","🥦 Brócolis","🥒 Pepino","🫑 Pimentão"],
     "🎯 Fruticultura": ["🍊 Laranja","🍌 Banana","🍇 Uva","🍎 Maçã","🥭 Manga","🥑 Abacate","🍋 Limão","🍑 Pêssego","🍂 Caqui","☕ Café"],
-    "🌲 Silvicultura": ["🌳 Eucalipto","🌲 Pinus","🌴 Teca","🌿 Paricá","🌲 Cedro"],
+    "🌲 Silvicultura": ["🌳 Eucalipto","🌲 Pinus","🌴 Teca","🌿 Paricá","🌲 Cedro","🌳 Mogno Africano"],
 }
 
 # ─────────────────────────────────────────────
@@ -1524,23 +1524,27 @@ def tela_login():
                 email_c = st.text_input("E-mail", key="sb_email_cad")
                 senha_c = st.text_input("Senha (mín. 6 caracteres)", type="password", key="sb_senha_cad")
                 conf_c  = st.text_input("Confirmar senha", type="password", key="sb_conf_cad")
-                st.markdown("#### 🌾 Qual é o seu segmento de atuação?")
-                _segs_cad = list(SEGMENTOS_INFO.keys())
-                seg_c = st.radio(
-                    "Segmento",
-                    _segs_cad,
-                    horizontal=True,
-                    key="sb_seg_cad",
-                    help="Você pode alterar depois em Configurações"
-                )
-                _culturas_seg_c = CULTURAS_POR_SEGMENTO.get(seg_c, [])
-                if _culturas_seg_c:
-                    _nomes_cult = " &nbsp;·&nbsp; ".join(
-                        f'<span style="background:#14532d;color:#6ee7b7;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600;">{c}</span>'
-                        for c in _culturas_seg_c
-                    )
-                    st.markdown(f"<div style='margin:6px 0 10px;'>{_nomes_cult}</div>", unsafe_allow_html=True)
                 btn_c = st.form_submit_button("✅ Criar Conta", use_container_width=True)
+
+            # Segmento FORA do form para atualizar culturas em tempo real
+            st.markdown("#### 🌾 Qual é o seu segmento de atuação?")
+            _segs_cad = list(SEGMENTOS_INFO.keys())
+            seg_c = st.radio(
+                "Segmento",
+                _segs_cad,
+                horizontal=True,
+                key="sb_seg_cad",
+                help="Você pode alterar depois em Configurações"
+            )
+            _culturas_seg_c = CULTURAS_POR_SEGMENTO.get(seg_c, [])
+            if _culturas_seg_c:
+                _nomes_cult = " &nbsp;·&nbsp; ".join(
+                    f'<span style="background:#14532d;color:#6ee7b7;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600;">{c.split(" ",1)[-1] if " " in c else c}</span>'
+                    for c in _culturas_seg_c
+                )
+                st.markdown(f"<div style='margin:6px 0 10px;'>{_nomes_cult}</div>", unsafe_allow_html=True)
+            with st.container():
+                pass  # placeholder after radio
             if btn_c:
                 if not nome_c or not email_c or not senha_c:
                     st.error("Preencha todos os campos.")
@@ -3074,7 +3078,77 @@ CATALOGO_PRODUTOS = [
     {"nome":"Ácido Bórico","fab":"Outros","cat":"Fertilizante","ia":"B 17%"},
     # ── OURO FINO ──
     {"nome":"Ênio 200 SC","fab":"Ouro Fino","cat":"Fungicida","ia":"Iprodiona"},
-]
+
+    # ── FMC Fertilizantes ──
+    {"nome":"Regent 800 WG","fab":"FMC","cat":"Inseticida","ia":"Fipronil"},
+    {"nome":"FMC Nitro Gold","fab":"FMC","cat":"Fertilizante","ia":"Nitrogênio líquido estabilizado"},
+    {"nome":"FMC Potássio Líquido","fab":"FMC","cat":"Fertilizante","ia":"K2O 30% líquido"},
+    {"nome":"FMC Starter","fab":"FMC","cat":"Fertilizante","ia":"NPK starter líquido para sulco"},
+    # ── Corteva Fertilizantes ──
+    {"nome":"Encrust","fab":"Corteva","cat":"Tratamento de Sementes","ia":"Polímero + NPK micronutrientes"},
+    {"nome":"Corteva N-Enhance","fab":"Corteva","cat":"Fertilizante","ia":"Nitrogênio estabilizado + NBPT"},
+    # ── Ihara ──
+    {"nome":"Ihara Cobre BR","fab":"Ihara","cat":"Fungicida/Fertilizante","ia":"Oxicloreto de Cobre 84%"},
+    {"nome":"Ihara Boro Quelatado","fab":"Ihara","cat":"Fertilizante","ia":"Boro EDTA 10%"},
+    {"nome":"Ihara Zinco Quelatado","fab":"Ihara","cat":"Fertilizante","ia":"Zinco EDTA 14%"},
+    {"nome":"Ihara Manganês Quelatado","fab":"Ihara","cat":"Fertilizante","ia":"Manganês EDTA 12%"},
+    {"nome":"Ihara Mix Micro","fab":"Ihara","cat":"Fertilizante","ia":"B+Cu+Mn+Zn+Mo quelatados"},
+    # ── CHDS (Crop Health Direct Solutions) ──
+    {"nome":"CHDS Potássio Silicatado","fab":"CHDS","cat":"Fertilizante","ia":"K2SiO3 – Silicato de Potássio"},
+    {"nome":"CHDS Silício Foliar","fab":"CHDS","cat":"Fertilizante","ia":"Si foliar estabilizador"},
+    {"nome":"CHDS Amino Stress","fab":"CHDS","cat":"Fertilizante","ia":"Aminoácidos + micronutrientes anti-stress"},
+    {"nome":"CHDS Enxofre 90 WDG","fab":"CHDS","cat":"Fertilizante","ia":"Enxofre elementar 90%"},
+    # ── Timac Agro ──
+    {"nome":"Physiostart","fab":"Timac Agro","cat":"Fertilizante","ia":"NPK + Seactiv – arranque radicular"},
+    {"nome":"Physiomax","fab":"Timac Agro","cat":"Fertilizante","ia":"Cálcio + Magnésio + Seactiv"},
+    {"nome":"Timac MAP Premium","fab":"Timac Agro","cat":"Fertilizante","ia":"MAP 11-52-00 com Seactiv"},
+    {"nome":"Timac KCl Premium","fab":"Timac Agro","cat":"Fertilizante","ia":"KCl 00-00-60 granulado premium"},
+    {"nome":"Timac Urea+","fab":"Timac Agro","cat":"Fertilizante","ia":"Ureia + NBPT inibidor de urease"},
+    {"nome":"Timac Basacote","fab":"Timac Agro","cat":"Fertilizante","ia":"NPK liberação lenta revestido"},
+    {"nome":"Fertileader Alpha","fab":"Timac Agro","cat":"Foliar / Nutrição","ia":"Seactiv + Aminoácidos + Zn"},
+    {"nome":"Fertileader Max","fab":"Timac Agro","cat":"Foliar / Nutrição","ia":"Seactiv + B + Mo + Mn"},
+    # ── Mosaic ──
+    {"nome":"MicroEssentials SZ","fab":"Mosaic","cat":"Fertilizante","ia":"MAP + S + Zn – 12-40-00+10S+1Zn"},
+    {"nome":"Mosaic MAP","fab":"Mosaic","cat":"Fertilizante","ia":"MAP 11-52-00 granulado"},
+    {"nome":"Mosaic KCl Standard","fab":"Mosaic","cat":"Fertilizante","ia":"KCl 00-00-60 granulado"},
+    {"nome":"Mosaic DAP","fab":"Mosaic","cat":"Fertilizante","ia":"DAP 18-46-00"},
+    {"nome":"Mosaic SulPoMag","fab":"Mosaic","cat":"Fertilizante","ia":"K2SO4·MgSO4 – 00-00-22+11Mg+22S"},
+    {"nome":"MicroEssentials S15","fab":"Mosaic","cat":"Fertilizante","ia":"10-40-00+15S – MAP+S"},
+    {"nome":"Mosaic Granol 25-00-25","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 25-00-25 granulado"},
+    {"nome":"Mosaic NPK 08-28-16","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 08-28-16 granulado"},
+    {"nome":"Mosaic NPK 04-20-20","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 04-20-20 granulado"},
+    {"nome":"Mosaic NPK 05-25-25","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 05-25-25 granulado"},
+    # ── Fertipar ──
+    {"nome":"Fertipar Sulfato de Amônio","fab":"Fertipar","cat":"Fertilizante","ia":"21% N + 24% S granulado"},
+    {"nome":"Fertipar Ureia Perolada","fab":"Fertipar","cat":"Fertilizante","ia":"Ureia 45% N perolada"},
+    {"nome":"Fertipar MAP","fab":"Fertipar","cat":"Fertilizante","ia":"MAP 11-52-00"},
+    {"nome":"Fertipar KCl","fab":"Fertipar","cat":"Fertilizante","ia":"KCl 00-00-60"},
+    {"nome":"Fertipar Superfosfato Simples","fab":"Fertipar","cat":"Fertilizante","ia":"SPS 18% P2O5 + 12% S"},
+    {"nome":"Fertipar Superfosfato Triplo","fab":"Fertipar","cat":"Fertilizante","ia":"SFT 41% P2O5"},
+    {"nome":"Fertipar Nitrato de Cálcio","fab":"Fertipar","cat":"Fertilizante","ia":"15,5% N + 26% CaO"},
+    {"nome":"Fertipar Nitrato de Potássio","fab":"Fertipar","cat":"Fertilizante","ia":"13% N + 46% K2O"},
+    {"nome":"Fertipar Sulfato de Potássio","fab":"Fertipar","cat":"Fertilizante","ia":"50% K2O + 17% S"},
+    {"nome":"Fertipar NPK 05-20-20","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 05-20-20"},
+    {"nome":"Fertipar NPK 08-20-20","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 08-20-20"},
+    {"nome":"Fertipar NPK 10-10-10","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 10-10-10"},
+    {"nome":"Fertipar NPK 12-06-12","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 12-06-12"},
+    # ── Yara ──
+    {"nome":"Yarabela Tropicote","fab":"Yara","cat":"Fertilizante","ia":"Nitrato de Amônio 27% N granulado"},
+    {"nome":"Yarabela Sulfan","fab":"Yara","cat":"Fertilizante","ia":"Nitrato de Amônio + Sulfato 26% N+14S"},
+    {"nome":"YaraMila Complex","fab":"Yara","cat":"Fertilizante","ia":"NPK 12-11-18+S+Mg+micro"},
+    {"nome":"YaraMila Actyva S","fab":"Yara","cat":"Fertilizante","ia":"NPK 12-11-18+9S"},
+    {"nome":"YaraMila Winner","fab":"Yara","cat":"Fertilizante","ia":"NPK 15-09-20+S"},
+    {"nome":"YaraVita Stopit","fab":"Yara","cat":"Foliar / Nutrição","ia":"Cálcio líquido foliar"},
+    {"nome":"YaraVita Bortrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Boro etanolamina 15%"},
+    {"nome":"YaraVita Zintrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Zinco líquido 70 g/L"},
+    {"nome":"YaraVita Mantrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Manganês líquido 500 g/L"},
+    {"nome":"YaraVita Cobratec","fab":"Yara","cat":"Foliar / Nutrição","ia":"Cobre líquido 190 g/L"},
+    {"nome":"YaraVita Molytrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Molibdênio líquido"},
+    {"nome":"YaraVita Kombiphos","fab":"Yara","cat":"Foliar / Nutrição","ia":"P + K + Mn + Zn foliar"},
+    {"nome":"YaraTera Rexolin","fab":"Yara","cat":"Fertilizante","ia":"Micronutrientes quelatados solúveis"},
+    {"nome":"Yara Ureia Prill","fab":"Yara","cat":"Fertilizante","ia":"Ureia 45% N prilled"},
+    {"nome":"Yara MAP","fab":"Yara","cat":"Fertilizante","ia":"MAP 11-52-00"},
+    {"nome":"Yara KCl Granulado","fab":"Yara","cat":"Fertilizante","ia":"KCl 00-00-60"},]
 
 
 # Ordena por nome para o autocomplete
@@ -3565,7 +3639,7 @@ def score_solo(d, cultura="Soja"):
         "Soja": (5.8, 6.5), "Milho": (5.8, 6.5), "Trigo": (5.8, 6.5),
         "Feijão": (6.0, 6.5), "Arroz": (5.5, 6.0), "Canola": (6.0, 6.5),
         "Café": (5.5, 6.5), "Tomate": (6.0, 6.8), "Batata": (5.5, 6.0),
-        "Eucalipto": (5.0, 6.0), "Pinus": (4.5, 5.5),
+        "Eucalipto": (5.0, 6.0), "Pinus": (4.5, 5.5), "Mogno Africano": (5.5, 6.5),
     }
     ph_min, ph_max = ph_ideais.get(cultura, (5.8, 6.5))
 
@@ -3776,7 +3850,7 @@ def bloco_upgrade(recurso: str, usado: int, limite: int):
     else:
         link_mes = MP_LINK_PRO_MES
         link_ano = MP_LINK_PRO_ANO
-        preco_ano = 59.90 * 12 * 0.85
+        preco_ano = 39.90 * 12 * 0.85
 
     st.markdown(f"""
     <div style='display:flex;gap:10px;margin-top:8px;'>
@@ -5620,44 +5694,74 @@ if menu == "🧪 Solo & Adubação":
         st.divider()
 
         st.subheader("Recomendação Base")
+        # Recomendação base por cultura (EMBRAPA/IAPAR - Sul do Brasil)
+        # N em kg/ha de N puro; P e K em kg/ha de P2O5 e K2O
         if cultura == "Soja":
+            # Soja fixa N biologicamente - adubação de base é P e K
             n_ha    = 0
-            p2o5_ha = max(40, 100 - fosforo * 2)
-            k2o_ha  = max(40, 120 - potassio * 0.5)
+            p2o5_ha = 120 if fosforo < 9 else (90 if fosforo < 18 else (60 if fosforo < 30 else 40))
+            k2o_ha  = 120 if potassio < 0.15 else (90 if potassio < 0.30 else (60 if potassio < 0.45 else 40))
+            # Ajuste por produtividade meta (sc/ha)
+            if produtividade > 70: p2o5_ha += 20; k2o_ha += 20
         elif cultura == "Milho":
-            n_ha    = max(80, produtividade * 3)
-            p2o5_ha = max(50, 120 - fosforo * 2)
-            k2o_ha  = max(50, 140 - potassio * 0.5)
+            # N parcelado: 1/3 base + 2/3 cobertura; aqui mostra total
+            n_ha    = 30 if produtividade <= 80 else (40 if produtividade <= 120 else 50)  # N base
+            p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else (40 if fosforo < 30 else 30))
+            k2o_ha  = 80 if potassio < 0.15 else (60 if potassio < 0.30 else (40 if potassio < 0.45 else 30))
+            if produtividade > 100: n_ha += 10; p2o5_ha += 20; k2o_ha += 20
+        elif cultura == "Trigo":
+            n_ha    = 30  # N base (30-40 kg/ha); cobertura separada
+            p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else (40 if fosforo < 30 else 30))
+            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else (30 if potassio < 0.45 else 20))
+        elif cultura == "Feijão":
+            n_ha    = 20  # N base
+            p2o5_ha = 100 if fosforo < 9 else (80 if fosforo < 18 else (60 if fosforo < 30 else 40))
+            k2o_ha  = 80 if potassio < 0.15 else (60 if potassio < 0.30 else (40 if potassio < 0.45 else 30))
+        elif cultura == "Canola":
+            n_ha    = 40
+            p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else 40)
+            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else 30)
+        elif cultura == "Aveia":
+            n_ha    = 20
+            p2o5_ha = 60 if fosforo < 9 else (40 if fosforo < 18 else 30)
+            k2o_ha  = 40 if potassio < 0.15 else (30 if potassio < 0.30 else 20)
         else:
-            n_ha    = max(60, produtividade * 2.5)
-            p2o5_ha = max(40, 100 - fosforo * 2)
-            k2o_ha  = max(40, 120 - potassio * 0.5)
-        if materia_organica >= 4:
-            n_ha *= 0.85
+            n_ha    = 30
+            p2o5_ha = 60 if fosforo < 9 else (40 if fosforo < 18 else 30)
+            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else 30)
 
-        map_ha   = p2o5_ha / 0.52
-        kcl_ha   = k2o_ha  / 0.60
-        ureia_ha = n_ha    / 0.45 if n_ha > 0 else 0
+        # Redução de N por matéria orgânica alta
+        if materia_organica >= 3.5:
+            n_ha = max(0, n_ha - 10)
+        if materia_organica >= 5.0:
+            n_ha = max(0, n_ha - 20)
+
+        # Aplicar fator de zona de produtividade
+        n_ha    = round(n_ha    * fator_zona, 1)
+        p2o5_ha = round(p2o5_ha * fator_zona, 1)
+        k2o_ha  = round(k2o_ha  * fator_zona, 1)
+
+        # Converter para produtos comerciais
+        map_ha   = round(p2o5_ha / 0.52, 1)   # MAP 11-52-00: 52% P2O5
+        kcl_ha   = round(k2o_ha  / 0.60, 1)   # KCl 00-00-60: 60% K2O
+        ureia_ha = round(n_ha    / 0.45, 1) if n_ha > 0 else 0  # Ureia 45% N
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Nitrogênio", f"{n:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
-        col2.metric("P₂O₅",      f"{p2o5:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
-        col3.metric("K₂O",       f"{k2o:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
+        col1.metric("Nitrogênio", f"{n_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
+        col2.metric("P₂O₅",      f"{p2o5_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
+        col3.metric("K₂O",       f"{k2o_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
         st.divider()
 
         st.subheader("Produtos Recomendados")
-        map_ha_ajustado  = map_ha  * fator_zona
-        kcl_ha_ajustado  = kcl_ha  * fator_zona
-        ureia_ha_ajustado = ureia_ha * fator_zona
         col1, col2, col3 = st.columns(3)
-        col1.metric("MAP 11-52-00", f"{map_ha_ajustado:.1f} kg/ha")
-        col2.metric("KCl 00-00-60", f"{kcl_ha_ajustado:.1f} kg/ha")
-        col3.metric("Ureia 45% N",  f"{ureia_ha_ajustado:.1f} kg/ha")
+        col1.metric("MAP 11-52-00", f"{map_ha:.1f} kg/ha")
+        col2.metric("KCl 00-00-60", f"{kcl_ha:.1f} kg/ha")
+        col3.metric("Ureia 45% N",  f"{ureia_ha:.1f} kg/ha")
 
         st.subheader("Total para a Área")
-        total_map  = map_ha_ajustado  * area
-        total_kcl  = kcl_ha_ajustado  * area
-        total_ureia = ureia_ha_ajustado * area
+        total_map   = round(map_ha   * area, 1)
+        total_kcl   = round(kcl_ha   * area, 1)
+        total_ureia = round(ureia_ha  * area, 1)
         col1, col2, col3 = st.columns(3)
         col1.metric("MAP Total",   f"{total_map:.1f} kg")
         col2.metric("KCl Total",   f"{total_kcl:.1f} kg")
@@ -8432,13 +8536,13 @@ elif menu == "⚙️ Configurações":
                     if key == "pro":
                         btn_lmes = MP_LINK_PRO_MES
                         btn_lano = MP_LINK_PRO_ANO
-                        btn_pano = round(49.90 * 12 * 0.85)
-                        btn_preco = 49.90
+                        btn_pano = round(39.90 * 12 * 0.85)
+                        btn_preco = 39.90
                     else:  # premium
                         btn_lmes = MP_LINK_PREMIUM_MES
                         btn_lano = MP_LINK_PREMIUM_ANO
-                        btn_pano = round(119.90 * 12 * 0.85)
-                        btn_preco = 119.90
+                        btn_pano = round(99.90 * 12 * 0.85)
+                        btn_preco = 99.90
                     st.link_button(
                         f"💳 Mensal — R$ {btn_preco:.2f}/mês",
                         btn_lmes,
