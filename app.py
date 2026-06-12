@@ -920,7 +920,7 @@ def buscar_precos_cepea_ia():
                 "anthropic-version": "2023-06-01",
             },
             json={
-                "model":      "claude-sonnet-4-5",
+                "model":      "claude-sonnet-4-6",
                 "max_tokens": 1000,
                 "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages":   [{"role": "user", "content": prompt}]
@@ -928,7 +928,12 @@ def buscar_precos_cepea_ia():
             timeout=60
         )
         if resp.status_code != 200:
-            st.session_state["_cepea_erro"] = f"HTTP {resp.status_code}: {resp.text[:60]}"
+            _err_msg = f"HTTP {resp.status_code}"
+            if resp.status_code == 401:
+                _err_msg = "Chave API inválida ou expirada"
+            elif resp.status_code == 429:
+                _err_msg = "Limite de requisições atingido"
+            st.session_state["_cepea_erro"] = _err_msg
             return None
 
         # Loop de tool_use — continua até end_turn
@@ -972,7 +977,7 @@ def buscar_precos_cepea_ia():
                             "anthropic-version": "2023-06-01",
                         },
                         json={
-                            "model":    "claude-sonnet-4-5",
+                            "model":    "claude-sonnet-4-6",
                             "max_tokens": 1000,
                             "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
                             "messages": _msgs,
@@ -7974,7 +7979,7 @@ if menu == "🌍 Inteligência":
                             "content-type": "application/json",
                         },
                         json={
-                            "model": "claude-sonnet-4-5",
+                            "model": "claude-sonnet-4-6",
                             "max_tokens": 1500,
                             "messages": [{"role":"user","content":_content_mapa}],
                         },
@@ -8422,7 +8427,7 @@ if menu == "🌍 Inteligência":
                             "content-type": "application/json",
                         },
                         json={
-                            "model": "claude-sonnet-4-5",
+                            "model": "claude-sonnet-4-6",
                             "max_tokens": 800,
                             "system": f"Você é um assistente agrícola especialista brasileiro. Responda sempre em português de forma prática e objetiva para produtores rurais. Baseie-se em EMBRAPA, CQFS RS/SC e boas práticas agrícolas. Contexto da propriedade: {_ctx_ia}",
                             "messages": _msgs_ia,
