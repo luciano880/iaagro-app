@@ -8398,48 +8398,112 @@ if menu == "🌍 Inteligência":
 
 if menu == "🌍 Inteligência":
   with _sub_int[4]:
-    st.header("🤖 Assistente IA Agrícola")
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🤖 Assistente IA Agrícola</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Especialista em agricultura brasileira — EMBRAPA, CQFS RS/SC, manejo integrado
+    </p></div>""", unsafe_allow_html=True)
+
     if "assistente_hist" not in st.session_state:
         st.session_state.assistente_hist = []
-    _d_ia = st.session_state.dados
-    _ctx_ia = (f"Cultura: {cultura_limpa(_d_ia.get('cultura','Soja'))}, "
-               f"pH: {_d_ia.get('ph',0)}, Área: {_d_ia.get('area',0)} ha")
-    for msg in st.session_state.assistente_hist:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-    _prompt_ia = st.chat_input("Digite sua pergunta agrícola...")
-    if _prompt_ia:
-        st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
-        with st.chat_message("user"):
-            st.markdown(_prompt_ia)
-        with st.chat_message("assistant"):
-            with st.spinner("Consultando..."):
-                try:
-                    import requests as _rq_ia
-                    _api_key_ia = st.secrets.get("ANTHROPIC_API_KEY","")
-                    _msgs_ia = [{"role":m["role"],"content":m["content"]}
-                                for m in st.session_state.assistente_hist]
-                    _resp_ia = _rq_ia.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers={
-                            "x-api-key": _api_key_ia,
-                            "anthropic-version": "2023-06-01",
-                            "content-type": "application/json",
-                        },
-                        json={
-                            "model": "claude-sonnet-4-6",
-                            "max_tokens": 800,
-                            "system": f"Você é um assistente agrícola especialista brasileiro. Responda sempre em português de forma prática e objetiva para produtores rurais. Baseie-se em EMBRAPA, CQFS RS/SC e boas práticas agrícolas. Contexto da propriedade: {_ctx_ia}",
-                            "messages": _msgs_ia,
-                        },
-                        timeout=30
-                    )
-                    _data_ia = _resp_ia.json()
-                    _ans = _data_ia.get("content",[{}])[0].get("text","Sem resposta.")
-                    st.markdown(_ans)
-                    st.session_state.assistente_hist.append({"role":"assistant","content":_ans})
-                except Exception as e:
-                    st.error(f"Erro: {e}")
+
+    # Contexto rico da propriedade
+    _d_ia  = st.session_state.dados
+    _areas_ctx = ""
+    if st.session_state.areas:
+        _areas_ctx = "; ".join([
+            f"{a.get('Talhão','?')} {a.get('Hectares',0)}ha {a.get('Cultura','?')}"
+            for a in st.session_state.areas[:3]
+        ])
+    _ctx_ia = (
+        f"Segmento: {st.session_state.get('segmento','Grãos')}. "
+        f"Propriedade: {_areas_ctx or 'não cadastrada'}. "
+        f"Região: Sul do Brasil (PR/SC/RS). "
+        f"Plano: {st.session_state.get('plano','free')}."
+    )
+
+    # Busca API key de forma robusta
+    import os as _os_ia
+    _api_key_ia = ""
+    try:
+        _api_key_ia = st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass
+    if not _api_key_ia:
+        try:
+            _api_key_ia = st.secrets.get("ANTHROPIC_API_KEY", "")
+        except Exception:
+            pass
+    if not _api_key_ia:
+        _api_key_ia = _os_ia.environ.get("ANTHROPIC_API_KEY", "")
+
+    if not _api_key_ia or len(_api_key_ia) < 20:
+        st.warning("⚠️ Chave API não configurada. Adicione ANTHROPIC_API_KEY nos secrets do Streamlit.")
+    else:
+        # Histórico de mensagens
+        for msg in st.session_state.assistente_hist:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo...")
+
+        if _prompt_ia:
+            st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
+            with st.chat_message("user"):
+                st.markdown(_prompt_ia)
+            with st.chat_message("assistant"):
+                with st.spinner("🌾 Consultando especialista agrícola..."):
+                    try:
+                        import requests as _rq_ia
+                        # Monta histórico limitado a 10 mensagens para não exceder tokens
+                        _msgs_ia = [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in st.session_state.assistente_hist[-10:]
+                        ]
+                        _system_ia = (
+                            "Você é um agrônomo especialista brasileiro com foco no Sul do Brasil (PR, SC, RS). "
+                            "Responda SEMPRE em português, de forma prática e objetiva para produtores rurais. "
+                            "Use dados da EMBRAPA, CQFS RS/SC, IAPAR e boas práticas agronômicas. "
+                            "Para recomendações de adubação, siga as tabelas CQFS RS/SC 2016. "
+                            "Para defensivos, cite apenas produtos registrados no MAPA. "
+                            "Seja direto: dê doses, épocas e práticas concretas. "
+                            f"Contexto da propriedade: {_ctx_ia}"
+                        )
+                        _resp_ia = _rq_ia.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "x-api-key":         _api_key_ia,
+                                "anthropic-version": "2023-06-01",
+                                "content-type":      "application/json",
+                            },
+                            json={
+                                "model":      "claude-sonnet-4-6",
+                                "max_tokens": 1024,
+                                "system":     _system_ia,
+                                "messages":   _msgs_ia,
+                            },
+                            timeout=45,
+                        )
+                        if _resp_ia.status_code == 200:
+                            _data_ia = _resp_ia.json()
+                            _ans = (_data_ia.get("content") or [{}])[0].get("text","")
+                            if _ans:
+                                st.markdown(_ans)
+                                st.session_state.assistente_hist.append(
+                                    {"role":"assistant","content":_ans})
+                            else:
+                                st.error("Resposta vazia da API.")
+                        elif _resp_ia.status_code == 401:
+                            st.error("❌ Chave API inválida ou expirada. Verifique ANTHROPIC_API_KEY.")
+                        elif _resp_ia.status_code == 429:
+                            st.warning("⏳ Limite de requisições. Aguarde alguns segundos e tente novamente.")
+                        else:
+                            st.error(f"Erro na API: HTTP {_resp_ia.status_code}")
+                    except Exception as _e_ia:
+                        st.error(f"Erro de conexão: {str(_e_ia)[:120]}")
+
     if st.session_state.assistente_hist:
         if st.button("🗑️ Limpar conversa", key="btn_limpar_assistente"):
             st.session_state.assistente_hist = []
