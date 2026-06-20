@@ -6822,14 +6822,23 @@ if menu == "📦 Operacional":
                 import xml.etree.ElementTree as _ET
                 _tree = _ET.parse(_xml_file)
                 _root = _tree.getroot()
-                _ns   = {"nfe": "http://www.portalfiscal.inf.br/nfe"}
+
+                # Detecta o namespace real do XML automaticamente
+                _tag_root = _root.tag
+                if _tag_root.startswith("{"):
+                    _ns_uri = _tag_root[1:_tag_root.find("}")]
+                else:
+                    _ns_uri = "http://www.portalfiscal.inf.br/nfe"
+                _ns = {"nfe": _ns_uri}
 
                 def _txt(el, tag, ns):
                     _e = el.find(tag, ns)
                     return _e.text.strip() if _e is not None and _e.text else ""
 
                 # Dados da NF
-                _inf = _root.find(".//nfe:infNFe", _ns) or _root.find(".//{http://www.portalfiscal.inf.br/nfe}infNFe")
+                _inf = _root.find(".//nfe:infNFe", _ns)
+                if _inf is None:
+                    _inf = _root.find(".//{http://www.portalfiscal.inf.br/nfe}infNFe")
                 _emit_nome = ""
                 _n_nf = ""
                 _dt_emis = ""
@@ -6845,7 +6854,9 @@ if menu == "📦 Operacional":
 
                 _itens_nfe = []
                 for _det in _dets:
-                    _prod_el = _det.find("nfe:prod", _ns) or _det.find("{http://www.portalfiscal.inf.br/nfe}prod")
+                    _prod_el = _det.find("nfe:prod", _ns)
+                    if _prod_el is None:
+                        _prod_el = _det.find("{http://www.portalfiscal.inf.br/nfe}prod")
                     if _prod_el is None:
                         continue
                     def _t(tag):
