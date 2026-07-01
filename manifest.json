@@ -7,12 +7,12 @@
   "theme_color": "#22c55e",
   "icons": [
     {
-      "src": "IAAgrologo.jpeg",
+      "src": "/app/static/IAAgrologo.jpeg",
       "sizes": "192x192",
       "type": "image/jpeg"
     },
     {
-      "src": "IAAgrologo.jpeg",
+      "src": "/app/static/IAAgrologo.jpeg",
       "sizes": "512x512",
       "type": "image/jpeg"
     }
