@@ -5822,151 +5822,6 @@ if menu == "🧪 Solo & Adubação":
         else:
             success_box("Micronutrientes em faixa aceitável.")
 
-        st.divider()
-        st.subheader("🗂️ Planejador de Insumos por Cultura")
-        st.markdown("""
-        <div style='background:#0f3460;border-radius:10px;padding:10px 16px;
-        border-left:4px solid #22c55e;margin-bottom:12px;'>
-        <span style='color:#f1f5f9;font-size:13px;'>
-        📊 Adicione culturas e áreas para calcular o total de insumos necessários na propriedade.
-        </span></div>""", unsafe_allow_html=True)
-
-        if "plan_insumos" not in st.session_state:
-            st.session_state.plan_insumos = []
-
-        # ── Formulário para adicionar linha ──────────────────────────────────
-        with st.form("form_plan_insumo", clear_on_submit=True):
-            _pi_c1, _pi_c2, _pi_c3 = st.columns(3)
-            _pi_cultura = _pi_c1.selectbox("Cultura", [
-                "🌱 Soja","🌽 Milho","🌾 Trigo","🌾 Aveia","🌻 Canola",
-                "🌱 Feijão","🍚 Arroz","🌾 Sorgo","🌿 Outro"
-            ], key="pi_sel_cultura")
-            _pi_talhao = _pi_c2.text_input("Nome do talhão/área", placeholder="Ex: Talhão Norte", key="pi_txt_talhao")
-            _pi_ha = _pi_c3.number_input("Hectares", min_value=0.1, value=10.0, step=0.5, key="pi_num_ha")
-
-            _pi_c4, _pi_c5, _pi_c6 = st.columns(3)
-
-            # Semente
-            _pi_semente = _pi_c4.text_input("Semente", placeholder="Ex: Brasmax Bônus, DKB390", key="pi_txt_semente")
-            _pi_dose_sem = _pi_c4.number_input("Dose semente (kg/ha)", min_value=0.0, value=50.0, key="pi_num_sem")
-
-            # MAP
-            _pi_map = _pi_c5.number_input("MAP kg/ha", min_value=0.0, value=float(round(map_ha)) if 'map_ha' in dir() else 0.0, key="pi_num_map")
-            # KCl
-            _pi_kcl = _pi_c5.number_input("KCl kg/ha", min_value=0.0, value=float(round(kcl_ha)) if 'kcl_ha' in dir() else 0.0, key="pi_num_kcl")
-
-            # Ureia / N
-            _pi_ureia = _pi_c6.number_input("Ureia kg/ha", min_value=0.0, value=float(round(ureia_ha)) if 'ureia_ha' in dir() else 0.0, key="pi_num_ureia")
-            # Insumo extra
-            _pi_extra_nome = _pi_c6.text_input("Outro insumo", placeholder="Ex: KAS, Yara Mila", key="pi_txt_extra")
-            _pi_extra_dose = _pi_c6.number_input("Dose outro (kg/ha)", min_value=0.0, key="pi_num_extra")
-
-            _pi_submit = st.form_submit_button("➕ Adicionar Cultura/Área", use_container_width=True)
-
-        if _pi_submit and _pi_ha > 0:
-            st.session_state.plan_insumos.append({
-                "cultura":    _pi_cultura,
-                "talhao":     _pi_talhao or _pi_cultura,
-                "ha":         _pi_ha,
-                "semente":    _pi_semente,
-                "dose_sem":   _pi_dose_sem,
-                "map_ha":     _pi_map,
-                "kcl_ha":     _pi_kcl,
-                "ureia_ha":   _pi_ureia,
-                "extra_nome": _pi_extra_nome,
-                "extra_ha":   _pi_extra_dose,
-            })
-            salvar_dados_iaagro()
-            st.rerun()
-
-        # ── Tabela e totais ──────────────────────────────────────────────────
-        if st.session_state.plan_insumos:
-            st.markdown("#### 📋 Planejamento Acumulado")
-
-            # Agrupa por cultura para mostrar subtotais
-            _culturas_unicas = list(dict.fromkeys(p["cultura"] for p in st.session_state.plan_insumos))
-
-            for _cult in _culturas_unicas:
-                _linhas = [p for p in st.session_state.plan_insumos if p["cultura"] == _cult]
-                _tot_ha  = sum(p["ha"] for p in _linhas)
-                _tot_map  = sum(p["map_ha"] * p["ha"] for p in _linhas)
-                _tot_kcl  = sum(p["kcl_ha"] * p["ha"] for p in _linhas)
-                _tot_urei = sum(p["ureia_ha"] * p["ha"] for p in _linhas)
-                _tot_sem  = sum(p["dose_sem"] * p["ha"] for p in _linhas)
-                _tot_ext  = sum(p["extra_ha"] * p["ha"] for p in _linhas)
-                _ext_nome = next((p["extra_nome"] for p in _linhas if p["extra_nome"]), "")
-
-                st.markdown(f"""
-                <div style='background:#0f2d4a;border-radius:12px;padding:14px 18px;
-                border-left:4px solid #22c55e;margin:6px 0;'>
-                <b style='color:#6ee7b7;font-size:14px;'>{_cult}</b>
-                <span style='color:#94a3b8;font-size:12px;margin-left:8px;'>
-                {len(_linhas)} talhão(ões) · {_tot_ha:.1f} ha total</span><br>
-                <div style='display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;'>
-                {"".join([f"<span style='color:#f1f5f9;font-size:12px;'><b style='color:#38bdf8;'>Semente</b> {_tot_sem:,.0f} kg</span>" if _tot_sem else ""])}
-                {"".join([f"<span style='color:#f1f5f9;font-size:12px;'><b style='color:#f59e0b;'>MAP</b> {_tot_map:,.0f} kg</span>" if _tot_map else ""])}
-                {"".join([f"<span style='color:#f1f5f9;font-size:12px;'><b style='color:#a78bfa;'>KCl</b> {_tot_kcl:,.0f} kg</span>" if _tot_kcl else ""])}
-                {"".join([f"<span style='color:#f1f5f9;font-size:12px;'><b style='color:#22c55e;'>Ureia</b> {_tot_urei:,.0f} kg</span>" if _tot_urei else ""])}
-                {"".join([f"<span style='color:#f1f5f9;font-size:12px;'><b style='color:#f472b6;'>{_ext_nome}</b> {_tot_ext:,.0f} kg</span>" if _tot_ext and _ext_nome else ""])}
-                </div></div>""", unsafe_allow_html=True)
-
-                # Linhas individuais
-                for _idx_pi, _p in enumerate(st.session_state.plan_insumos):
-                    if _p["cultura"] != _cult:
-                        continue
-                    _gi = st.session_state.plan_insumos.index(_p)
-                    _c1p, _c2p = st.columns([5,1])
-                    _c1p.markdown(f"""
-                    <div style='background:#0a1f35;border-radius:8px;padding:6px 12px;
-                    border-left:2px solid #1e4976;margin:2px 0;font-size:12px;color:#94a3b8;'>
-                    📍 {_p['talhao']} · {_p['ha']} ha
-                    {f"· Semente: {_p['dose_sem']} kg/ha ({_p['semente']})" if _p['semente'] else ""}
-                    {f"· MAP: {_p['map_ha']} kg/ha" if _p['map_ha'] else ""}
-                    {f"· KCl: {_p['kcl_ha']} kg/ha" if _p['kcl_ha'] else ""}
-                    {f"· Ureia: {_p['ureia_ha']} kg/ha" if _p['ureia_ha'] else ""}
-                    {f"· {_p['extra_nome']}: {_p['extra_ha']} kg/ha" if _p['extra_nome'] and _p['extra_ha'] else ""}
-                    </div>""", unsafe_allow_html=True)
-                    if _c2p.button("🗑️", key=f"del_pi_{_gi}"):
-                        st.session_state.plan_insumos.pop(_gi)
-                        salvar_dados_iaagro()
-                        st.rerun()
-
-            # ── TOTAIS GERAIS ────────────────────────────────────────────────
-            st.markdown("---")
-            _g_ha   = sum(p["ha"] for p in st.session_state.plan_insumos)
-            _g_map  = sum(p["map_ha"] * p["ha"] for p in st.session_state.plan_insumos)
-            _g_kcl  = sum(p["kcl_ha"] * p["ha"] for p in st.session_state.plan_insumos)
-            _g_urei = sum(p["ureia_ha"] * p["ha"] for p in st.session_state.plan_insumos)
-            _g_sem  = sum(p["dose_sem"] * p["ha"] for p in st.session_state.plan_insumos)
-
-            st.markdown("#### 🧮 Total Geral da Propriedade")
-            _tg1, _tg2, _tg3, _tg4, _tg5 = st.columns(5)
-            _tg1.metric("🌾 Área Total", f"{_g_ha:.1f} ha")
-            _tg2.metric("🌱 Semente Total", f"{_g_sem:,.0f} kg")
-            _tg3.metric("🟡 MAP Total", f"{_g_map:,.0f} kg", help=f"{_g_map/1000:.1f} toneladas")
-            _tg4.metric("🟣 KCl Total", f"{_g_kcl:,.0f} kg", help=f"{_g_kcl/1000:.1f} toneladas")
-            _tg5.metric("⬜ Ureia Total", f"{_g_urei:,.0f} kg", help=f"{_g_urei/1000:.1f} toneladas")
-
-            # Exportar planejamento
-            import pandas as _pd_pi
-            _df_pi = _pd_pi.DataFrame([{
-                "Cultura": p["cultura"], "Talhão": p["talhao"], "Hectares": p["ha"],
-                "Semente": p["semente"], "Dose Semente kg/ha": p["dose_sem"],
-                "Total Semente kg": round(p["dose_sem"]*p["ha"],1),
-                "MAP kg/ha": p["map_ha"], "Total MAP kg": round(p["map_ha"]*p["ha"],1),
-                "KCl kg/ha": p["kcl_ha"], "Total KCl kg": round(p["kcl_ha"]*p["ha"],1),
-                "Ureia kg/ha": p["ureia_ha"], "Total Ureia kg": round(p["ureia_ha"]*p["ha"],1),
-            } for p in st.session_state.plan_insumos])
-
-            _csv_pi = _df_pi.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Exportar planejamento CSV", _csv_pi,
-                               "planejamento_insumos.csv", "text/csv",
-                               key="btn_exp_plan_insumos", use_container_width=True)
-
-            if st.button("🗑️ Limpar planejamento", key="btn_limpar_plan"):
-                st.session_state.plan_insumos = []
-                salvar_dados_iaagro()
-                st.rerun()
 
         st.divider()
         st.subheader("Salvar Recomendação")
@@ -7177,7 +7032,7 @@ if menu == "📦 Operacional":
         st.session_state.aplicacoes = []
 
     ESTADIOS = [
-        "🌱 Pré-plantio","🌿 Pós-plantio / V0","🌾 V1 – V3","🌾 V4 – V6",
+        "🚜 Plantio","🌱 Pré-plantio","🌿 Pós-plantio / V0","🌾 V1 – V3","🌾 V4 – V6",
         "🌾 V7 – VT","🌸 R1 – R2 (Floração)","🫘 R3 – R4 (Granação)",
         "🫘 R5 – R6","🌾 Pré-colheita","📋 Outro",
     ]
@@ -7226,7 +7081,79 @@ if menu == "📦 Operacional":
             pressao      = col_o2.number_input("Pressão (bar)", min_value=0.0, key="num_pressao_aplic")
             clima_aplic  = col_o3.selectbox("Clima", ["Adequado","Vento alto","Muito seco","Chuva próxima","Muito quente"], key="sel_clima_aplic")
 
-        st.subheader("🧪 Produtos da Aplicação")
+        # ── CAMPOS ESPECIAIS PARA PLANTIO ─────────────────────────────────────
+        _is_plantio = estadio_sel == "🚜 Plantio"
+        if _is_plantio:
+            st.markdown("""
+            <div style='background:#14532d;border-radius:12px;padding:14px 18px;
+            border-left:4px solid #22c55e;margin:8px 0;'>
+            <b style='color:#6ee7b7;font-size:14px;'>🚜 Configuração de Plantio</b><br>
+            <span style='color:#94a3b8;font-size:12px;'>
+            Preencha os fertilizantes de base, KCl, ureia e inoculantes que serão aplicados no sulco.
+            </span></div>""", unsafe_allow_html=True)
+
+            st.markdown("#### 🌱 Semente")
+            _pl_c1, _pl_c2, _pl_c3 = st.columns(3)
+            _pl_semente    = _pl_c1.text_input("Variedade/Híbrido", placeholder="Ex: Brasmax Bônus IPRO, DKB390", key="pl_txt_semente")
+            _pl_dose_sem   = _pl_c2.number_input("Dose semente (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="pl_num_dose_sem")
+            _pl_pop        = _pl_c3.number_input("População (plantas/ha)", min_value=0, value=240000, step=5000, key="pl_num_pop")
+            _pl_tsi        = _pl_c1.text_input("TSI - Tratamento", placeholder="Ex: Maxim Advanced + Fortenza", key="pl_txt_tsi")
+            _pl_espacamento= _pl_c2.number_input("Espaçamento entre linhas (cm)", min_value=0.0, value=45.0, key="pl_num_esp")
+
+            st.markdown("#### 🧪 Fertilizantes de Base (sulco e/ou lanço)")
+            _fl_c1, _fl_c2, _fl_c3 = st.columns(3)
+
+            # Adubo base
+            _pl_adubo_nome = _fl_c1.text_input("Adubo de base", placeholder="Ex: MAP, NPK 08-28-16, Physiostart", key="pl_txt_adubo")
+            _pl_adubo_kg   = _fl_c1.number_input("Dose adubo (kg/ha)", min_value=0.0, step=5.0, key="pl_num_adubo")
+
+            # KCl
+            _pl_kcl_nome   = _fl_c2.text_input("KCl / Potássio", placeholder="Ex: KCl Mosaic, SulPoMag", key="pl_txt_kcl")
+            _pl_kcl_kg     = _fl_c2.number_input("Dose KCl (kg/ha)", min_value=0.0, step=5.0, key="pl_num_kcl")
+
+            # Ureia
+            _pl_ureia_nome = _fl_c3.text_input("Ureia / N", placeholder="Ex: Ureia Yara, KAS", key="pl_txt_ureia")
+            _pl_ureia_kg   = _fl_c3.number_input("Dose N (kg/ha)", min_value=0.0, step=5.0, key="pl_num_ureia")
+
+            st.markdown("#### 🦠 Inoculantes no Sulco")
+            _in_c1, _in_c2, _in_c3 = st.columns(3)
+            _pl_inoc1_nome = _in_c1.text_input("Inoculante 1", placeholder="Ex: Nitragin Gold, Cell Tech", key="pl_txt_inoc1")
+            _pl_inoc1_dose = _in_c1.number_input("Dose inoc 1 (mL/ha)", min_value=0.0, key="pl_num_inoc1")
+            _pl_inoc2_nome = _in_c2.text_input("Co-inoculante", placeholder="Ex: Azospirillum Masterfix", key="pl_txt_inoc2")
+            _pl_inoc2_dose = _in_c2.number_input("Dose co-inoc (mL/ha)", min_value=0.0, key="pl_num_inoc2")
+            _pl_inoc3_nome = _in_c3.text_input("Inoculante semente", placeholder="Ex: Bradyrhizobium Nitrobacter", key="pl_txt_inoc3")
+            _pl_inoc3_dose = _in_c3.number_input("Dose inoc semente (mL/sc)", min_value=0.0, key="pl_num_inoc3")
+
+            st.markdown("#### 🌿 Micronutrientes e Outros no Sulco")
+            _mn_c1, _mn_c2 = st.columns(2)
+            _pl_micro1_nome = _mn_c1.text_input("Micronutriente 1", placeholder="Ex: Boro Quelatado, Zinco", key="pl_txt_micro1")
+            _pl_micro1_dose = _mn_c1.number_input("Dose micro 1 (kg/L ha)", min_value=0.0, step=0.1, key="pl_num_micro1")
+            _pl_micro2_nome = _mn_c2.text_input("Micronutriente 2", placeholder="Ex: MicroEssentials SZ", key="pl_txt_micro2")
+            _pl_micro2_dose = _mn_c2.number_input("Dose micro 2 (kg/L ha)", min_value=0.0, step=0.1, key="pl_num_micro2")
+
+            # Mostra totais por ha e área
+            if area_aplic > 0 and (_pl_adubo_kg + _pl_kcl_kg + _pl_ureia_kg) > 0:
+                st.markdown("---")
+                st.markdown("**📊 Totais para a área informada:**")
+                _t1, _t2, _t3, _t4 = st.columns(4)
+                if _pl_adubo_kg > 0:
+                    _t1.metric(f"🟡 {_pl_adubo_nome or 'Adubo'}",
+                               f"{_pl_adubo_kg * area_aplic:,.0f} kg",
+                               f"{_pl_adubo_kg} kg/ha")
+                if _pl_kcl_kg > 0:
+                    _t2.metric(f"🟣 {_pl_kcl_nome or 'KCl'}",
+                               f"{_pl_kcl_kg * area_aplic:,.0f} kg",
+                               f"{_pl_kcl_kg} kg/ha")
+                if _pl_ureia_kg > 0:
+                    _t3.metric(f"⬜ {_pl_ureia_nome or 'Ureia'}",
+                               f"{_pl_ureia_kg * area_aplic:,.0f} kg",
+                               f"{_pl_ureia_kg} kg/ha")
+                if _pl_dose_sem > 0:
+                    _t4.metric("🌱 Semente",
+                               f"{_pl_dose_sem * area_aplic:,.0f} kg",
+                               f"{_pl_dose_sem} kg/ha")
+
+        st.subheader("🧪 Produtos da Aplicação" if not _is_plantio else "🧪 Defensivos e Outros Produtos")
         _nomes_estoque = [item["Insumo"] for item in st.session_state.estoque]
         n_produtos = int(st.number_input("Quantidade de produtos", min_value=1, max_value=10, value=1, step=1, key="num_qtd_produtos_aplic"))
 
@@ -7255,6 +7182,25 @@ if menu == "📦 Operacional":
             for p in produtos_aplic:
                 if p["Dose por ha"] <= 0: error_box(f"Dose zero: {p['Produto']}."); erro = True
             if not erro:
+                _dados_plantio = {}
+                if _is_plantio:
+                    _dados_plantio = {
+                        "semente":      _pl_semente,    "dose_sem_ha": _pl_dose_sem,
+                        "populacao":    _pl_pop,         "tsi":         _pl_tsi,
+                        "espacamento":  _pl_espacamento,
+                        "adubo_nome":   _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
+                        "kcl_nome":     _pl_kcl_nome,   "kcl_kg_ha":   _pl_kcl_kg,
+                        "ureia_nome":   _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
+                        "inoc1_nome":   _pl_inoc1_nome, "inoc1_dose":  _pl_inoc1_dose,
+                        "inoc2_nome":   _pl_inoc2_nome, "inoc2_dose":  _pl_inoc2_dose,
+                        "inoc3_nome":   _pl_inoc3_nome, "inoc3_dose":  _pl_inoc3_dose,
+                        "micro1_nome":  _pl_micro1_nome,"micro1_dose": _pl_micro1_dose,
+                        "micro2_nome":  _pl_micro2_nome,"micro2_dose": _pl_micro2_dose,
+                        "adubo_total_kg":  round(_pl_adubo_kg * area_aplic, 1),
+                        "kcl_total_kg":    round(_pl_kcl_kg * area_aplic, 1),
+                        "ureia_total_kg":  round(_pl_ureia_kg * area_aplic, 1),
+                        "semente_total_kg":round(_pl_dose_sem * area_aplic, 1),
+                    }
                 st.session_state.aplicacoes.append({
                     "ID Área":             st.session_state.dados.get("id_area",""),
                     "Estádio":             estadio_sel,
@@ -7271,6 +7217,7 @@ if menu == "📦 Operacional":
                     "Pressão bar":         pressao,
                     "Clima aplicação":     clima_aplic,
                     "Produtos":            produtos_aplic,
+                    "Dados Plantio":       _dados_plantio,
                     "Status":              "pendente",
                 })
                 atualizar_area_atual()
@@ -7310,7 +7257,7 @@ if menu == "📦 Operacional":
         if len(st.session_state.aplicacoes) == 0:
             info_box("Nenhuma aplicação registrada ainda.")
         else:
-            _ordem = {"🌱 Pré-plantio":1,"🌿 Pós-plantio / V0":2,"🌾 V1 – V3":3,
+            _ordem = {"🚜 Plantio":0,"🌱 Pré-plantio":1,"🌿 Pós-plantio / V0":2,"🌾 V1 – V3":3,
                       "🌾 V4 – V6":4,"🌾 V7 – VT":5,"🌸 R1 – R2 (Floração)":6,
                       "🫘 R3 – R4 (Granação)":7,"🫘 R5 – R6":8,"🌾 Pré-colheita":9}
             aplicacoes_ordenadas = sorted(st.session_state.aplicacoes,
