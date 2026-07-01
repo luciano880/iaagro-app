@@ -3304,8 +3304,20 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
         # ── Dados de Plantio (semente, fertilizantes, inoculantes) ─────────
         _dp = aplic.get("Dados Plantio", {})
         if _dp:
-            # Semente
-            if _dp.get("semente") or _dp.get("dose_sem_ha",0) > 0:
+            # Sementes — múltiplas variedades
+            _vars_pdf = _dp.get("variedades", [])
+            if _vars_pdf:
+                _tsi_pdf = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
+                for _vp in _vars_pdf:
+                    rows.append([
+                        P(f"<b>🌱 {_vp.get('nome','Semente')}</b> · {_vp.get('pop',0):,} pl/ha · {_vp.get('esp',0)} cm{_tsi_pdf}",8,True,colors.HexColor("#14532d")),
+                        P("Semente",8),
+                        P(str(_vp.get("dose",0)),8,False,None,TA_CENTER),
+                        P("kg/ha",8,False,None,TA_CENTER),
+                        P(f"{_vp.get('ha',0)} ha",8,False,None,TA_CENTER),
+                        P(f"<b>{_vp.get('total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                    ])
+            elif _dp.get("semente") or _dp.get("dose_sem_ha",0) > 0:
                 _sem_nome = _dp.get("semente","Semente")
                 _tsi = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
                 _pop = f" | Pop: {_dp.get('populacao',0):,} pl/ha" if _dp.get("populacao",0) > 0 else ""
@@ -7268,8 +7280,11 @@ if menu == "📦 Operacional":
             Preencha os fertilizantes de base, KCl, ureia e inoculantes que serão aplicados no sulco.
             </span></div>""", unsafe_allow_html=True)
 
-            st.markdown("#### 🌱 Semente")
-            _pl_c1, _pl_c2, _pl_c3 = st.columns(3)
+            st.markdown("#### 🌱 Sementes — Múltiplas Variedades")
+
+            # Init lista de variedades na sessão
+            if "pl_variedades" not in st.session_state:
+                st.session_state.pl_variedades = []
 
             # Selectbox com sementes do estoque + manual
             _sem_est = ["— digitar manualmente —"] + [
@@ -7277,20 +7292,68 @@ if menu == "📦 Operacional":
                 if any(p in i.get("Categoria","").lower() or p in i.get("Insumo","").lower()
                        for p in ["semente","seed","milho","soja","trigo","aveia","feijão","canola","sorgo","arroz","híbrido","variedade","cultivar"])
             ]
-            # Se não achou sementes por categoria, mostra tudo
             if len(_sem_est) <= 1:
                 _sem_est = ["— digitar manualmente —"] + [i["Insumo"] for i in st.session_state.estoque]
 
-            _pl_sem_sel  = _pl_c1.selectbox("🔍 Variedade/Híbrido (estoque)", _sem_est, key="pl_sel_semente")
-            _pl_sem_man  = _pl_c1.text_input("Ou digite a variedade", placeholder="Ex: Brasmax Bônus IPRO, DKB390", key="pl_txt_semente") if _pl_sem_sel == "— digitar manualmente —" else ""
-            _pl_semente  = _pl_sem_man if _pl_sem_sel == "— digitar manualmente —" else _pl_sem_sel
+            # Form para adicionar variedade
+            with st.form("form_add_variedade", clear_on_submit=True):
+                _sv_c1, _sv_c2, _sv_c3 = st.columns(3)
+                _sv_sel   = _sv_c1.selectbox("🔍 Variedade/Híbrido", _sem_est, key="sv_sel")
+                _sv_man   = _sv_c1.text_input("Ou digite", placeholder="Ex: Brasmax Bônus IPRO", key="sv_man") if _sv_sel == "— digitar manualmente —" else ""
+                _sv_nome  = _sv_man if _sv_sel == "— digitar manualmente —" else _sv_sel
+                _sv_ha    = _sv_c2.number_input("Hectares desta variedade", min_value=0.1, value=10.0, step=0.5, key="sv_ha")
+                _sv_dose  = _sv_c2.number_input("Dose (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="sv_dose")
+                _sv_pop   = _sv_c3.number_input("População (pl/ha)", min_value=0, value=240000, step=5000, key="sv_pop")
+                _sv_esp   = _sv_c3.number_input("Espaçamento (cm)", min_value=0.0, value=45.0, key="sv_esp")
+                _sv_add   = st.form_submit_button("➕ Adicionar Variedade", use_container_width=True)
 
-            _pl_dose_sem   = _pl_c2.number_input("Dose semente (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="pl_num_dose_sem")
-            _pl_pop        = _pl_c3.number_input("População (plantas/ha)", min_value=0, value=240000, step=5000, key="pl_num_pop")
+            if _sv_add and _sv_nome and _sv_nome != "— digitar manualmente —":
+                st.session_state.pl_variedades.append({
+                    "nome": _sv_nome, "ha": _sv_ha,
+                    "dose": _sv_dose, "pop": _sv_pop,
+                    "esp": _sv_esp,
+                    "total_kg": round(_sv_dose * _sv_ha, 1),
+                })
+                st.rerun()
 
-            # TSI — campo manual livre
-            _pl_tsi        = _pl_c1.text_area("TSI - Tratamento de sementes", placeholder="Ex: Maxim Advanced 200mL/sc + Fortenza 200mL/sc + Standak Top 200mL/sc", key="pl_txt_tsi", height=68)
-            _pl_espacamento= _pl_c2.number_input("Espaçamento entre linhas (cm)", min_value=0.0, value=45.0, key="pl_num_esp")
+            # TSI compartilhado para todas as variedades
+            _pl_tsi = st.text_area("TSI - Tratamento de sementes (todas as variedades)",
+                placeholder="Ex: Maxim Advanced 200mL/sc + Fortenza 200mL/sc + Standak Top 200mL/sc",
+                key="pl_txt_tsi", height=68)
+
+            # Mostra variedades adicionadas
+            if st.session_state.pl_variedades:
+                st.markdown("**📋 Variedades adicionadas:**")
+                _tot_ha_sem  = sum(v["ha"] for v in st.session_state.pl_variedades)
+                _tot_kg_sem  = sum(v["total_kg"] for v in st.session_state.pl_variedades)
+                for _vi, _v in enumerate(st.session_state.pl_variedades):
+                    _vc1, _vc2 = st.columns([5,1])
+                    _vc1.markdown(f"""
+                    <div style='background:#14532d;border-radius:8px;padding:6px 12px;
+                    border-left:3px solid #22c55e;margin:2px 0;font-size:12px;'>
+                    <b style='color:#6ee7b7;'>{_v['nome']}</b>
+                    <span style='color:#f1f5f9;'> · {_v['ha']} ha · {_v['dose']} kg/ha
+                    → <b>{_v['total_kg']:,.0f} kg</b>
+                    · {_v['pop']:,} pl/ha · {_v['esp']} cm</span>
+                    </div>""", unsafe_allow_html=True)
+                    if _vc2.button("🗑️", key=f"del_var_{_vi}"):
+                        st.session_state.pl_variedades.pop(_vi)
+                        st.rerun()
+
+                st.markdown(f"""
+                <div style='background:#0f2d4a;border-radius:8px;padding:8px 14px;
+                border-left:3px solid #22c55e;margin:4px 0;'>
+                <b style='color:#22c55e;'>📊 Total sementes:</b>
+                <span style='color:#f1f5f9;'> {_tot_ha_sem:.1f} ha · {_tot_kg_sem:,.0f} kg total</span>
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.info("Adicione ao menos uma variedade acima.")
+
+            # Compat: variáveis usadas abaixo (usa primeira variedade ou vazio)
+            _pl_semente  = st.session_state.pl_variedades[0]["nome"] if st.session_state.pl_variedades else ""
+            _pl_dose_sem = st.session_state.pl_variedades[0]["dose"] if st.session_state.pl_variedades else 0.0
+            _pl_pop      = st.session_state.pl_variedades[0]["pop"]  if st.session_state.pl_variedades else 0
+            _pl_espacamento = st.session_state.pl_variedades[0]["esp"] if st.session_state.pl_variedades else 45.0
 
             st.markdown("#### 🧪 Fertilizantes de Base (sulco e/ou lanço)")
 
@@ -7414,6 +7477,7 @@ if menu == "📦 Operacional":
                     "Status":              "pendente",
                 })
                 salvar_dados_iaagro()
+                st.session_state.pl_variedades = []
                 success_box(f"✅ Plantio salvo no cronograma da {st.session_state.get('aplic_cultura_ativa','cultura')}!")
                 st.rerun()
 
@@ -7452,6 +7516,7 @@ if menu == "📦 Operacional":
                         "semente":      _pl_semente,    "dose_sem_ha": _pl_dose_sem,
                         "populacao":    _pl_pop,         "tsi":         _pl_tsi,
                         "espacamento":  _pl_espacamento,
+                        "variedades":   st.session_state.get("pl_variedades", []),
                         "adubo_nome":   _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
                         "kcl_nome":     _pl_kcl_nome,   "kcl_kg_ha":   _pl_kcl_kg,
                         "ureia_nome":   _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
@@ -7488,6 +7553,8 @@ if menu == "📦 Operacional":
                 })
                 atualizar_area_atual()
                 salvar_dados_iaagro()
+                if _is_plantio:
+                    st.session_state.pl_variedades = []
                 success_box(f"✅ {nome_aplic} salva! {len(produtos_aplic)} produto(s).")
                 st.rerun()
 
@@ -7578,7 +7645,27 @@ if menu == "📦 Operacional":
                         _dv1, _dv2, _dv3 = st.columns(3)
 
                         # Semente
-                        if _dp_view.get("semente") or _dp_view.get("dose_sem_ha",0) > 0:
+                        # Múltiplas variedades
+                        _vars_view = _dp_view.get("variedades", [])
+                        if _vars_view:
+                            _tot_ha_v = sum(v["ha"] for v in _vars_view)
+                            _tot_kg_v = sum(v["total_kg"] for v in _vars_view)
+                            _linhas_v = "".join([
+                                f"<span style='color:#f1f5f9;font-size:11px;'>"
+                                f"<b style='color:#6ee7b7;'>{v['nome']}</b> · "
+                                f"{v['ha']} ha · {v['dose']} kg/ha → {v['total_kg']:,.0f} kg</span><br>"
+                                for v in _vars_view
+                            ])
+                            _tsi_v = f"<br><span style='color:#fbbf24;font-size:11px;'>TSI: {_dp_view.get('tsi','')}</span>" if _dp_view.get('tsi') else ""
+                            _dv1.markdown(f"""
+                            <div style='background:#14532d;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#6ee7b7;font-size:12px;'>🌱 SEMENTES ({len(_vars_view)} variedades)</b><br>
+                            {_linhas_v}
+                            <span style='color:#22c55e;font-size:11px;font-weight:700;'>
+                            Total: {_tot_ha_v:.1f} ha · {_tot_kg_v:,.0f} kg</span>
+                            {_tsi_v}
+                            </div>""", unsafe_allow_html=True)
+                        elif _dp_view.get("semente") or _dp_view.get("dose_sem_ha",0) > 0:
                             _dv1.markdown(f"""
                             <div style='background:#14532d;border-radius:8px;padding:8px 12px;margin:2px 0;'>
                             <b style='color:#6ee7b7;font-size:12px;'>🌱 SEMENTE</b><br>
