@@ -7101,34 +7101,59 @@ if menu == "📦 Operacional":
             _pl_espacamento= _pl_c2.number_input("Espaçamento entre linhas (cm)", min_value=0.0, value=45.0, key="pl_num_esp")
 
             st.markdown("#### 🧪 Fertilizantes de Base (sulco e/ou lanço)")
+
+            # Lista do estoque + opção manual
+            _est_nomes = ["— digitar manualmente —"] + [i["Insumo"] for i in st.session_state.estoque]
+
             _fl_c1, _fl_c2, _fl_c3 = st.columns(3)
 
             # Adubo base
-            _pl_adubo_nome = _fl_c1.text_input("Adubo de base", placeholder="Ex: MAP, NPK 08-28-16, Physiostart", key="pl_txt_adubo")
+            _pl_adubo_sel  = _fl_c1.selectbox("🔍 Adubo de base (estoque)", _est_nomes, key="pl_sel_adubo")
+            _pl_adubo_man  = _fl_c1.text_input("Ou digite o nome", placeholder="MAP, NPK 08-28-16...", key="pl_txt_adubo") if _pl_adubo_sel == "— digitar manualmente —" else ""
+            _pl_adubo_nome = _pl_adubo_man if _pl_adubo_sel == "— digitar manualmente —" else _pl_adubo_sel
             _pl_adubo_kg   = _fl_c1.number_input("Dose adubo (kg/ha)", min_value=0.0, step=5.0, key="pl_num_adubo")
 
             # KCl
-            _pl_kcl_nome   = _fl_c2.text_input("KCl / Potássio", placeholder="Ex: KCl Mosaic, SulPoMag", key="pl_txt_kcl")
-            _pl_kcl_kg     = _fl_c2.number_input("Dose KCl (kg/ha)", min_value=0.0, step=5.0, key="pl_num_kcl")
+            _pl_kcl_sel   = _fl_c2.selectbox("🔍 KCl / Potássio (estoque)", _est_nomes, key="pl_sel_kcl")
+            _pl_kcl_man   = _fl_c2.text_input("Ou digite o nome", placeholder="KCl Mosaic, SulPoMag...", key="pl_txt_kcl") if _pl_kcl_sel == "— digitar manualmente —" else ""
+            _pl_kcl_nome  = _pl_kcl_man if _pl_kcl_sel == "— digitar manualmente —" else _pl_kcl_sel
+            _pl_kcl_kg    = _fl_c2.number_input("Dose KCl (kg/ha)", min_value=0.0, step=5.0, key="pl_num_kcl")
 
             # Ureia
-            _pl_ureia_nome = _fl_c3.text_input("Ureia / N", placeholder="Ex: Ureia Yara, KAS", key="pl_txt_ureia")
+            _pl_ureia_sel  = _fl_c3.selectbox("🔍 Ureia / N (estoque)", _est_nomes, key="pl_sel_ureia")
+            _pl_ureia_man  = _fl_c3.text_input("Ou digite o nome", placeholder="Ureia Yara, KAS...", key="pl_txt_ureia") if _pl_ureia_sel == "— digitar manualmente —" else ""
+            _pl_ureia_nome = _pl_ureia_man if _pl_ureia_sel == "— digitar manualmente —" else _pl_ureia_sel
             _pl_ureia_kg   = _fl_c3.number_input("Dose N (kg/ha)", min_value=0.0, step=5.0, key="pl_num_ureia")
 
             st.markdown("#### 🦠 Inoculantes no Sulco")
             _in_c1, _in_c2, _in_c3 = st.columns(3)
-            _pl_inoc1_nome = _in_c1.text_input("Inoculante 1", placeholder="Ex: Nitragin Gold, Cell Tech", key="pl_txt_inoc1")
+
+            _pl_inoc1_sel  = _in_c1.selectbox("🔍 Inoculante 1 (estoque)", _est_nomes, key="pl_sel_inoc1")
+            _pl_inoc1_man  = _in_c1.text_input("Ou digite", placeholder="Nitragin Gold...", key="pl_txt_inoc1") if _pl_inoc1_sel == "— digitar manualmente —" else ""
+            _pl_inoc1_nome = _pl_inoc1_man if _pl_inoc1_sel == "— digitar manualmente —" else _pl_inoc1_sel
             _pl_inoc1_dose = _in_c1.number_input("Dose inoc 1 (mL/ha)", min_value=0.0, key="pl_num_inoc1")
-            _pl_inoc2_nome = _in_c2.text_input("Co-inoculante", placeholder="Ex: Azospirillum Masterfix", key="pl_txt_inoc2")
+
+            _pl_inoc2_sel  = _in_c2.selectbox("🔍 Co-inoculante (estoque)", _est_nomes, key="pl_sel_inoc2")
+            _pl_inoc2_man  = _in_c2.text_input("Ou digite", placeholder="Azospirillum...", key="pl_txt_inoc2") if _pl_inoc2_sel == "— digitar manualmente —" else ""
+            _pl_inoc2_nome = _pl_inoc2_man if _pl_inoc2_sel == "— digitar manualmente —" else _pl_inoc2_sel
             _pl_inoc2_dose = _in_c2.number_input("Dose co-inoc (mL/ha)", min_value=0.0, key="pl_num_inoc2")
-            _pl_inoc3_nome = _in_c3.text_input("Inoculante semente", placeholder="Ex: Bradyrhizobium Nitrobacter", key="pl_txt_inoc3")
+
+            _pl_inoc3_sel  = _in_c3.selectbox("🔍 Inoc. semente (estoque)", _est_nomes, key="pl_sel_inoc3")
+            _pl_inoc3_man  = _in_c3.text_input("Ou digite", placeholder="Bradyrhizobium...", key="pl_txt_inoc3") if _pl_inoc3_sel == "— digitar manualmente —" else ""
+            _pl_inoc3_nome = _pl_inoc3_man if _pl_inoc3_sel == "— digitar manualmente —" else _pl_inoc3_sel
             _pl_inoc3_dose = _in_c3.number_input("Dose inoc semente (mL/sc)", min_value=0.0, key="pl_num_inoc3")
 
             st.markdown("#### 🌿 Micronutrientes e Outros no Sulco")
             _mn_c1, _mn_c2 = st.columns(2)
-            _pl_micro1_nome = _mn_c1.text_input("Micronutriente 1", placeholder="Ex: Boro Quelatado, Zinco", key="pl_txt_micro1")
+
+            _pl_micro1_sel  = _mn_c1.selectbox("🔍 Micronutriente 1 (estoque)", _est_nomes, key="pl_sel_micro1")
+            _pl_micro1_man  = _mn_c1.text_input("Ou digite", placeholder="Boro Quelatado, Zinco...", key="pl_txt_micro1") if _pl_micro1_sel == "— digitar manualmente —" else ""
+            _pl_micro1_nome = _pl_micro1_man if _pl_micro1_sel == "— digitar manualmente —" else _pl_micro1_sel
             _pl_micro1_dose = _mn_c1.number_input("Dose micro 1 (kg/L ha)", min_value=0.0, step=0.1, key="pl_num_micro1")
-            _pl_micro2_nome = _mn_c2.text_input("Micronutriente 2", placeholder="Ex: MicroEssentials SZ", key="pl_txt_micro2")
+
+            _pl_micro2_sel  = _mn_c2.selectbox("🔍 Micronutriente 2 (estoque)", _est_nomes, key="pl_sel_micro2")
+            _pl_micro2_man  = _mn_c2.text_input("Ou digite", placeholder="MicroEssentials SZ...", key="pl_txt_micro2") if _pl_micro2_sel == "— digitar manualmente —" else ""
+            _pl_micro2_nome = _pl_micro2_man if _pl_micro2_sel == "— digitar manualmente —" else _pl_micro2_sel
             _pl_micro2_dose = _mn_c2.number_input("Dose micro 2 (kg/L ha)", min_value=0.0, step=0.1, key="pl_num_micro2")
 
             # Mostra totais por ha e área
