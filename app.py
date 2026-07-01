@@ -7042,6 +7042,59 @@ if menu == "📦 Operacional":
     if len(st.session_state.estoque) == 0:
         warning_box("Cadastre produtos no estoque antes de registrar aplicações.")
     else:
+        # ── SELEÇÃO DE CULTURA ATIVA ────────────────────────────────────────────
+        if "aplic_cultura_ativa" not in st.session_state:
+            st.session_state.aplic_cultura_ativa = None
+        if "aplic_ha_ativo" not in st.session_state:
+            st.session_state.aplic_ha_ativo = 0.0
+
+        _CULTURAS_PLAN = [
+            "🌱 Soja","🌽 Milho 1ª Safra","🌽 Milho 2ª Safra (Safrinha)",
+            "🌾 Trigo","🌾 Aveia","🌻 Canola","🌱 Feijão","🍚 Arroz","🌾 Sorgo","🌿 Outro"
+        ]
+
+        st.markdown("""
+        <div style='background:linear-gradient(135deg,#14532d,#0f3d20);border-radius:14px;
+        padding:16px 20px;margin-bottom:16px;border:1px solid #22c55e44;'>
+        <b style='color:#6ee7b7;font-size:15px;'>🌾 Planejamento de Safra por Cultura</b><br>
+        <span style='color:#94a3b8;font-size:12px;'>
+        Selecione a cultura e o total de hectares. Monte todas as aplicações e gere o PDF.
+        Depois inicie o planejamento da próxima cultura.
+        </span></div>""", unsafe_allow_html=True)
+
+        _pc1, _pc2, _pc3 = st.columns([3,2,2])
+        _cult_sel = _pc1.selectbox("🌱 Cultura", _CULTURAS_PLAN,
+            index=_CULTURAS_PLAN.index(st.session_state.aplic_cultura_ativa)
+                  if st.session_state.aplic_cultura_ativa in _CULTURAS_PLAN else 0,
+            key="sel_cult_aplic_ativa")
+        _ha_sel = _pc2.number_input("Total de hectares", min_value=0.0,
+            value=st.session_state.aplic_ha_ativo, step=0.5, key="num_ha_aplic_ativo")
+
+        if _pc3.button("✅ Confirmar Cultura", key="btn_confirmar_cultura_aplic",
+                       use_container_width=True, type="primary"):
+            st.session_state.aplic_cultura_ativa = _cult_sel
+            st.session_state.aplic_ha_ativo      = _ha_sel
+            salvar_dados_iaagro()
+            st.rerun()
+
+        if st.session_state.aplic_cultura_ativa:
+            _cult_ativa = st.session_state.aplic_cultura_ativa
+            _ha_ativo   = st.session_state.aplic_ha_ativo
+            # Contagem de aplicações desta cultura
+            _aplic_cultura = [a for a in st.session_state.aplicacoes
+                               if a.get("Cultura") == _cult_ativa]
+            _kc1, _kc2, _kc3 = st.columns(3)
+            _kc1.metric("🌾 Cultura ativa", _cult_ativa.split(" ",1)[-1] if " " in _cult_ativa else _cult_ativa)
+            _kc2.metric("📐 Hectares", f"{_ha_ativo:.1f} ha")
+            _kc3.metric("📋 Aplicações", len(_aplic_cultura))
+
+            if _pc3.button("🔄 Nova Cultura", key="btn_nova_cultura_aplic",
+                           use_container_width=True):
+                st.session_state.aplic_cultura_ativa = None
+                st.session_state.aplic_ha_ativo      = 0.0
+                st.rerun()
+
+        st.divider()
         st.subheader("➕ Nova Aplicação")
         col_h1, col_h2, col_h3 = st.columns(3)
         with col_h1:
@@ -7054,7 +7107,7 @@ if menu == "📦 Operacional":
         with col_h2:
             data_aplic = st.date_input("Data", key="dat_data_aplic")
             area_aplic = st.number_input("Área (ha)", min_value=0.0,
-                                          value=float(st.session_state.dados.get("area", 0.0)),
+                                          value=float(st.session_state.aplic_ha_ativo) if st.session_state.aplic_ha_ativo > 0 else float(st.session_state.dados.get("area", 0.0)),
                                           key="num_area_aplic")
         with col_h3:
             _calda_opcao = st.selectbox("Volume calda (L/ha)",
@@ -7214,6 +7267,53 @@ if menu == "📦 Operacional":
                                f"{_pl_dose_sem * area_aplic:,.0f} kg",
                                f"{_pl_dose_sem} kg/ha")
 
+            # ── BOTÃO SALVAR PLANTIO DIRETO ──────────────────────────────────
+            st.markdown("---")
+            if st.button("💾 Salvar Aplicação de Plantio no Cronograma",
+                         key="btn_salvar_plantio_direto",
+                         use_container_width=True, type="primary"):
+                _dp = {
+                    "semente": _pl_semente, "dose_sem_ha": _pl_dose_sem,
+                    "populacao": _pl_pop, "tsi": _pl_tsi,
+                    "espacamento": _pl_espacamento,
+                    "adubo_nome": _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
+                    "kcl_nome": _pl_kcl_nome, "kcl_kg_ha": _pl_kcl_kg,
+                    "ureia_nome": _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
+                    "inoc1_nome": _pl_inoc1_nome, "inoc1_dose": _pl_inoc1_dose,
+                    "inoc2_nome": _pl_inoc2_nome, "inoc2_dose": _pl_inoc2_dose,
+                    "inoc3_nome": _pl_inoc3_nome, "inoc3_dose": _pl_inoc3_dose,
+                    "micro1_nome": _pl_micro1_nome, "micro1_dose": _pl_micro1_dose,
+                    "micro2_nome": _pl_micro2_nome, "micro2_dose": _pl_micro2_dose,
+                    "adubo_total_kg": round(_pl_adubo_kg * area_aplic, 1),
+                    "kcl_total_kg": round(_pl_kcl_kg * area_aplic, 1),
+                    "ureia_total_kg": round(_pl_ureia_kg * area_aplic, 1),
+                    "semente_total_kg": round(_pl_dose_sem * area_aplic, 1),
+                }
+                st.session_state.aplicacoes.append({
+                    "ID Área":             st.session_state.dados.get("id_area",""),
+                    "Cultura":             st.session_state.get("aplic_cultura_ativa",""),
+                    "Hectares Cultura":    st.session_state.get("aplic_ha_ativo", area_aplic),
+                    "Estádio":             "🚜 Plantio",
+                    "Aplicação":           "🚜 Plantio",
+                    "Data":                str(data_aplic),
+                    "Área aplicada ha":    area_aplic,
+                    "Volume calda L/ha":   0,
+                    "Capacidade tanque L": 0,
+                    "Área por tanque ha":  0,
+                    "Número tanques":      0,
+                    "Operador":            "",
+                    "Pulverizador":        "",
+                    "Velocidade km/h":     0,
+                    "Pressão bar":         0,
+                    "Clima aplicação":     "",
+                    "Produtos":            [],
+                    "Dados Plantio":       _dp,
+                    "Status":              "pendente",
+                })
+                salvar_dados_iaagro()
+                success_box(f"✅ Plantio salvo no cronograma da {st.session_state.get('aplic_cultura_ativa','cultura')}!")
+                st.rerun()
+
         st.subheader("🧪 Produtos da Aplicação" if not _is_plantio else "🧪 Defensivos e Outros Produtos")
         _nomes_estoque = [item["Insumo"] for item in st.session_state.estoque]
         n_produtos = int(st.number_input("Quantidade de produtos", min_value=1, max_value=10, value=1, step=1, key="num_qtd_produtos_aplic"))
@@ -7264,6 +7364,8 @@ if menu == "📦 Operacional":
                     }
                 st.session_state.aplicacoes.append({
                     "ID Área":             st.session_state.dados.get("id_area",""),
+                    "Cultura":             st.session_state.get("aplic_cultura_ativa",""),
+                    "Hectares Cultura":    st.session_state.get("aplic_ha_ativo",0),
                     "Estádio":             estadio_sel,
                     "Aplicação":           nome_aplic,
                     "Data":                str(data_aplic),
@@ -7290,26 +7392,44 @@ if menu == "📦 Operacional":
         st.divider()
         st.subheader("📋 Histórico de Aplicações")
         if st.session_state.aplicacoes:
-            if st.button("📄 Gerar PDF — Programação de Aplicações", key="btn_gerar_pdf_aplic", use_container_width=True):
+            # Filtra por cultura ativa se houver
+            _cult_pdf = st.session_state.get("aplic_cultura_ativa","")
+            _aplic_pdf = [a for a in st.session_state.aplicacoes
+                          if a.get("Cultura","") == _cult_pdf] if _cult_pdf else st.session_state.aplicacoes
+
+            _pc_pdf1, _pc_pdf2 = st.columns(2)
+            if _pc_pdf1.button(
+                f"📄 Gerar PDF — {_cult_pdf.split(' ',1)[-1] if _cult_pdf else 'Todas as Culturas'}",
+                key="btn_gerar_pdf_aplic", use_container_width=True, type="primary"):
                 try:
                     _d = st.session_state.dados
+                    _cult_nome = _cult_pdf.split(" ",1)[-1] if _cult_pdf else cultura_limpa(_d.get("cultura",""))
+                    _ha_pdf = st.session_state.get("aplic_ha_ativo", _d.get("area",0))
                     _pdf_bytes = gerar_pdf_programacao_aplicacoes(
-                        aplicacoes = st.session_state.aplicacoes,
+                        aplicacoes = _aplic_pdf,
                         fazenda    = _d.get("fazenda",""),
                         talhao     = _d.get("talhao",""),
-                        cultura    = cultura_limpa(_d.get("cultura","")),
-                        area_ha    = _d.get("area",0),
+                        cultura    = _cult_nome,
+                        area_ha    = _ha_pdf,
                         operador   = _d.get("operador",""),
                     )
                     st.session_state["_pdf_aplic"] = _pdf_bytes
-                    st.success("✅ PDF gerado!")
+                    st.success(f"✅ PDF gerado! {len(_aplic_pdf)} aplicação(ões).")
                 except Exception as e:
                     st.error(f"Erro ao gerar PDF: {e}")
+
+            if _pc_pdf2.button("🔄 Nova Cultura / Limpar seleção",
+                               key="btn_pdf_nova_cultura", use_container_width=True):
+                st.session_state.aplic_cultura_ativa = None
+                st.session_state.aplic_ha_ativo      = 0.0
+                st.rerun()
+
             if st.session_state.get("_pdf_aplic"):
+                _nome_pdf = (_cult_pdf.split(" ",1)[-1].replace(" ","_") if _cult_pdf else "todas")
                 st.download_button(
                     label="⬇️ Baixar PDF",
                     data=st.session_state["_pdf_aplic"],
-                    file_name=f"programacao_aplicacoes_{datetime.now().strftime('%d%m%Y')}.pdf",
+                    file_name=f"programacao_{_nome_pdf}_{datetime.now().strftime('%d%m%Y')}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                     key="btn_download_pdf_aplic"
@@ -7321,7 +7441,18 @@ if menu == "📦 Operacional":
             _ordem = {"🚜 Plantio":0,"🌱 Pré-plantio":1,"🌿 Pós-plantio / V0":2,"🌾 V1 – V3":3,
                       "🌾 V4 – V6":4,"🌾 V7 – VT":5,"🌸 R1 – R2 (Floração)":6,
                       "🫘 R3 – R4 (Granação)":7,"🫘 R5 – R6":8,"🌾 Pré-colheita":9}
-            aplicacoes_ordenadas = sorted(st.session_state.aplicacoes,
+
+            # Filtro por cultura no histórico
+            _culturas_hist = list(dict.fromkeys(
+                a.get("Cultura","Sem cultura") for a in st.session_state.aplicacoes))
+            _fil_cult_hist = st.selectbox("🔍 Filtrar por cultura",
+                ["Todas"] + _culturas_hist, key="sel_fil_cult_hist")
+
+            _aplic_filtradas = st.session_state.aplicacoes if _fil_cult_hist == "Todas" else [
+                a for a in st.session_state.aplicacoes
+                if a.get("Cultura","Sem cultura") == _fil_cult_hist]
+
+            aplicacoes_ordenadas = sorted(_aplic_filtradas,
                 key=lambda x: _ordem.get(x.get("Estádio", x.get("Aplicação","")), 99))
 
             for idx_a, aplic in enumerate(aplicacoes_ordenadas):
