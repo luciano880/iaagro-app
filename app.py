@@ -3288,6 +3288,8 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                P("DOSE/ha",8,True,COR_BRANCO,TA_CENTER),P("UNIDADE",8,True,COR_BRANCO,TA_CENTER),
                P("POR TANQUE",8,True,COR_BRANCO,TA_CENTER),P("TOTAL AREA",8,True,COR_BRANCO,TA_CENTER)]
         rows = [hdr]
+
+        # ── Produtos defensivos normais ─────────────────────────────────────
         for p in aplic.get("Produtos",[]):
             unid = p.get("Unidade","").replace("/ha","")
             rows.append([
@@ -3298,6 +3300,107 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                 P(f"<b>{p.get('Produto por tanque',0):.2f}</b> {unid}",8,True,None,TA_CENTER),
                 P(f"<b>{p.get('Total usado',0):.2f}</b> {unid}",8,True,COR_VERDE_E,TA_CENTER),
             ])
+
+        # ── Dados de Plantio (semente, fertilizantes, inoculantes) ─────────
+        _dp = aplic.get("Dados Plantio", {})
+        if _dp:
+            # Semente
+            if _dp.get("semente") or _dp.get("dose_sem_ha",0) > 0:
+                _sem_nome = _dp.get("semente","Semente")
+                _tsi = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
+                _pop = f" | Pop: {_dp.get('populacao',0):,} pl/ha" if _dp.get("populacao",0) > 0 else ""
+                rows.append([
+                    P(f"<b>🌱 {_sem_nome}</b>{_pop}{_tsi}",8,True,colors.HexColor("#14532d")),
+                    P("Semente",8),
+                    P(str(_dp.get("dose_sem_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('semente_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # Adubo base
+            if _dp.get("adubo_nome") and _dp.get("adubo_kg_ha",0) > 0:
+                rows.append([
+                    P(f"<b>🟡 {_dp['adubo_nome']}</b>",8,True),
+                    P("Fertilizante",8),
+                    P(str(_dp.get("adubo_kg_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('adubo_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # KCl
+            if _dp.get("kcl_nome") and _dp.get("kcl_kg_ha",0) > 0:
+                rows.append([
+                    P(f"<b>🟣 {_dp['kcl_nome']}</b>",8,True),
+                    P("KCl/Potássio",8),
+                    P(str(_dp.get("kcl_kg_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('kcl_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # Ureia
+            if _dp.get("ureia_nome") and _dp.get("ureia_kg_ha",0) > 0:
+                rows.append([
+                    P(f"<b>⬜ {_dp['ureia_nome']}</b>",8,True),
+                    P("Ureia/N",8),
+                    P(str(_dp.get("ureia_kg_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('ureia_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # Inoculante 1
+            if _dp.get("inoc1_nome") and _dp.get("inoc1_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🦠 {_dp['inoc1_nome']}</b>",8,True),
+                    P("Inoculante sulco",8),
+                    P(str(_dp.get("inoc1_dose",0)),8,False,None,TA_CENTER),
+                    P("mL/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Co-inoculante
+            if _dp.get("inoc2_nome") and _dp.get("inoc2_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🦠 {_dp['inoc2_nome']}</b>",8,True),
+                    P("Co-inoculante",8),
+                    P(str(_dp.get("inoc2_dose",0)),8,False,None,TA_CENTER),
+                    P("mL/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Inoculante semente
+            if _dp.get("inoc3_nome") and _dp.get("inoc3_dose",0) > 0:
+                rows.append([
+                    P(f"<b>💉 {_dp['inoc3_nome']}</b>",8,True),
+                    P("Inoc. semente",8),
+                    P(str(_dp.get("inoc3_dose",0)),8,False,None,TA_CENTER),
+                    P("mL/sc",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Micro 1
+            if _dp.get("micro1_nome") and _dp.get("micro1_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🌿 {_dp['micro1_nome']}</b>",8,True),
+                    P("Micronutriente",8),
+                    P(str(_dp.get("micro1_dose",0)),8,False,None,TA_CENTER),
+                    P("kg/L ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Micro 2
+            if _dp.get("micro2_nome") and _dp.get("micro2_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🌿 {_dp['micro2_nome']}</b>",8,True),
+                    P("Micronutriente",8),
+                    P(str(_dp.get("micro2_dose",0)),8,False,None,TA_CENTER),
+                    P("kg/L ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+
+        if len(rows) == 1:
+            rows.append([P("Nenhum produto registrado",8,False,COR_SUB),"","","","",""])
+
         tp = Table(rows, colWidths=[4.5*cm,2.5*cm,2*cm,2*cm,3*cm,4.5*cm])
         stp = [("BACKGROUND",(0,0),(-1,0),COR_VERDE_E),("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
                ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
