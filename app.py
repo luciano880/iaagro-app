@@ -7057,21 +7057,41 @@ if menu == "📦 Operacional":
                                           value=float(st.session_state.dados.get("area", 0.0)),
                                           key="num_area_aplic")
         with col_h3:
-            calda_lha  = st.number_input("Volume calda (L/ha)", min_value=0.0, value=100.0, key="num_calda_lha")
-            _cap_salva = st.session_state.dados.get("cap_tanque_salva", 3000.0)
-            cap_tanque = st.number_input("Capacidade tanque (L)", min_value=0.0,
-                                          value=float(_cap_salva), key="num_cap_tanque",
-                                          help="💾 Salvo automaticamente")
-            if cap_tanque != _cap_salva and cap_tanque > 0:
-                st.session_state.dados["cap_tanque_salva"] = cap_tanque
-                salvar_dados_iaagro()
-                st.caption(f"✅ Tanque de {cap_tanque:.0f}L salvo!")
+            _calda_opcao = st.selectbox("Volume calda (L/ha)",
+                ["— Não se aplica —","50","80","100","120","150","200","Outro"],
+                key="sel_calda_opcao")
+            if _calda_opcao == "— Não se aplica —":
+                calda_lha = 0.0
+            elif _calda_opcao == "Outro":
+                calda_lha = st.number_input("Volume calda personalizado (L/ha)", min_value=0.0, value=100.0, key="num_calda_custom")
+            else:
+                calda_lha = float(_calda_opcao)
 
-        area_por_tanque = round(cap_tanque / calda_lha, 2) if calda_lha > 0 else 0
-        n_tanques       = round(area_aplic / area_por_tanque, 2) if area_por_tanque > 0 else 0
-        col_m1, col_m2 = st.columns(2)
-        col_m1.metric("📐 Área por tanque", f"{area_por_tanque} ha")
-        col_m2.metric("🪣 Nº de tanques",   f"{n_tanques}")
+            _tanque_opcao = st.selectbox("Capacidade tanque (L)",
+                ["— Não se aplica —","1000","1500","2000","2500","3000","4000","Outro"],
+                key="sel_tanque_opcao",
+                help="💾 Selecione o volume do tanque do pulverizador")
+            if _tanque_opcao == "— Não se aplica —":
+                cap_tanque = 0.0
+            elif _tanque_opcao == "Outro":
+                _cap_salva = st.session_state.dados.get("cap_tanque_salva", 3000.0)
+                cap_tanque = st.number_input("Capacidade personalizada (L)", min_value=0.0,
+                                              value=float(_cap_salva), key="num_cap_tanque")
+                if cap_tanque != _cap_salva and cap_tanque > 0:
+                    st.session_state.dados["cap_tanque_salva"] = cap_tanque
+                    salvar_dados_iaagro()
+            else:
+                cap_tanque = float(_tanque_opcao)
+
+        if calda_lha > 0 and cap_tanque > 0:
+            area_por_tanque = round(cap_tanque / calda_lha, 2)
+            n_tanques       = round(area_aplic / area_por_tanque, 2) if area_por_tanque > 0 else 0
+            col_m1, col_m2 = st.columns(2)
+            col_m1.metric("📐 Área por tanque", f"{area_por_tanque} ha")
+            col_m2.metric("🪣 Nº de tanques",   f"{n_tanques}")
+        else:
+            area_por_tanque = 0.0
+            n_tanques       = 0.0
 
         with st.expander("🧑‍🌾 Dados do operador", expanded=False):
             col_o1, col_o2, col_o3 = st.columns(3)
@@ -7094,10 +7114,26 @@ if menu == "📦 Operacional":
 
             st.markdown("#### 🌱 Semente")
             _pl_c1, _pl_c2, _pl_c3 = st.columns(3)
-            _pl_semente    = _pl_c1.text_input("Variedade/Híbrido", placeholder="Ex: Brasmax Bônus IPRO, DKB390", key="pl_txt_semente")
+
+            # Selectbox com sementes do estoque + manual
+            _sem_est = ["— digitar manualmente —"] + [
+                i["Insumo"] for i in st.session_state.estoque
+                if any(p in i.get("Categoria","").lower() or p in i.get("Insumo","").lower()
+                       for p in ["semente","seed","milho","soja","trigo","aveia","feijão","canola","sorgo","arroz","híbrido","variedade","cultivar"])
+            ]
+            # Se não achou sementes por categoria, mostra tudo
+            if len(_sem_est) <= 1:
+                _sem_est = ["— digitar manualmente —"] + [i["Insumo"] for i in st.session_state.estoque]
+
+            _pl_sem_sel  = _pl_c1.selectbox("🔍 Variedade/Híbrido (estoque)", _sem_est, key="pl_sel_semente")
+            _pl_sem_man  = _pl_c1.text_input("Ou digite a variedade", placeholder="Ex: Brasmax Bônus IPRO, DKB390", key="pl_txt_semente") if _pl_sem_sel == "— digitar manualmente —" else ""
+            _pl_semente  = _pl_sem_man if _pl_sem_sel == "— digitar manualmente —" else _pl_sem_sel
+
             _pl_dose_sem   = _pl_c2.number_input("Dose semente (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="pl_num_dose_sem")
             _pl_pop        = _pl_c3.number_input("População (plantas/ha)", min_value=0, value=240000, step=5000, key="pl_num_pop")
-            _pl_tsi        = _pl_c1.text_input("TSI - Tratamento", placeholder="Ex: Maxim Advanced + Fortenza", key="pl_txt_tsi")
+
+            # TSI — campo manual livre
+            _pl_tsi        = _pl_c1.text_area("TSI - Tratamento de sementes", placeholder="Ex: Maxim Advanced 200mL/sc + Fortenza 200mL/sc + Standak Top 200mL/sc", key="pl_txt_tsi", height=68)
             _pl_espacamento= _pl_c2.number_input("Espaçamento entre linhas (cm)", min_value=0.0, value=45.0, key="pl_num_esp")
 
             st.markdown("#### 🧪 Fertilizantes de Base (sulco e/ou lanço)")
