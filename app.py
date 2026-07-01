@@ -1,6 +1,13 @@
 import streamlit as st
+
+st.set_page_config(
+    page_title="IAAgro Pro",
+    page_icon="🌾",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import random
 import json
 import os
@@ -11,9 +18,15 @@ import hashlib
 import smtplib
 import re
 import requests
+import xml.etree.ElementTree as ET
 from PIL import Image as PILImage
 import pdfplumber
 import pytesseract
+try:
+    from pyzbar.pyzbar import decode as pyzbar_decode
+    PYZBAR_OK = True
+except Exception:
+    PYZBAR_OK = False
 
 # ─────────────────────────────────────────────
 # TESSERACT — caminho para Windows
@@ -29,10 +42,39 @@ from streamlit_js_eval import get_geolocation
 from streamlit_folium import st_folium
 from folium.plugins import Draw
 from io import BytesIO
+
+# ─────────────────────────────────────────────
+# SUPABASE — importa módulo de integração
+# ─────────────────────────────────────────────
+try:
+    from supabase_db import (
+        sb_login, sb_signup, sb_logout, sb_reset_senha,
+        sb_carregar, sb_salvar, sb_plano, sb_refresh
+    )
+    _SB_DISPONIVEL = True
+except Exception:
+    _SB_DISPONIVEL = False
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+
+# ─────────────────────────────────────────────
+# SEGMENTOS E CULTURAS — definidos no topo para uso em tela_login
+# ─────────────────────────────────────────────
+SEGMENTOS_INFO = {
+    "🌾 Grãos":        {"desc":"Soja, Milho, Trigo e outros cereais",   "cor":"#14532d","borda":"#22c55e"},
+    "🌿 Horticultura": {"desc":"Hortaliças, verduras e legumes",         "cor":"#14532d","borda":"#84cc16"},
+    "🎯 Fruticultura": {"desc":"Frutas tropicais, uva, café e outras",  "cor":"#7f1d1d","borda":"#f87171"},
+    "🌲 Silvicultura": {"desc":"Eucalipto, Pinus e reflorestamento",     "cor":"#1e3a5f","borda":"#38bdf8"},
+}
+
+CULTURAS_POR_SEGMENTO = {
+    "🌾 Grãos":        ["🌱 Soja","🌽 Milho","🌾 Trigo","🌱 Feijão","🌻 Canola","🌿 Aveia","🍚 Arroz","🌾 Sorgo","🌾 Cevada","🌻 Girassol"],
+    "🌿 Horticultura": ["🍅 Tomate","🥔 Batata","🧅 Cebola","🧄 Alho","🍠 Mandioca","🥬 Alface","🥕 Cenoura","🥦 Brócolis","🥒 Pepino","🫑 Pimentão"],
+    "🎯 Fruticultura": ["🍊 Laranja","🍌 Banana","🍇 Uva","🍎 Maçã","🥭 Manga","🥑 Abacate","🍋 Limão","🍑 Pêssego","🍂 Caqui","☕ Café"],
+    "🌲 Silvicultura": ["🌳 Eucalipto","🌲 Pinus","🌴 Teca","🌿 Paricá","🌲 Cedro","🌳 Mogno Africano"],
+}
 
 # ─────────────────────────────────────────────
 # CORREÇÃO 1: função sem recursão infinita
@@ -483,16 +525,19 @@ def error_box(msg):
 
 # ─────────────────────────────────────────────
 # ARQUIVOS DE PERSISTÊNCIA
-# Usa pasta /tmp no Streamlit Cloud (persiste entre reruns da sessão)
-# Para persistência total entre deploys, usar backup manual via Configurações
+# usuarios.json fica no repositório (persistente entre deploys)
+# dados operacionais ficam em /tmp (sessão)
 # ─────────────────────────────────────────────
 import pathlib
 
-# Detecta se está no Streamlit Cloud ou local
 _BASE_DIR = pathlib.Path("/tmp/iaagro_data")
 _BASE_DIR.mkdir(parents=True, exist_ok=True)
 
-ARQUIVO_USUARIOS     = str(_BASE_DIR / "usuarios.json")
+# Usuários: salva no diretório do app (persistente no Git/repositório)
+_REPO_DIR = pathlib.Path(__file__).parent if "__file__" in dir() else pathlib.Path(".")
+ARQUIVO_USUARIOS     = str(_REPO_DIR / "usuarios.json")
+
+# Dados operacionais em /tmp (rápido, mas reseta no redeploy)
 ARQUIVO_ESTOQUE      = str(_BASE_DIR / "estoque.json")
 ARQUIVO_AREAS        = str(_BASE_DIR / "areas.json")
 ARQUIVO_DADOS_IAAGRO = str(_BASE_DIR / "dados_iaagro.json")
@@ -602,7 +647,16 @@ def gerar_backup():
 
 def restaurar_backup(arquivo):
     try:
-        dados = json.loads(arquivo.read().decode("utf-8"))
+        import io
+        if isinstance(arquivo, (bytes, bytearray)):
+            conteudo = arquivo
+        elif isinstance(arquivo, io.BytesIO):
+            conteudo = arquivo.read()
+        else:
+            conteudo = arquivo.read()
+        dados = json.loads(conteudo.decode("utf-8"))
+        if "dados" not in dados and "areas" not in dados:
+            return False, "Arquivo inválido — não parece ser um backup do IAAgro."
         st.session_state.usuarios = dados.get("usuarios", {})
         st.session_state.dados    = dados.get("dados", {})
         st.session_state.areas    = dados.get("areas", [])
@@ -615,11 +669,17 @@ def restaurar_backup(arquivo):
         st.session_state.calendario_eventos  = dados.get("calendario_eventos", [])
         st.session_state.harvest_historico   = dados.get("harvest_historico", [])
         st.session_state.receituarios        = dados.get("receituarios", [])
+        st.session_state.safrinha_registros  = dados.get("safrinha_registros", [])
+        st.session_state.segmento            = dados.get("segmento", None)
         if dados.get("email_config"):
-            st.session_state.email_config    = dados["email_config"]
+            st.session_state.email_config = dados["email_config"]
         salvar_dados_iaagro()
         salvar_usuarios(st.session_state.usuarios)
-        return True, f"Backup de {dados.get('backup_data','?')} restaurado com sucesso!"
+        n_areas   = len(st.session_state.areas)
+        n_estoque = len(st.session_state.estoque)
+        return True, f"Backup de {dados.get('backup_data','?')} restaurado! {n_areas} áreas, {n_estoque} itens de estoque."
+    except json.JSONDecodeError:
+        return False, "Arquivo corrompido — não é um JSON válido."
     except Exception as e:
         return False, f"Erro ao restaurar: {e}"
 
@@ -771,7 +831,28 @@ def buscar_dolar_awesomeapi():
                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json",
     }
-    # 1. Banco Central do Brasil — PTAX
+    # 1. ExchangeRate-API (mais permissiva no Streamlit Cloud)
+    try:
+        r3 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=6, headers=headers)
+        if r3.status_code == 200:
+            brl = r3.json().get("rates", {}).get("BRL", 0)
+            if brl > 0:
+                return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
+    except Exception:
+        pass  # falha silenciada — não crítico
+    # 2. AwesomeAPI
+    try:
+        r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
+                         timeout=6, headers=headers)
+        if r.status_code == 200:
+            d = r.json()
+            bid = float(d["USDBRL"]["bid"])
+            if bid > 0:
+                return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
+                        "horario": d["USDBRL"].get("create_date", "")}
+    except Exception:
+        pass  # falha silenciada — não crítico
+    # 3. Banco Central do Brasil — PTAX
     try:
         from datetime import datetime as _dt2, timedelta as _td
         for delta in [0, 1, 2]:
@@ -787,68 +868,186 @@ def buscar_dolar_awesomeapi():
                             "fonte": "Banco Central do Brasil PTAX (tempo real)",
                             "horario": data}
     except Exception:
-        pass
-    # 2. AwesomeAPI
-    try:
-        r = requests.get("https://economia.awesomeapi.com.br/json/last/USD-BRL",
-                         timeout=6, headers=headers)
-        if r.status_code == 200:
-            d = r.json()
-            bid = float(d["USDBRL"]["bid"])
-            if bid > 0:
-                return {"preco": round(bid, 4), "fonte": "AwesomeAPI (tempo real)",
-                        "horario": d["USDBRL"].get("create_date", "")}
-    except Exception:
-        pass
-    # 3. ExchangeRate-API
-    try:
-        r3 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5, headers=headers)
-        if r3.status_code == 200:
-            brl = r3.json().get("rates", {}).get("BRL", 0)
-            if brl > 0:
-                return {"preco": round(brl, 4), "fonte": "ExchangeRate-API (tempo real)", "horario": ""}
-    except Exception:
-        pass
+        pass  # falha silenciada — não crítico
     return {"preco": 5.80, "fonte": "Offline"}
 
 
 def buscar_precos_cepea_ia():
     """
     Usa Claude API com web_search para buscar preços CEPEA em tempo real.
-    Esta chamada funciona no Streamlit Cloud pois vai para api.anthropic.com.
     """
     try:
+        # Tenta acessar a chave de diferentes formas
+        api_key = ""
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except Exception:
+            try:
+                api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            except Exception:
+                pass  # falha silenciada — não crítico
+        if not api_key:
+            import os
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+        if not api_key or len(api_key) < 20:
+            st.session_state["_cepea_erro"] = "API key não encontrada ou inválida"
+            return None
+
+        hoje_str = datetime.now().strftime("%d/%m/%Y")
         prompt = (
-            "Pesquise AGORA os precos mais recentes das commodities agricolas brasileiras "
-            "(CEPEA/ESALQ ou indicador de mercado, data de hoje). "
-            "Responda SOMENTE com JSON valido sem markdown:\n"
+            f"Hoje é {hoje_str}. "
+            "Pesquise AGORA no site do CEPEA (cepea.esalq.usp.br) ou em fontes de mercado físico brasileiro "
+            "os preços FÍSICOS das seguintes commodities NO BRASIL (NÃO use preços da CBOT/Bolsa de Chicago): "
+            "- Soja: preço físico PR/SC em R$/sc 60kg (referência COAMO, Paranaguá ou CEPEA/ESALQ Paraná) "
+            "- Milho: preço físico PR/SC em R$/sc 60kg (referência Maringá, Cascavel ou CEPEA Paraná) "
+            "- Trigo: preço físico PR em R$/sc 60kg (referência CEPEA/ESALQ) "
+            "- Café: preço físico SP em R$/sc 60kg (referência CEPEA/ESALQ São Paulo) "
+            "- Algodão: preço físico MT em R$/@ (referência CEPEA) "
+            "- Boi Gordo: preço físico SP em R$/@ (referência CEPEA/ESALQ São Paulo) "
+            "- Arroz: preço físico RS em R$/sc 50kg (referência CEPEA) "
+            "IMPORTANTE: os preços físicos brasileiros típicos são: soja ~110-130 R$/sc, milho ~50-65 R$/sc, trigo ~65-80 R$/sc. "
+            "Se não encontrar, use a melhor estimativa do mercado físico brasileiro disponível. "
+            "Responda SOMENTE com JSON válido, sem texto extra, sem markdown:\n"
             '{"soja":0.0,"milho":0.0,"trigo":0.0,"cafe":0.0,"algodao":0.0,"boi":0.0,"arroz":0.0,'
-            '"fonte":"CEPEA/ESALQ","data":"DD/MM/AAAA"}\n'
-            "Unidades: soja/milho/trigo/cafe em R$/sc 60kg (PR/SP), "
-            "algodao e boi em R$/arroba (MT/SP), arroz R$/sc 50kg (RS)."
+            '"fonte":"CEPEA/ESALQ","mercado":"fisico_br","data":"' + hoje_str + '"}'
         )
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers={"Content-Type": "application/json"},
-            json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 300,
-                "tools": [{"type": "web_search_20250305", "name": "web_search"}],
-                "messages": [{"role": "user", "content": prompt}]
+            headers={
+                "Content-Type":      "application/json",
+                "x-api-key":         api_key,
+                "anthropic-version": "2023-06-01",
             },
-            timeout=45
+            json={
+                "model":      "claude-sonnet-4-6",
+                "max_tokens": 1000,
+                "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
+                "messages":   [{"role": "user", "content": prompt}]
+            },
+            timeout=60
         )
-        if resp.status_code == 200:
-            texto = "".join(b.get("text","") for b in resp.json().get("content",[]) if b.get("type")=="text")
-            inicio = texto.find("{")
-            fim    = texto.rfind("}") + 1
-            if inicio >= 0 and fim > inicio:
-                dados = json.loads(texto[inicio:fim])
-                campos = ["soja","milho","trigo","cafe","algodao","boi","arroz"]
-                if all(isinstance(dados.get(c,0),(int,float)) and dados.get(c,0) > 0 for c in campos):
-                    return dados
-    except Exception:
-        pass
+        if resp.status_code != 200:
+            _err_msg = f"HTTP {resp.status_code}"
+            if resp.status_code == 401:
+                _err_msg = "Chave API inválida ou expirada"
+            elif resp.status_code == 429:
+                _err_msg = "Limite de requisições atingido"
+            st.session_state["_cepea_erro"] = _err_msg
+            return None
+
+        # Loop de tool_use — continua até end_turn
+        _msgs = [{"role": "user", "content": prompt}]
+        _resp_data = resp.json()
+        _max_iter = 4
+        _iter = 0
+        texto = ""
+
+        while _iter < _max_iter:
+            _iter += 1
+            _content = _resp_data.get("content", [])
+            _stop    = _resp_data.get("stop_reason", "end_turn")
+
+            # Coleta texto da resposta
+            for bloco in _content:
+                if bloco.get("type") == "text":
+                    texto += bloco.get("text", "")
+
+            if _stop == "end_turn":
+                break
+
+            if _stop == "tool_use":
+                # Adiciona resposta do assistant e resultado fake da tool
+                _msgs.append({"role": "assistant", "content": _content})
+                _tool_results = []
+                for bloco in _content:
+                    if bloco.get("type") == "tool_use":
+                        _tool_results.append({
+                            "type":        "tool_result",
+                            "tool_use_id": bloco["id"],
+                            "content":     "Busca realizada. Por favor retorne os preços encontrados em JSON."
+                        })
+                if _tool_results:
+                    _msgs.append({"role": "user", "content": _tool_results})
+                    _r2 = requests.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "Content-Type":      "application/json",
+                            "x-api-key":         api_key,
+                            "anthropic-version": "2023-06-01",
+                        },
+                        json={
+                            "model":    "claude-sonnet-4-6",
+                            "max_tokens": 1000,
+                            "tools":    [{"type": "web_search_20250305", "name": "web_search"}],
+                            "messages": _msgs,
+                        },
+                        timeout=60
+                    )
+                    if _r2.status_code == 200:
+                        _resp_data = _r2.json()
+                    else:
+                        break
+                else:
+                    break
+            else:
+                break
+
+        texto = texto.replace("```json", "").replace("```", "").strip()
+        dados = None
+        # Procura JSON no texto
+        idx = 0
+        while idx < len(texto):
+            inicio = texto.find("{", idx)
+            if inicio < 0:
+                break
+            fim = texto.rfind("}", inicio) + 1
+            if fim <= inicio:
+                break
+            try:
+                candidato = json.loads(texto[inicio:fim])
+                campos = ["soja", "milho", "trigo", "cafe", "algodao", "boi", "arroz"]
+                if all(isinstance(candidato.get(c, 0), (int, float)) and float(candidato.get(c, 0)) > 10 for c in campos):
+                    dados = candidato
+                    break
+            except Exception:
+                pass
+            idx = inicio + 1
+
+        if dados:
+            st.session_state["_cepea_erro"] = ""
+            return dados
+        else:
+            # Tenta extrair valores individualmente se modelo respondeu em texto
+            import re
+            valores = {}
+            mapa = {
+                "soja":    r"soja[^0-9]*(\d+[.,]\d+)",
+                "milho":   r"milho[^0-9]*(\d+[.,]\d+)",
+                "trigo":   r"trigo[^0-9]*(\d+[.,]\d+)",
+                "cafe":    r"caf[eé][^0-9]*(\d+[.,]\d+)",
+                "algodao": r"algod[aã]o[^0-9]*(\d+[.,]\d+)",
+                "boi":     r"boi[^0-9]*(\d+[.,]\d+)",
+                "arroz":   r"arroz[^0-9]*(\d+[.,]\d+)",
+            }
+            for campo, pat in mapa.items():
+                m = re.search(pat, texto.lower())
+                if m:
+                    valores[campo] = float(m.group(1).replace(",", "."))
+
+            if len(valores) >= 5:
+                for campo in ["soja","milho","trigo","cafe","algodao","boi","arroz"]:
+                    if campo not in valores:
+                        valores[campo] = 0.0
+                valores["fonte"] = "CEPEA/ESALQ"
+                valores["mercado"] = "fisico_br"
+                valores["data"]  = datetime.now().strftime("%d/%m/%Y")
+                st.session_state["_cepea_erro"] = ""
+                return valores
+
+            st.session_state["_cepea_erro"] = f"JSON não encontrado: {texto[:60]}"
+    except Exception as e:
+        st.session_state["_cepea_erro"] = f"Exceção: {str(e)[:80]}"
     return None
 
 
@@ -925,8 +1124,21 @@ def buscar_precos_commodities():
     resultado["dolar"] = dolar_data
     dolar_val  = dolar_data.get("preco", 5.80)
 
-    # Prioridade 1: IA com CEPEA
-    dados_cepea = buscar_precos_cepea_ia()
+    # Verifica cache — só chama IA se passou mais de 30 min
+    _cache = st.session_state.get("_cepea_cache", {})
+    _cache_ts = st.session_state.get("_cepea_cache_ts", 0)
+    _agora = datetime.now().timestamp()
+    _cache_valido = _cache and (_agora - _cache_ts) < 1800  # 30 minutos
+
+    dados_cepea = None
+    if _cache_valido:
+        dados_cepea = _cache
+    else:
+        dados_cepea = buscar_precos_cepea_ia()
+        if dados_cepea:
+            st.session_state["_cepea_cache"]    = dados_cepea
+            st.session_state["_cepea_cache_ts"] = _agora
+
     if dados_cepea:
         fc = f"{dados_cepea.get('fonte','CEPEA')} — {dados_cepea.get('data','')}"
         resultado["soja_sc"]    = {"preco":float(dados_cepea["soja"]),    "unidade":"R$/sc 60kg","praca":"PR","fonte":fc}
@@ -943,9 +1155,9 @@ def buscar_precos_commodities():
 
     hoje = datetime.now().strftime("%d/%m/%Y")
     for chave, fb in {
-        "soja_sc":    {"preco":142.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
-        "milho_sc":   {"preco": 74.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
-        "trigo_sc":   {"preco":100.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "soja_sc":    {"preco":115.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "milho_sc":   {"preco": 58.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
+        "trigo_sc":   {"preco": 69.0, "unidade":"R$/sc 60kg","praca":"PR","fonte":f"Referência {hoje}"},
         "cafe_sc":    {"preco":2250.0,"unidade":"R$/sc 60kg","praca":"SP","fonte":f"Referência {hoje}"},
         "algodao_at": {"preco":120.0, "unidade":"R$/@",      "praca":"MT","fonte":f"Referência {hoje}"},
         "boi_at":     {"preco":320.0, "unidade":"R$/@",      "praca":"SP","fonte":f"Referência {hoje}"},
@@ -1015,18 +1227,82 @@ def carregar_dados_iaagro():
 
 def salvar_dados_iaagro():
     dados_salvos = {
-        "dados": st.session_state.dados,
-        "areas": st.session_state.areas,
-        "estoque": st.session_state.estoque,
-        "aplicacoes": st.session_state.aplicacoes,
+        "dados":                   st.session_state.dados,
+        "areas":                   st.session_state.areas,
+        "estoque":                 st.session_state.estoque,
+        "aplicacoes":              st.session_state.aplicacoes,
         "historico_produtividade": st.session_state.historico_produtividade,
-        "pluviometro": st.session_state.pluviometro,
-        "carencia_registros": st.session_state.get("carencia_registros", []),
-        "dre_registros":      st.session_state.get("dre_registros", []),
-        "calendario_eventos": st.session_state.get("calendario_eventos", []),
-        "harvest_historico":   st.session_state.get("harvest_historico", []),
-        "receituarios":        st.session_state.get("receituarios", []),
+        "pluviometro":             st.session_state.pluviometro,
+        "carencia_registros":      st.session_state.get("carencia_registros", []),
+        "dre_registros":           st.session_state.get("dre_registros", []),
+        "calendario_eventos":      st.session_state.get("calendario_eventos", []),
+        "harvest_historico":       st.session_state.get("harvest_historico", []),
+        "receituarios":            st.session_state.get("receituarios", []),
+        "segmento":                st.session_state.get("segmento", None),
+        "safrinha_registros":      st.session_state.get("safrinha_registros", []),
+        "fluxo_caixa":             st.session_state.get("fluxo_caixa", []),
+        "contratos_troca":         st.session_state.get("contratos_troca", []),
+        "planejamento_safras":     st.session_state.get("planejamento_safras", []),
+        "plan_insumos":            st.session_state.get("plan_insumos", []),
+        "corretivos_aplicados":    st.session_state.get("corretivos_aplicados", []),
     }
+    # Lê variáveis globais dinamicamente (podem não existir quando função é definida)
+    _sb_url    = st.secrets.get("SUPABASE_URL", "") if hasattr(st, 'secrets') else ""
+    _sb_key    = st.secrets.get("SUPABASE_ANON_KEY", "") if hasattr(st, 'secrets') else ""
+    _sb_token  = st.session_state.get("sb_token", "")
+    _sb_uid    = st.session_state.get("sb_user_id", "")
+    _sb_ok     = bool(_sb_url and _sb_key and _sb_token and _sb_uid and _SB_DISPONIVEL)
+
+    if _sb_ok:
+        try:
+            ok = sb_salvar(_sb_url, _sb_key, _sb_token, _sb_uid, dados_salvos)
+            if ok:
+                st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')}"
+                return
+            else:
+                # Tenta renovar token e salvar de novo
+                _refresh = st.session_state.get("sb_refresh_token", "")
+                if _refresh and _SB_DISPONIVEL:
+                    try:
+                        _novo = sb_refresh(_sb_url, _sb_key, _refresh)
+                        if _novo.get("ok"):
+                            st.session_state.sb_token         = _novo["token"]
+                            st.session_state.sb_refresh_token = _novo["refresh_token"]
+                            # Salva query_params com novo token
+                            try:
+                                _tk = _novo["token"]
+                                st.query_params["_t1"] = _tk[:200]
+                                st.query_params["_t2"] = _tk[200:400]
+                                st.query_params["_t3"] = _tk[400:]
+                            except Exception:
+                                pass
+                            ok2 = sb_salvar(_sb_url, _sb_key, _novo["token"], _sb_uid, dados_salvos)
+                            if ok2:
+                                st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')} (renovado)"
+                                return
+                    except Exception:
+                        pass
+                # Captura erro detalhado
+                import requests as _rq
+                _r = _rq.patch(
+                    f"{_sb_url}/rest/v1/iaagro_dados?user_id=eq.{_sb_uid}",
+                    headers={"apikey": _sb_key, "Authorization": f"Bearer {_sb_token}",
+                             "Content-Type": "application/json", "Prefer": "return=minimal"},
+                    json={"atualizado_em": datetime.now().isoformat()},
+                    timeout=10
+                )
+                st.session_state["_ultimo_save"] = f"❌ {_r.status_code}: {_r.text[:50]}"
+        except Exception as e:
+            st.session_state["_ultimo_save"] = f"❌ Erro: {str(e)[:40]}"
+    else:
+        motivo = []
+        if not _sb_url: motivo.append("sem URL")
+        if not _sb_key: motivo.append("sem KEY")
+        if not _sb_token: motivo.append("sem token")
+        if not _sb_uid: motivo.append("sem user_id")
+        if not _SB_DISPONIVEL: motivo.append("módulo não carregou")
+        st.session_state["_ultimo_save"] = f"⚠️ Local ({', '.join(motivo)})"
+    # Fallback: arquivo local
     with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
         json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
 
@@ -1061,18 +1337,110 @@ def salvar_estoque(estoque):
         json.dump(estoque, arquivo, indent=4, ensure_ascii=False)
 
 def carregar_usuarios():
-    if os.path.exists(ARQUIVO_USUARIOS):
-        with open(ARQUIVO_USUARIOS, "r", encoding="utf-8") as arquivo:
-            return json.load(arquivo)
+    # Tenta carregar do repositório primeiro
+    for caminho in [ARQUIVO_USUARIOS, str(_BASE_DIR / "usuarios.json")]:
+        if os.path.exists(caminho):
+            try:
+                with open(caminho, "r", encoding="utf-8") as arquivo:
+                    dados = json.load(arquivo)
+                    if isinstance(dados, dict) and dados:
+                        return dados
+            except Exception:
+                pass  # falha silenciada — não crítico
     return {}
 
 def salvar_usuarios(usuarios):
-    with open(ARQUIVO_USUARIOS, "w", encoding="utf-8") as arquivo:
-        json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
+    # Salva no repositório (persistente)
+    try:
+        with open(ARQUIVO_USUARIOS, "w", encoding="utf-8") as arquivo:
+            json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
+    except Exception:
+        pass  # falha silenciada — não crítico
+    # Backup em /tmp também
+    try:
+        with open(str(_BASE_DIR / "usuarios.json"), "w", encoding="utf-8") as arquivo:
+            json.dump(usuarios, arquivo, indent=4, ensure_ascii=False)
+    except Exception:
+        pass  # falha silenciada — não crítico
+
+# ─────────────────────────────────────────────
+# SUPABASE — configuração
+# ─────────────────────────────────────────────
+_SB_URL = st.secrets.get("SUPABASE_URL", "")
+_SB_KEY = st.secrets.get("SUPABASE_ANON_KEY", "")
+_SUPABASE_ATIVO = bool(_SB_URL and _SB_KEY and _SB_DISPONIVEL)
+
+# ─────────────────────────────────────────────
+# AUTO-LOGIN — restaura sessão via query_params
+# Quando usuário recarrega a página, o token
+# salvo nos query_params restaura a sessão
+# ─────────────────────────────────────────────
+def _tentar_autologin():
+    """Tenta restaurar sessão via query_params após reload."""
+    try:
+        params = st.query_params
+        _t1  = params.get("_t1", "")
+        _t2  = params.get("_t2", "")
+        _t3  = params.get("_t3", "")
+        _tk  = _t1 + _t2 + _t3
+        _uid = params.get("_u", "")
+        _pl  = params.get("_p", "free")
+        _nm  = params.get("_n", "")
+        _rf  = params.get("_rf", "")
+        if _tk and _uid and not st.session_state.get("logado"):
+            # Tenta renovar token com refresh antes de carregar
+            if _rf and _SUPABASE_ATIVO:
+                try:
+                    _novo = sb_refresh(_SB_URL, _SB_KEY, _rf)
+                    if _novo.get("ok"):
+                        _tk = _novo["token"]
+                        _rf = _novo.get("refresh_token", _rf)
+                except Exception:
+                    pass
+            _dados = sb_carregar(_SB_URL, _SB_KEY, _tk, _uid) if _SUPABASE_ATIVO else None
+            if _dados is not None:
+                st.session_state.logado           = True
+                st.session_state.sb_token         = _tk
+                st.session_state.sb_refresh_token = _rf
+                st.session_state.sb_user_id       = _uid
+                st.session_state.sb_plano         = _pl
+                st.session_state.usuario_atual    = (_nm or "Usuário").replace("_", " ")
+                # Carrega TODOS os campos do Supabase
+                _campos = ["dados","areas","estoque","aplicacoes","historico_produtividade",
+                           "pluviometro","carencia_registros","dre_registros","calendario_eventos",
+                           "harvest_historico","receituarios","safrinha_registros","fluxo_caixa",
+                           "corretivos_aplicados","segmento","contratos_troca"]
+                for k in _campos:
+                    if k in _dados and _dados[k] not in (None, [], {}):
+                        setattr(st.session_state, k, _dados[k])
+                try:
+                    st.session_state.sb_plano = sb_plano(_SB_URL, _SB_KEY, _tk, _uid)
+                except Exception:
+                    pass
+                # Atualiza query_params com token renovado
+                try:
+                    st.query_params["_t1"] = _tk[:200]
+                    st.query_params["_t2"] = _tk[200:400]
+                    st.query_params["_t3"] = _tk[400:]
+                    if _rf:
+                        st.query_params["_rf"] = _rf[:200]
+                except Exception:
+                    pass
+                return True
+    except Exception:
+        pass
+    return False
+
+if _SUPABASE_ATIVO and not st.session_state.get("logado"):
+    _tentar_autologin()
 
 # ─────────────────────────────────────────────
 # SESSION STATE – LOGIN
 # ─────────────────────────────────────────────
+if "sb_token"   not in st.session_state: st.session_state.sb_token   = ""
+if "sb_user_id" not in st.session_state: st.session_state.sb_user_id = ""
+if "sb_plano"   not in st.session_state: st.session_state.sb_plano   = "free"
+
 if "usuarios" not in st.session_state:
     st.session_state.usuarios = carregar_usuarios()
 
@@ -1086,223 +1454,275 @@ if "usuario_atual" not in st.session_state:
 # TELA DE LOGIN
 # ─────────────────────────────────────────────
 def tela_login():
-    # Logo centralizada na tela de login
+    """Tela de login — usa Supabase se disponível, senão sistema local."""
+
+    # Logo
     if os.path.exists("IAAgrologo.jpeg"):
         import base64 as _b64
         with open("IAAgrologo.jpeg", "rb") as _f:
-            _logo = _b64.b64encode(_f.read()).decode()
-        st.markdown(f"""
-        <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:10px;">
-            <img src="data:image/jpeg;base64,{_logo}"
-                 style="width:180px;border-radius:20px;
-                        box-shadow:0 4px 24px rgba(0,200,83,0.35);
-                        margin-bottom:14px;" />
-            <h1 style="color:#6ee7b7;font-size:2.2rem;font-weight:900;
-                       letter-spacing:2px;margin:0;">IAAgro Pro</h1>
-            <p style="color:#93c5fd;font-size:1rem;font-weight:600;
-                      margin:4px 0 0 0;letter-spacing:1px;">
-                Gestão agrícola inteligente
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+            _logo_b64 = _b64.b64encode(_f.read()).decode()
+        st.markdown(f"""<div style='text-align:center;padding:20px 0 10px;'>
+        <img src='data:image/jpeg;base64,{_logo_b64}' style='max-height:120px;border-radius:12px;'/>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<h2 style='text-align:center;color:#22c55e;'>🌾 IAAGRO</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center;color:#94a3b8;'>Inteligência Agrícola de Precisão</p>", unsafe_allow_html=True)
+
+    if _SUPABASE_ATIVO:
+        # ── LOGIN VIA SUPABASE ───────────────────────────
+        aba_login, aba_cadastro, aba_recuperar = st.tabs(["🔓 Entrar","➕ Criar Conta","🔑 Recuperar Senha"])
+
+        with aba_login:
+            with st.form("form_login_sb", clear_on_submit=False):
+                email_l = st.text_input("E-mail", placeholder="seu@email.com", key="sb_email_login")
+                senha_l = st.text_input("Senha", type="password", key="sb_senha_login")
+                btn_l   = st.form_submit_button("Entrar", use_container_width=True)
+            if btn_l:
+                if not email_l or not senha_l:
+                    st.error("Preencha e-mail e senha.")
+                else:
+                    with st.spinner("Autenticando..."):
+                        res = sb_login(_SB_URL, _SB_KEY, email_l.strip(), senha_l)
+                    if res["ok"]:
+                        st.session_state.logado           = True
+                        st.session_state.usuario_atual    = res["nome"] or res["email"]
+                        st.session_state.sb_token         = res["token"]
+                        st.session_state.sb_refresh_token = res.get("refresh_token", "")
+                        st.session_state.sb_user_id       = res["user_id"]
+                        st.session_state.sb_plano         = sb_plano(_SB_URL, _SB_KEY, res["token"], res["user_id"])
+                        # Carrega dados do usuário do Supabase
+                        dados_sb = sb_carregar(_SB_URL, _SB_KEY, res["token"], res["user_id"])
+                        if dados_sb:
+                            for k, v in dados_sb.items():
+                                if k not in st.session_state:
+                                    setattr(st.session_state, k, v)
+                            # Aplica segmento do cadastro se for primeiro login
+                            if not dados_sb.get("segmento") and st.session_state.get("_seg_novo_usuario"):
+                                st.session_state.segmento = st.session_state.pop("_seg_novo_usuario")
+                                salvar_dados_iaagro()
+                        elif st.session_state.get("_seg_novo_usuario"):
+                            st.session_state.segmento = st.session_state.pop("_seg_novo_usuario")
+                        # Salva refresh info nos query_params para auto-login após reload
+                        try:
+                            import hashlib as _hl
+                            _nome_url = (res["nome"] or res["email"]).replace(" ", "_")[:20]
+                            # Salva token completo — query_params suporta strings longas
+                            _tk_full = res["token"]
+                            st.query_params["_u"] = res["user_id"]
+                            st.query_params["_p"] = st.session_state.sb_plano
+                            st.query_params["_n"] = _nome_url
+                            # Divide token em partes para query_params
+                            st.query_params["_t1"] = _tk_full[:200]
+                            st.query_params["_t2"] = _tk_full[200:400]
+                            st.query_params["_t3"] = _tk_full[400:]
+                            st.query_params["_rf"]  = res.get("refresh_token","")[:200]
+                        except Exception:
+                            pass
+                        st.success(f"✅ Bem-vindo, {st.session_state.usuario_atual}!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {res['erro']}")
+
+        with aba_cadastro:
+            st.markdown("#### 🌿 Criar nova conta")
+            with st.form("form_cadastro_sb", clear_on_submit=True):
+                nome_c  = st.text_input("Nome completo", key="sb_nome_cad")
+                email_c = st.text_input("E-mail", key="sb_email_cad")
+                senha_c = st.text_input("Senha (mín. 6 caracteres)", type="password", key="sb_senha_cad")
+                conf_c  = st.text_input("Confirmar senha", type="password", key="sb_conf_cad")
+                btn_c = st.form_submit_button("✅ Criar Conta", use_container_width=True)
+
+            # Segmento FORA do form para atualizar culturas em tempo real
+            st.markdown("#### 🌾 Qual é o seu segmento de atuação?")
+            _segs_cad = list(SEGMENTOS_INFO.keys())
+            seg_c = st.radio(
+                "Segmento",
+                _segs_cad,
+                horizontal=True,
+                key="sb_seg_cad",
+                help="Você pode alterar depois em Configurações"
+            )
+            _culturas_seg_c = CULTURAS_POR_SEGMENTO.get(seg_c, [])
+            if _culturas_seg_c:
+                _nomes_cult = " &nbsp;·&nbsp; ".join(
+                    f'<span style="background:#14532d;color:#6ee7b7;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600;">{c.split(" ",1)[-1] if " " in c else c}</span>'
+                    for c in _culturas_seg_c
+                )
+                st.markdown(f"<div style='margin:6px 0 10px;'>{_nomes_cult}</div>", unsafe_allow_html=True)
+            with st.container():
+                pass  # placeholder after radio
+            if btn_c:
+                if not nome_c or not email_c or not senha_c:
+                    st.error("Preencha todos os campos.")
+                elif len(senha_c) < 6:
+                    st.error("Senha deve ter pelo menos 6 caracteres.")
+                elif senha_c != conf_c:
+                    st.error("Senhas não conferem.")
+                else:
+                    with st.spinner("Criando conta..."):
+                        res = sb_signup(_SB_URL, _SB_KEY, email_c.strip(), senha_c, nome_c.strip())
+                    if res.get("id") or res.get("user"):
+                        st.session_state["_seg_novo_usuario"] = seg_c
+                        st.success(f"✅ Conta criada! Segmento: **{seg_c}**. Verifique seu e-mail e faça login.")
+                    else:
+                        st.error(f"❌ {res.get('msg', res.get('error_description', 'Erro ao criar conta'))}")
+
+        with aba_recuperar:
+            st.markdown("#### 🔑 Recuperar Senha")
+
+            if not st.session_state.get("_recup_email"):
+                with st.form("form_recup_sb", clear_on_submit=True):
+                    email_r = st.text_input("E-mail cadastrado", key="sb_email_recup")
+                    btn_r   = st.form_submit_button("📨 Enviar código por e-mail", use_container_width=True)
+                if btn_r:
+                    if not email_r:
+                        st.error("Digite seu e-mail.")
+                    else:
+                        try:
+                            import requests as _req
+                            # Envia OTP numérico de 6 dígitos
+                            r = _req.post(
+                                f"{_SB_URL}/auth/v1/otp",
+                                headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
+                                json={
+                                    "email": email_r.strip(),
+                                    "create_user": False,
+                                    "options": {"should_create_user": False}
+                                },
+                                timeout=10
+                            )
+                            if r.status_code == 200:
+                                st.session_state["_recup_email"] = email_r.strip()
+                                st.success(f"✅ Código enviado para **{email_r.strip()}**!")
+                                st.info("📧 Verifique seu e-mail e copie o código de 8 dígitos.")
+                                st.rerun()
+                            else:
+                                st.error("❌ E-mail não encontrado.")
+                        except Exception as e:
+                            st.error(f"❌ Erro: {e}")
+            else:
+                _email_recup = st.session_state["_recup_email"]
+                st.info(f"📧 Código enviado para **{_email_recup}**")
+                st.warning("⚠️ O e-mail enviado tem um código de 8 dígitos. **Não clique no link** — copie apenas o código numérico.")
+
+                with st.form("form_otp_sb", clear_on_submit=False):
+                    otp_code   = st.text_input("Código de 8 dígitos do e-mail", key="sb_otp_code",
+                                               placeholder="12345678", max_chars=8)
+                    nova_senha = st.text_input("Nova senha (mín. 6 caracteres)", type="password", key="sb_nova_senha")
+                    conf_nova  = st.text_input("Confirmar nova senha", type="password", key="sb_conf_nova")
+                    btn_otp    = st.form_submit_button("🔐 Redefinir Senha", use_container_width=True)
+
+                if btn_otp:
+                    if not otp_code or len(otp_code.strip()) < 6:
+                        st.error("Digite o código de 8 dígitos.")
+                    elif len(nova_senha) < 6:
+                        st.error("Senha deve ter pelo menos 6 caracteres.")
+                    elif nova_senha != conf_nova:
+                        st.error("Senhas não conferem.")
+                    else:
+                        try:
+                            import requests as _req
+                            r = _req.post(
+                                f"{_SB_URL}/auth/v1/verify",
+                                headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
+                                json={"type": "magiclink", "email": _email_recup, "token": otp_code.strip()},
+                                timeout=10
+                            )
+                            if r.status_code != 200:
+                                # Tenta também com type "email"
+                                r = _req.post(
+                                    f"{_SB_URL}/auth/v1/verify",
+                                    headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
+                                    json={"type": "email", "email": _email_recup, "token": otp_code.strip()},
+                                    timeout=10
+                                )
+                            if r.status_code == 200 and "access_token" in r.json():
+                                _token_temp = r.json()["access_token"]
+                                r2 = _req.put(
+                                    f"{_SB_URL}/auth/v1/user",
+                                    headers={"apikey": _SB_KEY,
+                                             "Authorization": f"Bearer {_token_temp}",
+                                             "Content-Type": "application/json"},
+                                    json={"password": nova_senha},
+                                    timeout=10
+                                )
+                                if r2.status_code == 200:
+                                    st.session_state.pop("_recup_email", None)
+                                    st.success("✅ Senha redefinida! Faça login com a nova senha.")
+                                    st.balloons()
+                                else:
+                                    st.error(f"❌ Erro ao atualizar senha: {r2.text[:80]}")
+                            else:
+                                st.error(f"❌ Código inválido ou expirado. Tente solicitar um novo código.")
+                        except Exception as e:
+                            st.error(f"❌ Erro: {e}")
+
+                if st.button("↩️ Solicitar novo código", key="btn_recup_voltar"):
+                    st.session_state.pop("_recup_email", None)
+                    st.rerun()
+
+        st.markdown("---")
+        st.caption("🔒 Dados protegidos por Supabase | Cada usuário tem seus próprios dados")
+
     else:
-        st.markdown("""
-        <div style="text-align:center;margin-bottom:16px;">
-            <h1 style="color:#6ee7b7;font-size:2.2rem;font-weight:900;">🌱 IAAgro Pro</h1>
-            <p style="color:#93c5fd;font-size:1rem;font-weight:600;">Gestão agrícola inteligente</p>
-        </div>
-        """, unsafe_allow_html=True)
+        # ── LOGIN LOCAL (fallback sem Supabase) ─────────
+        aba_login, aba_cadastro, aba_recuperar = st.tabs(["🔓 Entrar","➕ Criar Conta","🔑 Recuperar Senha"])
 
-    st.markdown("<h3 style='color:#f1f5f9;text-align:center;margin-bottom:18px;'>Acesse sua conta</h3>",
-                unsafe_allow_html=True)
-
-    aba_login, aba_cadastro, aba_recuperar = st.tabs(
-        ["Entrar", "Criar conta", "Recuperar senha"]
-    )
-
-    with aba_login:
-        usuario = st.text_input("Usuário", key="login_usuario")
-        senha   = st.text_input("Senha", type="password", key="login_senha")
-
-        if st.button("Entrar"):
-            u = st.session_state.usuarios.get(usuario)
-            if u and verificar_senha(senha, u["senha"]):
-                st.session_state.logado = True
-                st.session_state.usuario_atual = usuario
-                st.success("Login realizado com sucesso.")
-                st.rerun()
-            else:
-                st.error("Usuário ou senha incorretos.")
-
-    with aba_cadastro:
-        novo_nome     = st.text_input("Nome completo")
-        novo_email    = st.text_input("Email de recuperação")
-        novo_usuario  = st.text_input("Criar usuário")
-        nova_senha    = st.text_input("Criar senha", type="password")
-        confirmar_senha = st.text_input("Confirmar senha", type="password")
-
-        if st.button("Cadastrar"):
-            if novo_nome.strip() == "":
-                st.error("Digite seu nome.")
-            elif novo_email.strip() == "" or "@" not in novo_email or "." not in novo_email:
-                st.error("Digite um email válido.")
-            elif novo_usuario.strip() == "":
-                st.error("Digite um usuário.")
-            elif len(nova_senha) < 6:
-                st.error("A senha precisa ter pelo menos 6 caracteres.")
-            elif nova_senha != confirmar_senha:
-                st.error("As senhas não conferem.")
-            elif novo_usuario in st.session_state.usuarios:
-                st.error("Esse usuário já existe.")
-            else:
-                st.session_state.usuarios[novo_usuario] = {
-                    "nome":  novo_nome,
-                    "email": novo_email,
-                    "senha": hash_senha(nova_senha)   # CORREÇÃO 9: hash
-                }
-                # CORREÇÃO 8: salvar após cadastro
-                salvar_usuarios(st.session_state.usuarios)
-                st.success("Conta criada com sucesso. Agora faça login.")
-
-    with aba_recuperar:
-        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
-        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 14px 0;font-size:13px;">
-        🔐 Informe seu usuário e e-mail cadastrado. Enviaremos um código de 6 dígitos para redefinir sua senha.
-        </div>''', unsafe_allow_html=True)
-
-        # Session state do fluxo de recuperação
-        if "rec_etapa"      not in st.session_state: st.session_state.rec_etapa      = 1
-        if "rec_token"      not in st.session_state: st.session_state.rec_token      = ""
-        if "rec_token_exp"  not in st.session_state: st.session_state.rec_token_exp  = None
-        if "rec_usuario_ok" not in st.session_state: st.session_state.rec_usuario_ok = ""
-
-        # ── ETAPA 1: Solicitar código ──────────────────────────────────
-        if st.session_state.rec_etapa == 1:
-            st.markdown("#### 📧 Etapa 1 — Solicitar código por e-mail")
-            rec_user  = st.text_input("👤 Usuário cadastrado", key="rec_u1")
-            rec_email = st.text_input("📧 E-mail cadastrado",  key="rec_e1",
-                                       placeholder="email@exemplo.com")
-
-            cfg_email = st.session_state.get("email_config", {})
-            if not cfg_email.get("ativo") or not cfg_email.get("remetente"):
-                st.markdown('''<div style="background:#78350f;color:#fff;padding:10px 14px;
-                border-radius:8px;border-left:4px solid #f59e0b;font-size:12px;font-weight:600;">
-                ⚠️ Email SMTP não configurado. Configure em <b>⚙️ Configurações → Email SMTP</b>
-                para usar a recuperação por email.
-                </div>''', unsafe_allow_html=True)
-
-            if st.button("📨 Enviar código por e-mail", key="btn_enviar_token",
-                         use_container_width=True):
-                if not rec_user.strip():
-                    st.error("❌ Digite seu usuário.")
-                elif rec_user not in st.session_state.usuarios:
-                    st.error("❌ Usuário ou e-mail incorretos.")
-                elif not rec_email.strip() or "@" not in rec_email:
-                    st.error("❌ Digite um e-mail válido.")
-                elif st.session_state.usuarios[rec_user].get("email","").strip().lower() \
-                        != rec_email.strip().lower():
-                    st.error("❌ Usuário ou e-mail incorretos.")
-                else:
-                    # Gerar token de 6 dígitos
-                    token = str(random.randint(100000, 999999))
-                    exp   = datetime.now() + __import__('datetime').timedelta(minutes=15)
-                    ok, msg_err = enviar_email_recuperacao(rec_email.strip(), rec_user, token)
-                    if ok:
-                        st.session_state.rec_token      = token
-                        st.session_state.rec_token_exp  = exp
-                        st.session_state.rec_usuario_ok = rec_user
-                        st.session_state.rec_etapa      = 2
-                        st.rerun()
-                    else:
-                        if "não configurado" in msg_err.lower() or "não config" in msg_err.lower():
-                            st.error(f"❌ {msg_err}")
-                        else:
-                            st.error(f"❌ Falha ao enviar email: {msg_err}")
-
-        # ── ETAPA 2: Inserir código ────────────────────────────────────
-        elif st.session_state.rec_etapa == 2:
-            st.markdown("#### 🔢 Etapa 2 — Digite o código recebido")
-            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
-            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
-            ✅ Código enviado para o e-mail cadastrado do usuário <b>{st.session_state.rec_usuario_ok}</b>.<br>
-            ⏱️ Válido por 15 minutos.
-            </div>''', unsafe_allow_html=True)
-
-            token_digitado = st.text_input("🔢 Código de 6 dígitos",
-                                            placeholder="000000", key="rec_token_input",
-                                            max_chars=6)
-
-            col_et2a, col_et2b = st.columns(2)
-            with col_et2a:
-                if st.button("✅ Validar código", key="btn_validar_token",
-                             use_container_width=True):
-                    agora = datetime.now()
-                    if st.session_state.rec_token_exp and agora > st.session_state.rec_token_exp:
-                        st.error("❌ Código expirado. Solicite um novo.")
-                        st.session_state.rec_etapa = 1
-                        st.rerun()
-                    elif token_digitado.strip() == st.session_state.rec_token:
-                        st.session_state.rec_etapa = 3
-                        st.rerun()
-                    else:
-                        st.error("❌ Código incorreto. Verifique o email e tente novamente.")
-            with col_et2b:
-                if st.button("🔄 Reenviar código", key="btn_reenviar_token",
-                             use_container_width=True):
-                    st.session_state.rec_etapa = 1
+        with aba_login:
+            with st.form("form_login", clear_on_submit=False):
+                usuario = st.text_input("Usuário", key="login_usuario")
+                senha   = st.text_input("Senha", type="password", key="login_senha")
+                entrar  = st.form_submit_button("Entrar", use_container_width=True)
+            if entrar:
+                _usuarios = st.session_state.usuarios if isinstance(st.session_state.usuarios, dict) else {}
+                u = _usuarios.get(usuario)
+                if u and verificar_senha(senha, u["senha"]):
+                    st.session_state.logado        = True
+                    st.session_state.usuario_atual = usuario
+                    st.session_state.sb_plano      = "pro"  # local = sem limite
+                    st.success("Login realizado com sucesso.")
                     st.rerun()
-
-        # ── ETAPA 3: Nova senha ────────────────────────────────────────
-        elif st.session_state.rec_etapa == 3:
-            st.markdown("#### 🔑 Etapa 3 — Criar nova senha")
-            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:10px 14px;
-            border-radius:8px;border-left:4px solid #22c55e;font-size:13px;font-weight:600;margin:8px 0;">
-            ✅ Código validado! Crie uma nova senha para <b>{st.session_state.rec_usuario_ok}</b>.
-            </div>''', unsafe_allow_html=True)
-
-            nova_senha1 = st.text_input("🔑 Nova senha (mín. 6 caracteres)",
-                                         type="password", key="rec_ns1")
-            nova_senha2 = st.text_input("🔑 Confirmar nova senha",
-                                         type="password", key="rec_ns2")
-
-            # Feedback em tempo real
-            if nova_senha1 and len(nova_senha1) < 6:
-                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Mínimo 6 caracteres.</div>', unsafe_allow_html=True)
-            if nova_senha1 and nova_senha2 and nova_senha1 != nova_senha2:
-                st.markdown('<div style="color:#f87171;font-size:12px;font-weight:600;">⚠️ Senhas não coincidem.</div>', unsafe_allow_html=True)
-            if nova_senha1 and nova_senha2 and nova_senha1 == nova_senha2 and len(nova_senha1) >= 6:
-                st.markdown('<div style="color:#86efac;font-size:12px;font-weight:600;">✅ Senhas coincidem.</div>', unsafe_allow_html=True)
-
-            if st.button("🔐 Salvar nova senha", key="btn_salvar_nova_senha",
-                         use_container_width=True):
-                if len(nova_senha1) < 6:
-                    st.error("❌ Senha precisa ter pelo menos 6 caracteres.")
-                elif nova_senha1 != nova_senha2:
-                    st.error("❌ As senhas não coincidem.")
                 else:
-                    usuario_rec = st.session_state.rec_usuario_ok
-                    st.session_state.usuarios[usuario_rec]["senha"] = hash_senha(nova_senha1)
+                    st.error("Usuário ou senha incorretos.")
+
+        with aba_cadastro:
+            novo_nome       = st.text_input("Nome completo",       key="cad_nome")
+            novo_email      = st.text_input("Email de recuperação", key="cad_email")
+            novo_usuario    = st.text_input("Criar usuário",        key="cad_usuario")
+            nova_senha      = st.text_input("Criar senha",          type="password", key="cad_senha")
+            confirmar_senha = st.text_input("Confirmar senha",      type="password", key="cad_confirmar")
+            if st.button("Cadastrar", use_container_width=True, key="btn_cadastrar"):
+                if not novo_nome.strip():
+                    st.error("Digite seu nome.")
+                elif not novo_email.strip() or "@" not in novo_email:
+                    st.error("Digite um email válido.")
+                elif not novo_usuario.strip():
+                    st.error("Digite um usuário.")
+                elif len(nova_senha) < 6:
+                    st.error("Senha deve ter pelo menos 6 caracteres.")
+                elif nova_senha != confirmar_senha:
+                    st.error("As senhas não conferem.")
+                elif novo_usuario in st.session_state.usuarios:
+                    st.error("Esse usuário já existe.")
+                else:
+                    st.session_state.usuarios[novo_usuario] = {
+                        "nome":  novo_nome,
+                        "email": novo_email,
+                        "senha": hash_senha(nova_senha)
+                    }
                     salvar_usuarios(st.session_state.usuarios)
-                    # Limpar fluxo
-                    st.session_state.rec_etapa      = 1
-                    st.session_state.rec_token      = ""
-                    st.session_state.rec_token_exp  = None
-                    st.session_state.rec_usuario_ok = ""
-                    st.session_state.senha_redefinida = True
-                    st.rerun()
+                    st.success("✅ Conta criada! Faça login na aba Entrar.")
 
-        # Mensagem de sucesso persistente
-        if st.session_state.get("senha_redefinida"):
-            st.markdown('''<div style="background:#14532d;color:#fff;padding:14px 18px;
-            border-radius:10px;border-left:5px solid #22c55e;font-weight:700;font-size:15px;margin:8px 0;">
-            ✅ Senha redefinida com sucesso! Vá para a aba <b>Entrar</b> e faça login com a nova senha.
-            </div>''', unsafe_allow_html=True)
-            if st.button("🔓 Ir para Login", key="btn_ir_login", use_container_width=True):
-                st.session_state.senha_redefinida = False
-                st.rerun()
+        with aba_recuperar:
+            st.info("Sistema local — recuperação de senha não disponível sem e-mail configurado.")
+
+        st.caption("⚠️ Modo local — dados compartilhados. Configure Supabase para multi-usuário.")
 
 
 if not st.session_state.logado:
+    # Verifica se havia uma sessão anterior (usuário recarregou a página)
+    if st.session_state.get("usuario_atual"):
+        st.warning("⏳ Sua sessão expirou. Faça login novamente — seus dados estão salvos no servidor.")
     tela_login()
     st.stop()
 
@@ -1336,39 +1756,202 @@ st.sidebar.markdown(
     f'font-weight:700;font-size:14px;margin-bottom:8px;">👤 {st.session_state.usuario_atual}</div>',
     unsafe_allow_html=True
 )
+
+# Badge do plano no sidebar
+_plano_atual = st.session_state.get("sb_plano", "free")
+PLANOS = {
+    "free": {
+        "nome":    "🆓 Free",
+        "preco":   0,
+        "areas":   2,
+        "estoque": 20,
+        "cor":     "#78350f",
+        "borda":   "#f59e0b",
+        "recursos": [
+            "2 áreas cadastradas",
+            "20 itens de estoque",
+            "Análise de solo básica",
+            "Calendário agrícola",
+            "Preços offline",
+        ],
+        "bloqueados": [
+            "Relatório PDF",
+            "Importação NF-e XML",
+            "Preços CEPEA tempo real",
+            "Mapa de Colheita IA",
+            "IR Rural",
+            "Safrinha",
+        ]
+    },
+    "pro": {
+        "nome":    "💎 Pro",
+        "preco":   39.90,
+        "areas":   10,
+        "estoque": 100,
+        "cor":     "#1e3a5f",
+        "borda":   "#3b82f6",
+        "recursos": [
+            "10 áreas cadastradas",
+            "100 itens de estoque",
+            "Diagnóstico completo EMBRAPA",
+            "Relatório PDF premium",
+            "Importação NF-e XML",
+            "Preços CEPEA tempo real",
+            "Safrinha",
+            "IR Rural automatizado",
+            "Receituário Agronômico",
+            "Suporte via WhatsApp",
+        ],
+        "bloqueados": [
+            "Áreas ilimitadas",
+            "Estoque ilimitado",
+            "Mapa de Colheita IA avançado",
+            "API de integração",
+            "Multi-usuário",
+        ]
+    },
+    "premium": {
+        "nome":    "🚀 Premium",
+        "preco":   99.90,
+        "areas":   -1,   # ilimitado
+        "estoque": -1,   # ilimitado
+        "cor":     "#14532d",
+        "borda":   "#22c55e",
+        "recursos": [
+            "Áreas ILIMITADAS",
+            "Estoque ILIMITADO",
+            "Tudo do Plano Pro",
+            "Mapa de Colheita IA avançado",
+            "Relatórios agrupados",
+            "API de integração",
+            "Suporte prioritário 24h",
+            "Treinamento online",
+            "White-label disponível",
+        ],
+        "bloqueados": []
+    },
+}
+
+WPP_NUMERO  = "5549998159224"  # ← coloque seu WhatsApp aqui
+MP_LINK_PRO_MES     = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=01acc9e1ce454303a618b885331ae9e5"
+MP_LINK_PREMIUM_MES = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=416dbeae6a3247318f68384d489db649"
+MP_LINK_PRO_ANO     = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=ef9d65771cee403091026fdb75f6de9b"
+MP_LINK_PREMIUM_ANO = "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=9efddff1bb814a3fa0d1c527104e4ea1"
+_plano_info  = PLANOS.get(_plano_atual, PLANOS["free"])
+st.sidebar.markdown(
+    f"<div style='background:{_plano_info['cor']};color:{_plano_info['borda']};"
+    f"padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;"
+    f"margin-bottom:6px;text-align:center;border:1px solid {_plano_info['borda']};'>"
+    f"{_plano_info['nome']}</div>",
+    unsafe_allow_html=True
+)
+
 if st.sidebar.button("Sair", key="botao_sair"):
-    st.session_state.logado = False
+    if _SUPABASE_ATIVO and st.session_state.get("sb_token"):
+        try:
+            sb_logout(_SB_URL, _SB_KEY, st.session_state.sb_token)
+        except Exception:
+            pass
+    st.session_state.logado        = False
     st.session_state.usuario_atual = ""
+    st.session_state.sb_token      = ""
+    st.session_state.sb_user_id    = ""
+    st.session_state.sb_plano      = "free"
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
     st.rerun()
+
+# Status do último salvamento (debug)
+if st.session_state.get("_ultimo_save"):
+    _cor_s = "#14532d" if "✅" in st.session_state["_ultimo_save"] else "#7f1d1d"
+    st.sidebar.markdown(
+        f"<div style='background:{_cor_s};color:#fff;padding:3px 8px;"
+        f"border-radius:4px;font-size:10px;margin-top:2px;'>"
+        f"{st.session_state['_ultimo_save']}</div>",
+        unsafe_allow_html=True
+    )
 
 
 # ─────────────────────────────────────────────
 # SESSION STATE – DADOS
+# Carrega do Supabase se tem token, senão arquivo local
 # ─────────────────────────────────────────────
-dados_carregados = carregar_dados_iaagro()
+_dados_supabase = {}
+if (_SUPABASE_ATIVO
+        and st.session_state.get("sb_token")
+        and st.session_state.get("sb_user_id")
+        and "areas" not in st.session_state):
+    try:
+        _dados_supabase = sb_carregar(
+            _SB_URL, _SB_KEY,
+            st.session_state.sb_token,
+            st.session_state.sb_user_id
+        ) or {}
+        if _dados_supabase:
+            st.session_state.sb_plano = sb_plano(
+                _SB_URL, _SB_KEY,
+                st.session_state.sb_token,
+                st.session_state.sb_user_id
+            )
+    except Exception:
+        pass  # falha silenciada — usa arquivo local
 
-if "dados"   not in st.session_state:
-    st.session_state.dados   = dados_carregados.get("dados", {})
-if "areas"   not in st.session_state:
-    st.session_state.areas   = dados_carregados.get("areas", [])
+dados_carregados = {}
+
+# Carrega do Supabase sempre que logado — garante dados frescos incluindo contratos_troca
+if _dados_supabase:
+    dados_carregados = _dados_supabase
+elif (_SUPABASE_ATIVO
+      and st.session_state.get("sb_token")
+      and st.session_state.get("sb_user_id")):
+    try:
+        dados_carregados = sb_carregar(
+            _SB_URL, _SB_KEY,
+            st.session_state.sb_token,
+            st.session_state.sb_user_id
+        ) or {}
+    except Exception:
+        dados_carregados = carregar_dados_iaagro()
+else:
+    dados_carregados = carregar_dados_iaagro()
+
+# Aplica cada campo: se session_state vazio E supabase tem dados, carrega do supabase
+def _carregar_campo(campo, default):
+    _local = st.session_state.get(campo)
+    _remoto = dados_carregados.get(campo, default)
+    if not _local and _remoto:
+        setattr(st.session_state, campo, _remoto)
+    elif campo not in st.session_state:
+        setattr(st.session_state, campo, default)
+
+if "dados" not in st.session_state:
+    _d = dados_carregados.get("dados", {})
+    st.session_state.dados = _d if isinstance(_d, dict) else {}
+if "areas" not in st.session_state or (not st.session_state.areas and dados_carregados.get("areas")):
+    st.session_state.areas = dados_carregados.get("areas", [])
 if "contador_area" not in st.session_state:
+    _areas_dc = st.session_state.get("areas", dados_carregados.get("areas", []))
     st.session_state.contador_area = max(
-        (int(a["ID"].split("-")[-1]) for a in dados_carregados.get("areas", []) if "ID" in a),
+        (int(a["ID"].split("-")[-1]) for a in _areas_dc if "ID" in a),
         default=0
     ) + 1
 if "area_selecionada" not in st.session_state:
     st.session_state.area_selecionada = None
-if "estoque" not in st.session_state:
+if "segmento" not in st.session_state or (not st.session_state.segmento and dados_carregados.get("segmento")):
+    st.session_state.segmento = dados_carregados.get("segmento", None)
+if "estoque" not in st.session_state or (not st.session_state.estoque and dados_carregados.get("estoque")):
     st.session_state.estoque = dados_carregados.get("estoque", [])
-if "aplicacoes" not in st.session_state:
+if "aplicacoes" not in st.session_state or (not st.session_state.aplicacoes and dados_carregados.get("aplicacoes")):
     st.session_state.aplicacoes = dados_carregados.get("aplicacoes", [])
-if "historico_produtividade" not in st.session_state:
+if "historico_produtividade" not in st.session_state or (not st.session_state.historico_produtividade and dados_carregados.get("historico_produtividade")):
     st.session_state.historico_produtividade = dados_carregados.get("historico_produtividade", [])
-if "pluviometro" not in st.session_state:
+if "pluviometro" not in st.session_state or (not st.session_state.pluviometro and dados_carregados.get("pluviometro")):
     st.session_state.pluviometro = dados_carregados.get("pluviometro", [])
-if "carencia_registros" not in st.session_state:
+if "carencia_registros" not in st.session_state or (not st.session_state.carencia_registros and dados_carregados.get("carencia_registros")):
     st.session_state.carencia_registros = dados_carregados.get("carencia_registros", [])
-if "dre_registros" not in st.session_state:
+if "dre_registros" not in st.session_state or (not st.session_state.dre_registros and dados_carregados.get("dre_registros")):
     st.session_state.dre_registros = dados_carregados.get("dre_registros", [])
 if "calendario_eventos" not in st.session_state:
     st.session_state.calendario_eventos = dados_carregados.get("calendario_eventos", [])
@@ -1382,6 +1965,38 @@ if "clima_data"        not in st.session_state: st.session_state.clima_data     
 if "precos_data"       not in st.session_state: st.session_state.precos_data       = None
 if "receituarios"      not in st.session_state: st.session_state.receituarios      = dados_carregados.get("receituarios", [])
 if "senha_redefinida"  not in st.session_state: st.session_state.senha_redefinida  = False
+if "safrinha_registros" not in st.session_state: st.session_state.safrinha_registros = dados_carregados.get("safrinha_registros", [])
+if "corretivos_aplicados" not in st.session_state or (not st.session_state.get("corretivos_aplicados") and dados_carregados.get("corretivos_aplicados")):
+    st.session_state.corretivos_aplicados = dados_carregados.get("corretivos_aplicados", [])
+if "contratos_troca" not in st.session_state or (not st.session_state.get("contratos_troca") and dados_carregados.get("contratos_troca")):
+    st.session_state.contratos_troca = dados_carregados.get("contratos_troca", [])
+if "planejamento_safras" not in st.session_state or (not st.session_state.get("planejamento_safras") and dados_carregados.get("planejamento_safras")):
+    st.session_state.planejamento_safras = dados_carregados.get("planejamento_safras", [])
+if "plan_insumos" not in st.session_state or (not st.session_state.get("plan_insumos") and dados_carregados.get("plan_insumos")):
+    st.session_state.plan_insumos = dados_carregados.get("plan_insumos", [])
+if "fluxo_caixa" not in st.session_state or (not st.session_state.get("fluxo_caixa") and dados_carregados.get("fluxo_caixa")):
+    st.session_state.fluxo_caixa = dados_carregados.get("fluxo_caixa", [])
+if "harvest_historico" not in st.session_state or (not st.session_state.get("harvest_historico") and dados_carregados.get("harvest_historico")):
+    st.session_state.harvest_historico = dados_carregados.get("harvest_historico", [])
+if "receituarios" not in st.session_state or (not st.session_state.get("receituarios") and dados_carregados.get("receituarios")):
+    st.session_state.receituarios = dados_carregados.get("receituarios", [])
+if "carencia_registros" not in st.session_state or (not st.session_state.get("carencia_registros") and dados_carregados.get("carencia_registros")):
+    st.session_state.carencia_registros = dados_carregados.get("carencia_registros", [])
+if "pluviometro" not in st.session_state or (not st.session_state.get("pluviometro") and dados_carregados.get("pluviometro")):
+    st.session_state.pluviometro = dados_carregados.get("pluviometro", [])
+if "calendario_eventos" not in st.session_state or (not st.session_state.get("calendario_eventos") and dados_carregados.get("calendario_eventos")):
+    st.session_state.calendario_eventos = dados_carregados.get("calendario_eventos", [])
+if "dre_registros" not in st.session_state or (not st.session_state.get("dre_registros") and dados_carregados.get("dre_registros")):
+    st.session_state.dre_registros = dados_carregados.get("dre_registros", [])
+
+# ── GPS session_states — inicialização segura ───────────────────
+if "_gps_lat"       not in st.session_state: st.session_state._gps_lat       = None
+if "_gps_lon"       not in st.session_state: st.session_state._gps_lon       = None
+if "_gps_mf_lat"    not in st.session_state: st.session_state._gps_mf_lat    = None
+if "_gps_mf_lon"    not in st.session_state: st.session_state._gps_mf_lon    = None
+if "_gps_clima_lat" not in st.session_state: st.session_state._gps_clima_lat = None
+if "_gps_clima_lon" not in st.session_state: st.session_state._gps_clima_lon = None
+if "filtro_out"     not in st.session_state: st.session_state.filtro_out     = []
 
 # ─────────────────────────────────────────────
 
@@ -2471,7 +3086,77 @@ CATALOGO_PRODUTOS = [
     {"nome":"Ácido Bórico","fab":"Outros","cat":"Fertilizante","ia":"B 17%"},
     # ── OURO FINO ──
     {"nome":"Ênio 200 SC","fab":"Ouro Fino","cat":"Fungicida","ia":"Iprodiona"},
-]
+
+    # ── FMC Fertilizantes ──
+    {"nome":"Regent 800 WG","fab":"FMC","cat":"Inseticida","ia":"Fipronil"},
+    {"nome":"FMC Nitro Gold","fab":"FMC","cat":"Fertilizante","ia":"Nitrogênio líquido estabilizado"},
+    {"nome":"FMC Potássio Líquido","fab":"FMC","cat":"Fertilizante","ia":"K2O 30% líquido"},
+    {"nome":"FMC Starter","fab":"FMC","cat":"Fertilizante","ia":"NPK starter líquido para sulco"},
+    # ── Corteva Fertilizantes ──
+    {"nome":"Encrust","fab":"Corteva","cat":"Tratamento de Sementes","ia":"Polímero + NPK micronutrientes"},
+    {"nome":"Corteva N-Enhance","fab":"Corteva","cat":"Fertilizante","ia":"Nitrogênio estabilizado + NBPT"},
+    # ── Ihara ──
+    {"nome":"Ihara Cobre BR","fab":"Ihara","cat":"Fungicida/Fertilizante","ia":"Oxicloreto de Cobre 84%"},
+    {"nome":"Ihara Boro Quelatado","fab":"Ihara","cat":"Fertilizante","ia":"Boro EDTA 10%"},
+    {"nome":"Ihara Zinco Quelatado","fab":"Ihara","cat":"Fertilizante","ia":"Zinco EDTA 14%"},
+    {"nome":"Ihara Manganês Quelatado","fab":"Ihara","cat":"Fertilizante","ia":"Manganês EDTA 12%"},
+    {"nome":"Ihara Mix Micro","fab":"Ihara","cat":"Fertilizante","ia":"B+Cu+Mn+Zn+Mo quelatados"},
+    # ── CHDS (Crop Health Direct Solutions) ──
+    {"nome":"CHDS Potássio Silicatado","fab":"CHDS","cat":"Fertilizante","ia":"K2SiO3 – Silicato de Potássio"},
+    {"nome":"CHDS Silício Foliar","fab":"CHDS","cat":"Fertilizante","ia":"Si foliar estabilizador"},
+    {"nome":"CHDS Amino Stress","fab":"CHDS","cat":"Fertilizante","ia":"Aminoácidos + micronutrientes anti-stress"},
+    {"nome":"CHDS Enxofre 90 WDG","fab":"CHDS","cat":"Fertilizante","ia":"Enxofre elementar 90%"},
+    # ── Timac Agro ──
+    {"nome":"Physiostart","fab":"Timac Agro","cat":"Fertilizante","ia":"NPK + Seactiv – arranque radicular"},
+    {"nome":"Physiomax","fab":"Timac Agro","cat":"Fertilizante","ia":"Cálcio + Magnésio + Seactiv"},
+    {"nome":"Timac MAP Premium","fab":"Timac Agro","cat":"Fertilizante","ia":"MAP 11-52-00 com Seactiv"},
+    {"nome":"Timac KCl Premium","fab":"Timac Agro","cat":"Fertilizante","ia":"KCl 00-00-60 granulado premium"},
+    {"nome":"Timac Urea+","fab":"Timac Agro","cat":"Fertilizante","ia":"Ureia + NBPT inibidor de urease"},
+    {"nome":"Timac Basacote","fab":"Timac Agro","cat":"Fertilizante","ia":"NPK liberação lenta revestido"},
+    {"nome":"Fertileader Alpha","fab":"Timac Agro","cat":"Foliar / Nutrição","ia":"Seactiv + Aminoácidos + Zn"},
+    {"nome":"Fertileader Max","fab":"Timac Agro","cat":"Foliar / Nutrição","ia":"Seactiv + B + Mo + Mn"},
+    # ── Mosaic ──
+    {"nome":"MicroEssentials SZ","fab":"Mosaic","cat":"Fertilizante","ia":"MAP + S + Zn – 12-40-00+10S+1Zn"},
+    {"nome":"Mosaic MAP","fab":"Mosaic","cat":"Fertilizante","ia":"MAP 11-52-00 granulado"},
+    {"nome":"Mosaic KCl Standard","fab":"Mosaic","cat":"Fertilizante","ia":"KCl 00-00-60 granulado"},
+    {"nome":"Mosaic DAP","fab":"Mosaic","cat":"Fertilizante","ia":"DAP 18-46-00"},
+    {"nome":"Mosaic SulPoMag","fab":"Mosaic","cat":"Fertilizante","ia":"K2SO4·MgSO4 – 00-00-22+11Mg+22S"},
+    {"nome":"MicroEssentials S15","fab":"Mosaic","cat":"Fertilizante","ia":"10-40-00+15S – MAP+S"},
+    {"nome":"Mosaic Granol 25-00-25","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 25-00-25 granulado"},
+    {"nome":"Mosaic NPK 08-28-16","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 08-28-16 granulado"},
+    {"nome":"Mosaic NPK 04-20-20","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 04-20-20 granulado"},
+    {"nome":"Mosaic NPK 05-25-25","fab":"Mosaic","cat":"Fertilizante","ia":"NPK 05-25-25 granulado"},
+    # ── Fertipar ──
+    {"nome":"Fertipar Sulfato de Amônio","fab":"Fertipar","cat":"Fertilizante","ia":"21% N + 24% S granulado"},
+    {"nome":"Fertipar Ureia Perolada","fab":"Fertipar","cat":"Fertilizante","ia":"Ureia 45% N perolada"},
+    {"nome":"Fertipar MAP","fab":"Fertipar","cat":"Fertilizante","ia":"MAP 11-52-00"},
+    {"nome":"Fertipar KCl","fab":"Fertipar","cat":"Fertilizante","ia":"KCl 00-00-60"},
+    {"nome":"Fertipar Superfosfato Simples","fab":"Fertipar","cat":"Fertilizante","ia":"SPS 18% P2O5 + 12% S"},
+    {"nome":"Fertipar Superfosfato Triplo","fab":"Fertipar","cat":"Fertilizante","ia":"SFT 41% P2O5"},
+    {"nome":"Fertipar Nitrato de Cálcio","fab":"Fertipar","cat":"Fertilizante","ia":"15,5% N + 26% CaO"},
+    {"nome":"Fertipar Nitrato de Potássio","fab":"Fertipar","cat":"Fertilizante","ia":"13% N + 46% K2O"},
+    {"nome":"Fertipar Sulfato de Potássio","fab":"Fertipar","cat":"Fertilizante","ia":"50% K2O + 17% S"},
+    {"nome":"Fertipar NPK 05-20-20","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 05-20-20"},
+    {"nome":"Fertipar NPK 08-20-20","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 08-20-20"},
+    {"nome":"Fertipar NPK 10-10-10","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 10-10-10"},
+    {"nome":"Fertipar NPK 12-06-12","fab":"Fertipar","cat":"Fertilizante","ia":"NPK 12-06-12"},
+    # ── Yara ──
+    {"nome":"Yarabela Tropicote","fab":"Yara","cat":"Fertilizante","ia":"Nitrato de Amônio 27% N granulado"},
+    {"nome":"Yarabela Sulfan","fab":"Yara","cat":"Fertilizante","ia":"Nitrato de Amônio + Sulfato 26% N+14S"},
+    {"nome":"YaraMila Complex","fab":"Yara","cat":"Fertilizante","ia":"NPK 12-11-18+S+Mg+micro"},
+    {"nome":"YaraMila Actyva S","fab":"Yara","cat":"Fertilizante","ia":"NPK 12-11-18+9S"},
+    {"nome":"YaraMila Winner","fab":"Yara","cat":"Fertilizante","ia":"NPK 15-09-20+S"},
+    {"nome":"YaraVita Stopit","fab":"Yara","cat":"Foliar / Nutrição","ia":"Cálcio líquido foliar"},
+    {"nome":"YaraVita Bortrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Boro etanolamina 15%"},
+    {"nome":"YaraVita Zintrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Zinco líquido 70 g/L"},
+    {"nome":"YaraVita Mantrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Manganês líquido 500 g/L"},
+    {"nome":"YaraVita Cobratec","fab":"Yara","cat":"Foliar / Nutrição","ia":"Cobre líquido 190 g/L"},
+    {"nome":"YaraVita Molytrac","fab":"Yara","cat":"Foliar / Nutrição","ia":"Molibdênio líquido"},
+    {"nome":"YaraVita Kombiphos","fab":"Yara","cat":"Foliar / Nutrição","ia":"P + K + Mn + Zn foliar"},
+    {"nome":"YaraTera Rexolin","fab":"Yara","cat":"Fertilizante","ia":"Micronutrientes quelatados solúveis"},
+    {"nome":"Yara Ureia Prill","fab":"Yara","cat":"Fertilizante","ia":"Ureia 45% N prilled"},
+    {"nome":"Yara MAP","fab":"Yara","cat":"Fertilizante","ia":"MAP 11-52-00"},
+    {"nome":"Yara KCl Granulado","fab":"Yara","cat":"Fertilizante","ia":"KCl 00-00-60"},]
 
 
 # Ordena por nome para o autocomplete
@@ -2519,12 +3204,263 @@ def atualizar_area_atual():
     salvar_dados_iaagro()
 
 
+def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura="", area_ha=0, operador=""):
+    """Gera PDF profissional com programação de aplicações por estádio."""
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm, mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, KeepTogether
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            rightMargin=1.5*cm, leftMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=2*cm)
+    story = []
+
+    COR_VERDE  = colors.HexColor("#16a34a")
+    COR_VERDE_E= colors.HexColor("#14532d")
+    COR_AZUL   = colors.HexColor("#1e3a5f")
+    COR_CINZA  = colors.HexColor("#f1f5f9")
+    COR_BORDA  = colors.HexColor("#e2e8f0")
+    COR_BRANCO = colors.white
+    COR_TEXTO  = colors.HexColor("#0f172a")
+    COR_SUB    = colors.HexColor("#64748b")
+    COR_TIPO   = {
+        "Herbicida":colors.HexColor("#fef3c7"),"Fungicida":colors.HexColor("#dbeafe"),
+        "Inseticida":colors.HexColor("#fee2e2"),"Adjuvante":colors.HexColor("#d1fae5"),
+        "Óleo mineral/vegetal":colors.HexColor("#ede9fe"),"Fertilizante foliar":colors.HexColor("#fce7f3"),
+        "Regulador":colors.HexColor("#ffedd5"),"Outro":COR_CINZA,
+    }
+
+    def P(txt, size=9, bold=False, color=None, align=TA_LEFT):
+        fn = "Helvetica-Bold" if bold else "Helvetica"
+        c  = color or COR_TEXTO
+        return Paragraph(txt, ParagraphStyle("p", fontName=fn, fontSize=size, textColor=c, alignment=align, leading=size+3))
+
+    # CABEÇALHO
+    h = [[P("IAAgro",18,True,COR_VERDE), P("PROGRAMAÇÃO DE APLICACOES",14,True,COR_BRANCO,TA_CENTER),
+          P(f"Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}",7,False,COR_CINZA,TA_RIGHT)]]
+    th = Table(h, colWidths=[4*cm,10*cm,4.5*cm])
+    th.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),COR_VERDE_E),
+        ("TOPPADDING",(0,0),(-1,-1),10),("BOTTOMPADDING",(0,0),(-1,-1),10),
+        ("LEFTPADDING",(0,0),(-1,-1),10),("RIGHTPADDING",(0,0),(-1,-1),10),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.append(th); story.append(Spacer(1,3*mm))
+
+    # INFO PROPRIEDADE
+    i = [[P(f"<b>Fazenda:</b> {fazenda or '—'}"),P(f"<b>Talhao:</b> {talhao or '—'}"),
+          P(f"<b>Cultura:</b> {cultura or '—'}"),P(f"<b>Area:</b> {area_ha} ha"),
+          P(f"<b>Responsavel:</b> {operador or '—'}")]]
+    ti = Table(i, colWidths=[3.5*cm,3.5*cm,3*cm,2.5*cm,6*cm])
+    ti.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),COR_CINZA),("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
+        ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),6)]))
+    story.append(ti); story.append(Spacer(1,4*mm))
+
+    # LEGENDA
+    leg = [("Herbicida","#fef3c7"),("Fungicida","#dbeafe"),("Inseticida","#fee2e2"),
+           ("Adjuvante","#d1fae5"),("Oleo","#ede9fe"),("Fert.Foliar","#fce7f3")]
+    tl = Table([[P(n,7,True) for n,_ in leg]], colWidths=[3*cm]*6)
+    tl.setStyle(TableStyle([*[("BACKGROUND",(i,0),(i,0),colors.HexColor(c)) for i,(n,c) in enumerate(leg)],
+        ("GRID",(0,0),(-1,-1),0.3,COR_BORDA),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3),
+        ("ALIGN",(0,0),(-1,-1),"CENTER")]))
+    story.append(P("Legenda:",7,False,COR_SUB)); story.append(Spacer(1,1*mm))
+    story.append(tl); story.append(Spacer(1,5*mm))
+
+    # BLOCOS POR ESTÁDIO
+    for num, aplic in enumerate(aplicacoes, 1):
+        est = aplic.get("Estádio") or aplic.get("Aplicação","")
+        for e in ["🌱","🌿","🌾","🌸","🫘","📋"]: est = est.replace(e,"").strip()
+
+        cab = [[P(f"{num}. {est}",11,True,COR_BRANCO),
+                P(f"Data: {aplic.get('Data','—')} | Area: {aplic.get('Área aplicada ha',0)} ha | "
+                  f"Calda: {aplic.get('Volume calda L/ha',0)} L/ha | "
+                  f"Tanques: {aplic.get('Número tanques',0):.1f} | "
+                  f"Pulverizador: {aplic.get('Pulverizador','—')} | "
+                  f"Clima: {aplic.get('Clima aplicação','—')}",8,False,COR_CINZA)]]
+        tc = Table(cab, colWidths=[4.5*cm,14*cm])
+        tc.setStyle(TableStyle([("BACKGROUND",(0,0),(0,0),COR_VERDE),("BACKGROUND",(1,0),(1,0),COR_AZUL),
+            ("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7),
+            ("LEFTPADDING",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+
+        hdr = [P("PRODUTO",8,True,COR_BRANCO,TA_CENTER),P("TIPO",8,True,COR_BRANCO,TA_CENTER),
+               P("DOSE/ha",8,True,COR_BRANCO,TA_CENTER),P("UNIDADE",8,True,COR_BRANCO,TA_CENTER),
+               P("POR TANQUE",8,True,COR_BRANCO,TA_CENTER),P("TOTAL AREA",8,True,COR_BRANCO,TA_CENTER)]
+        rows = [hdr]
+
+        # ── Produtos defensivos normais ─────────────────────────────────────
+        for p in aplic.get("Produtos",[]):
+            unid = p.get("Unidade","").replace("/ha","")
+            rows.append([
+                P(f"<b>{p.get('Produto','')}</b>",8,True),
+                P(p.get("Tipo",""),8),
+                P(str(p.get("Dose por ha",0)),8,False,None,TA_CENTER),
+                P(p.get("Unidade",""),8,False,None,TA_CENTER),
+                P(f"<b>{p.get('Produto por tanque',0):.2f}</b> {unid}",8,True,None,TA_CENTER),
+                P(f"<b>{p.get('Total usado',0):.2f}</b> {unid}",8,True,COR_VERDE_E,TA_CENTER),
+            ])
+
+        # ── Dados de Plantio (semente, fertilizantes, inoculantes) ─────────
+        _dp = aplic.get("Dados Plantio", {})
+        if _dp:
+            # Sementes — múltiplas variedades
+            _vars_pdf = _dp.get("variedades", [])
+            if _vars_pdf:
+                _tsi_pdf = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
+                for _vp in _vars_pdf:
+                    rows.append([
+                        P(f"<b>🌱 {_vp.get('nome','Semente')}</b> · {_vp.get('pop',0):,} pl/ha · {_vp.get('esp',0)} cm{_tsi_pdf}",8,True,colors.HexColor("#14532d")),
+                        P("Semente",8),
+                        P(str(_vp.get("dose",0)),8,False,None,TA_CENTER),
+                        P("kg/ha",8,False,None,TA_CENTER),
+                        P(f"{_vp.get('ha',0)} ha",8,False,None,TA_CENTER),
+                        P(f"<b>{_vp.get('total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                    ])
+            elif _dp.get("semente") or _dp.get("dose_sem_ha",0) > 0:
+                _sem_nome = _dp.get("semente","Semente")
+                _tsi = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
+                _pop = f" | Pop: {_dp.get('populacao',0):,} pl/ha" if _dp.get("populacao",0) > 0 else ""
+                rows.append([
+                    P(f"<b>🌱 {_sem_nome}</b>{_pop}{_tsi}",8,True,colors.HexColor("#14532d")),
+                    P("Semente",8),
+                    P(str(_dp.get("dose_sem_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('semente_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # Adubo base
+            if _dp.get("adubo_nome") and _dp.get("adubo_kg_ha",0) > 0:
+                rows.append([
+                    P(f"<b>🟡 {_dp['adubo_nome']}</b>",8,True),
+                    P("Fertilizante",8),
+                    P(str(_dp.get("adubo_kg_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('adubo_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # KCl
+            if _dp.get("kcl_nome") and _dp.get("kcl_kg_ha",0) > 0:
+                rows.append([
+                    P(f"<b>🟣 {_dp['kcl_nome']}</b>",8,True),
+                    P("KCl/Potássio",8),
+                    P(str(_dp.get("kcl_kg_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('kcl_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # Ureia
+            if _dp.get("ureia_nome") and _dp.get("ureia_kg_ha",0) > 0:
+                rows.append([
+                    P(f"<b>⬜ {_dp['ureia_nome']}</b>",8,True),
+                    P("Ureia/N",8),
+                    P(str(_dp.get("ureia_kg_ha",0)),8,False,None,TA_CENTER),
+                    P("kg/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_dp.get('ureia_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                ])
+            # Inoculante 1
+            if _dp.get("inoc1_nome") and _dp.get("inoc1_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🦠 {_dp['inoc1_nome']}</b>",8,True),
+                    P("Inoculante sulco",8),
+                    P(str(_dp.get("inoc1_dose",0)),8,False,None,TA_CENTER),
+                    P("mL/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Co-inoculante
+            if _dp.get("inoc2_nome") and _dp.get("inoc2_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🦠 {_dp['inoc2_nome']}</b>",8,True),
+                    P("Co-inoculante",8),
+                    P(str(_dp.get("inoc2_dose",0)),8,False,None,TA_CENTER),
+                    P("mL/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Inoculante semente
+            if _dp.get("inoc3_nome") and _dp.get("inoc3_dose",0) > 0:
+                rows.append([
+                    P(f"<b>💉 {_dp['inoc3_nome']}</b>",8,True),
+                    P("Inoc. semente",8),
+                    P(str(_dp.get("inoc3_dose",0)),8,False,None,TA_CENTER),
+                    P("mL/sc",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Micro 1
+            if _dp.get("micro1_nome") and _dp.get("micro1_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🌿 {_dp['micro1_nome']}</b>",8,True),
+                    P("Micronutriente",8),
+                    P(str(_dp.get("micro1_dose",0)),8,False,None,TA_CENTER),
+                    P("kg/L ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+            # Micro 2
+            if _dp.get("micro2_nome") and _dp.get("micro2_dose",0) > 0:
+                rows.append([
+                    P(f"<b>🌿 {_dp['micro2_nome']}</b>",8,True),
+                    P("Micronutriente",8),
+                    P(str(_dp.get("micro2_dose",0)),8,False,None,TA_CENTER),
+                    P("kg/L ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                ])
+
+        if len(rows) == 1:
+            rows.append([P("Nenhum produto registrado",8,False,COR_SUB),"","","","",""])
+
+        tp = Table(rows, colWidths=[4.5*cm,2.5*cm,2*cm,2*cm,3*cm,4.5*cm])
+        stp = [("BACKGROUND",(0,0),(-1,0),COR_VERDE_E),("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
+               ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
+               ("LEFTPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE")]
+        for ri, p in enumerate(aplic.get("Produtos",[]),1):
+            stp.append(("BACKGROUND",(1,ri),(1,ri),COR_TIPO.get(p.get("Tipo",""),COR_CINZA)))
+            stp.append(("BACKGROUND",(0,ri),(0,ri),COR_CINZA if ri%2 else COR_BRANCO))
+        tp.setStyle(TableStyle(stp))
+
+        ass = [[P(f"<b>Operador:</b> {aplic.get('Operador','_________________________')}",8),
+                P("<b>Inicio:</b> ____/____/______ ___:___ h",8),
+                P("<b>Assinatura:</b> _______________________",8)]]
+        ta = Table(ass, colWidths=[5.5*cm,5.5*cm,7.5*cm])
+        ta.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f8fafc")),
+            ("GRID",(0,0),(-1,-1),0.3,COR_BORDA),("TOPPADDING",(0,0),(-1,-1),5),
+            ("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),8)]))
+
+        story.append(KeepTogether([tc,tp,ta,Spacer(1,5*mm)]))
+
+    story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
+    story.append(Spacer(1,2*mm))
+    story.append(P(f"IAAgro - Inteligencia Agricola de Precisao | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Uso interno",
+                   7,False,COR_SUB,TA_CENTER))
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
 def calcular_calcario_por_ph(ph, area):
-    if   ph < 4.8: dose = 4.0
-    elif ph < 5.2: dose = 3.0
-    elif ph < 5.5: dose = 2.0
-    elif ph < 5.8: dose = 1.0
-    else:          dose = 0.0
+    """
+    Calagem pelo método SMP (CQFS RS/SC 2016) ou pH em água.
+    PRNT médio adotado: 75% (calcário comercial típico da região Sul)
+    Fórmula: NC (t/ha) = dose_base / (PRNT/100)
+    """
+    PRNT = 0.75  # PRNT médio 75% — calcário comercial RS/SC/PR
+
+    if   ph < 4.8: dose_base = 4.0
+    elif ph < 5.0: dose_base = 3.5
+    elif ph < 5.2: dose_base = 3.0
+    elif ph < 5.4: dose_base = 2.5
+    elif ph < 5.5: dose_base = 2.0
+    elif ph < 5.6: dose_base = 1.5
+    elif ph < 5.8: dose_base = 1.0
+    elif ph < 6.0: dose_base = 0.5
+    else:          dose_base = 0.0
+
+    # Corrige pelo PRNT 75%
+    dose = round(dose_base / PRNT, 2) if dose_base > 0 else 0.0
     return dose, dose * area
 
 
@@ -2584,60 +3520,309 @@ def estimar_producao(meta, nota):
 
 
 def recomendacao_npk(cultura, produtividade, fosforo, potassio, materia_organica, argila=50, ph=5.5):
+    # Remove ícone se presente
+    cultura = cultura_limpa(cultura) if cultura else "Soja"
+    """
+    Recomendação NPK baseada em:
+    - EMBRAPA Soja — Circular Técnica 98 + Tecnologias de Produção 2022
+    - EMBRAPA Milho e Sorgo — Circular Técnica 100/2023
+    - CQFS RS/SC 2016 (Manual de Calagem e Adubação)
+    - IAC Boletim 100 (2014) — culturas diversas
+    - EMBRAPA Trigo — Recomendações Técnicas 2021
+    - EMBRAPA Arroz e Feijão
+    - MAPA — Boas Práticas Agrícolas
+    Unidades: kg/ha de N, P2O5, K2O
+    P = Mehlich-1 (mg/dm³) | K = mg/dm³ | MO = g/dm³ ou %
+    """
     n = p2o5 = k2o = 0
+
     if cultura == "Soja":
+        # EMBRAPA Soja: N=0 com boa nodulação (BNF supre 200-300 kg N/ha)
         n = 0
-        if   fosforo < 10:  p2o5 = 120
-        elif fosforo < 20:  p2o5 = 90
-        elif fosforo < 35:  p2o5 = 60
-        else:               p2o5 = 30
-        if   potassio < 80:  k2o = 140
-        elif potassio < 150: k2o = 100
-        elif potassio < 250: k2o = 70
-        else:                k2o = 40
-        if produtividade > 70: p2o5 += 20; k2o += 20
+        # P2O5 — CQFS RS/SC 2016 Tab. 4.3 — solo argiloso (argila 41-60%)
+        # Exportação: ~16 kg P2O5/sc (60 kg) → manutenção + reposição
+        if   fosforo < 4:   p2o5 = 140
+        elif fosforo < 7:   p2o5 = 110
+        elif fosforo < 11:  p2o5 = 90
+        elif fosforo < 16:  p2o5 = 70
+        elif fosforo < 22:  p2o5 = 55
+        elif fosforo < 30:  p2o5 = 40
+        else:               p2o5 = 25
+        # K2O — CQFS RS/SC 2016 Tab. 4.4 — exportação ~18 kg K2O/sc
+        if   potassio < 40:  k2o = 130
+        elif potassio < 60:  k2o = 105
+        elif potassio < 80:  k2o = 85
+        elif potassio < 120: k2o = 70
+        elif potassio < 180: k2o = 55
+        elif potassio < 240: k2o = 40
+        else:                k2o = 25
+        # Ajuste produtividade (EMBRAPA — base 50 sc/ha)
+        fator_prod = max(1.0, produtividade / 50)
+        p2o5 = round(p2o5 * fator_prod, 0)
+        k2o  = round(k2o  * fator_prod, 0)
+
     elif cultura == "Milho":
-        n = produtividade * 2.2
-        if   fosforo < 10:  p2o5 = 140
-        elif fosforo < 20:  p2o5 = 100
-        elif fosforo < 35:  p2o5 = 70
-        else:               p2o5 = 40
-        k2o = produtividade * 1.8
-        if potassio < 120:  k2o += 50
+        # EMBRAPA Milho — base 10 t/ha, N parcelado (plantio + cobertura)
+        # N plantio: 20-30 kg/ha | N cobertura: 30-50 kg/ha por 1000 kg grão
+        n_plantio = 25
+        n_cob     = min(produtividade * 1.5, 140)  # 1,5 kg N / sc 60kg
+        n = round(n_plantio + n_cob, 1)
+        # P2O5 — CQFS 2016 Tab. 5.3
+        if   fosforo < 4:   p2o5 = 130
+        elif fosforo < 7:   p2o5 = 105
+        elif fosforo < 11:  p2o5 = 85
+        elif fosforo < 16:  p2o5 = 65
+        elif fosforo < 22:  p2o5 = 50
+        elif fosforo < 30:  p2o5 = 35
+        else:               p2o5 = 20
+        # K2O — CQFS 2016 Tab. 5.4
+        if   potassio < 40:  k2o = 120
+        elif potassio < 60:  k2o = 95
+        elif potassio < 80:  k2o = 75
+        elif potassio < 120: k2o = 60
+        elif potassio < 180: k2o = 45
+        elif potassio < 240: k2o = 30
+        else:                k2o = 20
+        # Alta produtividade (>150 sc/ha = 9 t/ha)
+        if produtividade > 150: p2o5 += 25; k2o += 30; n = min(n + 25, 180)
+
     elif cultura == "Trigo":
-        n = produtividade * 1.8
+        # EMBRAPA Trigo — Sistema Plantio Direto Sul Brasil 2021
+        # N = 30 plantio + cobertura conforme MO e produtividade
+        if   materia_organica < 2.5: n = 30 + produtividade * 1.0
+        elif materia_organica < 4.0: n = 20 + produtividade * 0.9
+        else:                        n = 15 + produtividade * 0.8
+        n = min(round(n, 1), 100)
+        # P2O5 — CQFS 2016
+        if   fosforo < 4:   p2o5 = 110
+        elif fosforo < 7:   p2o5 = 90
+        elif fosforo < 11:  p2o5 = 70
+        elif fosforo < 16:  p2o5 = 55
+        elif fosforo < 22:  p2o5 = 40
+        else:               p2o5 = 25
+        # K2O — CQFS 2016
+        if   potassio < 60:  k2o = 90
+        elif potassio < 80:  k2o = 70
+        elif potassio < 120: k2o = 55
+        elif potassio < 180: k2o = 40
+        else:                k2o = 25
+
+    elif cultura == "Feijão":
+        # EMBRAPA Feijão + CQFS 2016 — fixação parcial de N
+        # N starter 20 kg/ha + complemento se não inoculado
+        n = 20
+        if materia_organica < 2.5: n = 30
+        # P2O5
+        if   fosforo < 7:   p2o5 = 100
+        elif fosforo < 11:  p2o5 = 80
+        elif fosforo < 16:  p2o5 = 65
+        elif fosforo < 22:  p2o5 = 50
+        elif fosforo < 30:  p2o5 = 35
+        else:               p2o5 = 20
+        # K2O
+        if   potassio < 60:  k2o = 80
+        elif potassio < 80:  k2o = 65
+        elif potassio < 120: k2o = 50
+        elif potassio < 180: k2o = 35
+        else:                k2o = 20
+
+    elif cultura == "Arroz":
+        # EMBRAPA Arroz e Feijão — irrigado e sequeiro
+        n = round(20 + produtividade * 2.0, 1)
+        n = min(n, 130)
+        if   fosforo < 7:   p2o5 = 90
+        elif fosforo < 11:  p2o5 = 70
+        elif fosforo < 16:  p2o5 = 55
+        elif fosforo < 22:  p2o5 = 40
+        else:               p2o5 = 25
+        if   potassio < 60:  k2o = 90
+        elif potassio < 80:  k2o = 70
+        elif potassio < 120: k2o = 55
+        elif potassio < 180: k2o = 40
+        else:                k2o = 25
+
+    elif cultura == "Canola":
+        # EMBRAPA Trigo adaptado + pesquisas Paraná/RS
+        # Canola extrai muito enxofre — recomenda gesso
+        n = round(30 + produtividade * 2.5, 1)
+        n = min(n, 120)
+        if   fosforo < 7:   p2o5 = 90
+        elif fosforo < 11:  p2o5 = 70
+        elif fosforo < 16:  p2o5 = 55
+        elif fosforo < 22:  p2o5 = 40
+        else:               p2o5 = 25
+        if   potassio < 60:  k2o = 80
+        elif potassio < 80:  k2o = 65
+        elif potassio < 120: k2o = 50
+        elif potassio < 180: k2o = 35
+        else:                k2o = 20
+
+    elif cultura in ["Aveia", "Cevada"]:
+        # CQFS RS/SC 2016
+        n = round(15 + produtividade * 1.5, 1)
+        n = min(n, 90)
+        if   fosforo < 7:   p2o5 = 80
+        elif fosforo < 11:  p2o5 = 65
+        elif fosforo < 16:  p2o5 = 50
+        elif fosforo < 22:  p2o5 = 35
+        else:               p2o5 = 20
+        if   potassio < 60:  k2o = 70
+        elif potassio < 80:  k2o = 55
+        elif potassio < 120: k2o = 40
+        elif potassio < 180: k2o = 30
+        else:                k2o = 20
+
+    elif cultura == "Sorgo":
+        # EMBRAPA Milho e Sorgo
+        n = round(20 + produtividade * 1.5, 1)
+        n = min(n, 100)
+        if   fosforo < 7:   p2o5 = 75
+        elif fosforo < 11:  p2o5 = 60
+        elif fosforo < 16:  p2o5 = 45
+        else:               p2o5 = 30
+        if   potassio < 60:  k2o = 70
+        elif potassio < 120: k2o = 50
+        else:                k2o = 30
+
+    elif cultura == "Café":
+        # EMBRAPA Café — Circular Técnica 132
+        # Produtividade em sc/ha beneficiado
+        n  = round(80 + produtividade * 1.5, 1)
+        n  = min(n, 300)
         if   fosforo < 10:  p2o5 = 100
         elif fosforo < 20:  p2o5 = 70
-        else:               p2o5 = 40
-        k2o = produtividade * 1.4
-    # Ajustes solo
-    if argila < 25:        k2o += 20
-    elif argila > 60:      k2o -= 10
-    if materia_organica >= 4: n *= 0.85
-    if ph < 5.2:           p2o5 += 15
+        elif fosforo < 40:  p2o5 = 50
+        else:               p2o5 = 30
+        if   potassio < 60:  k2o = 180
+        elif potassio < 120: k2o = 140
+        elif potassio < 180: k2o = 100
+        else:                k2o = 70
+
+    elif cultura in ["Tomate", "Batata"]:
+        # IAC Boletim 100 — horticultura
+        n  = round(120 + produtividade * 0.8, 1)
+        p2o5 = 120 if fosforo < 30 else 80
+        k2o  = 200 if potassio < 150 else 150
+
+    elif cultura in ["Eucalipto", "Pinus"]:
+        # EMBRAPA Florestas
+        n = 30; p2o5 = 100; k2o = 50
+
+    elif cultura == "Pastagem":
+        # EMBRAPA Gado de Corte/Leite
+        n  = round(40 + produtividade * 0.5, 1)
+        n  = min(n, 120)
+        p2o5 = 60 if fosforo < 15 else 30
+        k2o  = 60 if potassio < 100 else 30
+
+    else:
+        # Genérico — conservador
+        n = 40; p2o5 = 60; k2o = 60
+
+    # ── Ajustes gerais de solo ──────────────────────────────
+    # Textura: solos arenosos (<20% argila) têm menor CTC → mais K
+    if argila < 15:     k2o = round(k2o * 1.25, 0)
+    elif argila < 25:   k2o = round(k2o * 1.15, 0)
+    elif argila > 70:   k2o = round(k2o * 0.90, 0)
+
+    # MO alta reduz necessidade de N (mineralização)
+    if materia_organica >= 5.5:   n = round(n * 0.70, 1)
+    elif materia_organica >= 4.0: n = round(n * 0.80, 1)
+    elif materia_organica >= 3.0: n = round(n * 0.90, 1)
+
+    # pH baixo reduz disponibilidade de P (precipitação com Al e Fe)
+    if ph < 5.0:   p2o5 = round(p2o5 * 1.30, 0)
+    elif ph < 5.3: p2o5 = round(p2o5 * 1.15, 0)
+    elif ph < 5.5: p2o5 = round(p2o5 * 1.08, 0)
+
     return round(n, 1), round(p2o5, 1), round(k2o, 1)
 
 
-def score_solo(d):
+def score_solo(d, cultura="Soja"):
+    """
+    Score de qualidade do solo baseado nos parâmetros EMBRAPA/CQFS RS-SC 2016
+    Considera limites ideais por cultura
+    """
+    cultura = cultura_limpa(cultura) if cultura else "Soja"
     score   = 100
     alertas = []
-    ph              = d.get("ph", 0)
-    fosforo         = d.get("fosforo", 0)
-    potassio        = d.get("potassio", 0)
-    calcio          = d.get("calcio", 0)
-    magnesio        = d.get("magnesio", 0)
-    aluminio        = d.get("aluminio", 0)
+    ph               = d.get("ph", 0)
+    fosforo          = d.get("fosforo", 0)
+    potassio         = d.get("potassio", 0)
+    calcio           = d.get("calcio", 0)
+    magnesio         = d.get("magnesio", 0)
+    aluminio         = d.get("aluminio", 0)
     materia_organica = d.get("materia_organica", 0)
-    if ph < 5.0:    score -= 20; alertas.append("pH baixo")
-    elif ph < 5.5:  score -= 10; alertas.append("pH abaixo do ideal")
-    if fosforo < 10: score -= 20; alertas.append("Fósforo muito baixo")
-    elif fosforo < 20: score -= 10; alertas.append("Fósforo baixo")
-    if potassio < 80:  score -= 15; alertas.append("Potássio baixo")
-    elif potassio < 120: score -= 8; alertas.append("Potássio médio/baixo")
-    if calcio < 3:   score -= 15; alertas.append("Cálcio baixo")
-    if magnesio < 1: score -= 10; alertas.append("Magnésio baixo")
-    if aluminio > 0.5: score -= 20; alertas.append("Alumínio elevado")
-    if materia_organica < 2.5: score -= 10; alertas.append("Matéria orgânica baixa")
+    enxofre          = d.get("enxofre", 0)
+    zinco            = d.get("zinco", 0)
+    boro             = d.get("boro", 0)
+
+    # pH ideal por cultura (EMBRAPA/CQFS)
+    ph_ideais = {
+        "Soja": (5.8, 6.5), "Milho": (5.8, 6.5), "Trigo": (5.8, 6.5),
+        "Feijão": (6.0, 6.5), "Arroz": (5.5, 6.0), "Canola": (6.0, 6.5),
+        "Café": (5.5, 6.5), "Tomate": (6.0, 6.8), "Batata": (5.5, 6.0),
+        "Eucalipto": (5.0, 6.0), "Pinus": (4.5, 5.5), "Mogno Africano": (5.5, 6.5),
+    }
+    ph_min, ph_max = ph_ideais.get(cultura, (5.8, 6.5))
+
+    # pH
+    if ph > 0:
+        if ph < ph_min - 0.5:
+            score -= 20; alertas.append(f"pH muito baixo para {cultura} (ideal {ph_min}-{ph_max})")
+        elif ph < ph_min:
+            score -= 10; alertas.append(f"pH abaixo do ideal para {cultura}")
+        elif ph > ph_max + 0.5:
+            score -= 10; alertas.append(f"pH elevado — risco de deficiência de micronutrientes")
+
+    # Fósforo (mg/dm³ — Mehlich-1)
+    if fosforo > 0:
+        if   fosforo < 6:   score -= 20; alertas.append("Fósforo muito baixo (<6 mg/dm³)")
+        elif fosforo < 12:  score -= 12; alertas.append("Fósforo baixo (6-12 mg/dm³)")
+        elif fosforo < 18:  score -= 6;  alertas.append("Fósforo médio — atenção")
+
+    # Potássio (mg/dm³)
+    if potassio > 0:
+        if   potassio < 60:  score -= 20; alertas.append("Potássio muito baixo (<60 mg/dm³)")
+        elif potassio < 100: score -= 12; alertas.append("Potássio baixo (60-100 mg/dm³)")
+        elif potassio < 150: score -= 5;  alertas.append("Potássio médio — monitorar")
+
+    # Cálcio (cmolc/dm³)
+    if calcio > 0:
+        if   calcio < 2.0: score -= 20; alertas.append("Cálcio muito baixo (<2 cmolc/dm³)")
+        elif calcio < 3.5: score -= 10; alertas.append("Cálcio baixo (2-3,5 cmolc/dm³)")
+
+    # Magnésio (cmolc/dm³)
+    if magnesio > 0:
+        if   magnesio < 0.5: score -= 15; alertas.append("Magnésio muito baixo (<0,5 cmolc/dm³)")
+        elif magnesio < 1.0: score -= 8;  alertas.append("Magnésio baixo (0,5-1,0 cmolc/dm³)")
+
+    # Relação Ca:Mg ideal 3:1 a 5:1
+    if calcio > 0 and magnesio > 0:
+        rel = calcio / magnesio
+        if rel < 2.5: alertas.append(f"Relação Ca:Mg baixa ({rel:.1f}:1) — risco de toxidez Mg")
+        elif rel > 8:  alertas.append(f"Relação Ca:Mg alta ({rel:.1f}:1) — deficiência Mg possível")
+
+    # Alumínio (cmolc/dm³) — tóxico acima de 0,3
+    if aluminio > 0:
+        if aluminio > 1.0: score -= 25; alertas.append(f"Alumínio tóxico ({aluminio} cmolc/dm³) — urgente calcário")
+        elif aluminio > 0.5: score -= 15; alertas.append(f"Alumínio elevado ({aluminio} cmolc/dm³)")
+        elif aluminio > 0.3: score -= 8;  alertas.append(f"Alumínio detectado ({aluminio} cmolc/dm³)")
+
+    # Matéria orgânica (%)
+    if materia_organica > 0:
+        if   materia_organica < 1.5: score -= 15; alertas.append("MO muito baixa (<1,5%) — solo degradado")
+        elif materia_organica < 2.5: score -= 8;  alertas.append("MO baixa (1,5-2,5%) — adubação verde recomendada")
+        elif materia_organica > 6.0: alertas.append("MO alta — reduzir N mineral")
+
+    # Micronutrientes (quando disponíveis)
+    if enxofre > 0 and enxofre < 5:
+        score -= 8; alertas.append(f"Enxofre baixo (<5 mg/dm³) — usar fertilizante com S")
+    if zinco > 0 and zinco < 0.6:
+        score -= 5; alertas.append(f"Zinco baixo (<0,6 mg/dm³)")
+    if boro > 0 and boro < 0.2:
+        score -= 5; alertas.append(f"Boro baixo (<0,2 mg/dm³) — importante para soja/café")
+
     score = max(0, min(100, score))
     if   score >= 85: classe = "Excelente"
     elif score >= 70: classe = "Boa"
@@ -2647,46 +3832,49 @@ def score_solo(d):
     return score, classe, alertas
 
 
-def baixar_estoque(nome_insumo, quantidade_usada):
+def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
+    """
+    Dá baixa no estoque convertendo unidades automaticamente.
+    Estoque sempre em L ou kg. Aplicação pode ser mL/ha, g/ha, etc.
+    """
+    def converter_para_base(qtd, unid):
+        """Converte para a unidade base: L ou kg."""
+        unid = (unid or "").lower().replace(" ", "")
+        if "ml" in unid:     return qtd / 1000  # mL → L
+        if "g/ha" in unid or unid == "g":   return qtd / 1000  # g → kg
+        if "mg" in unid:     return qtd / 1_000_000
+        return qtd  # já em L ou kg
+
+    qtd_convertida = converter_para_base(quantidade_usada, unidade_usada)
+
     for item in st.session_state.estoque:
         if item["Insumo"] == nome_insumo:
-            if item["Quantidade"] >= quantidade_usada:
-                item["Quantidade"] -= quantidade_usada
-                item["Valor Total R$"] = item["Quantidade"] * item["Valor Unitário R$"]
-                return True, "Baixa realizada com sucesso."
-            return False, "Estoque insuficiente."
-    return False, "Insumo não encontrado."
+            estoque_atual = float(item.get("Quantidade", 0))
+            if estoque_atual >= qtd_convertida:
+                item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
+                item["Valor Total R$"] = item["Quantidade"] * item.get("Valor Unitário R$", 0)
+                return True, f"Baixa de {qtd_convertida:.3f} realizada."
+            return False, f"Estoque insuficiente: tem {estoque_atual:.3f}, precisa {qtd_convertida:.3f}"
+    return False, "Insumo não encontrado no estoque."
 
 
+# ─────────────────────────────────────────────
+# MENU
+# ─────────────────────────────────────────────
 # ─────────────────────────────────────────────
 # MENU
 # ─────────────────────────────────────────────
 menu = st.sidebar.radio(
     "📋 Menu",
     [
-        "Início",
-        "Cadastro da Área",
-        "Áreas Cadastradas",
-        "Histórico de Produtividade",
-        "Pluviômetro",
-        "Mapa de Fertilidade",
-        "Análise de Solo",
-        "Diagnóstico Completo",
-        "Adubação",
-        "Custos",
-        "Estoque de Insumos",
-        "Aplicações",
-        "Relatório Final",
-        "🌤️ Clima & Alertas",
-        "💰 Preços de Mercado",
-        "📄 OCR Laudo de Solo",
-        "⏱️ Prazo de Carência",
-        "📋 Ordem de Serviço",
-        "💹 Dashboard Financeiro",
-        "📅 Calendário Agrícola",
-        "🗺️ Mapa de Colheita IA",
-        "📜 Receituário Agronômico",
-        "📊 Comparativo de Safras",
+        "🏠 Início",
+        "🌾 Lavoura",
+        "🧪 Solo & Adubação",
+        "💰 Financeiro",
+        "📦 Operacional",
+        "🌍 Inteligência",
+        "🌱 Safrinha",
+        "📄 Relatório Final",
         "⚙️ Configurações"
     ]
 )
@@ -2706,78 +3894,289 @@ if st.session_state.area_selecionada:
     st.sidebar.markdown(f'<div style="background:#14532d;color:#fff;padding:8px 12px;border-radius:8px;font-weight:700;font-size:13px;margin-top:6px;">🌾 Área ativa: {st.session_state.area_selecionada}</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
+# MAPEAMENTO GLOBAL DE CULTURAS POR SEGMENTO
+# (definição completa no topo do arquivo — aqui apenas mapas derivados)
+# ─────────────────────────────────────────────
+
+# Mapa reverso para extrair nome sem ícone (para lógicas internas)
+CULTURA_NOME_LIMPO = {c: c.split(" ",1)[1] if " " in c else c
+                      for seg in CULTURAS_POR_SEGMENTO.values() for c in seg}
+
+# Ícone por nome limpo da cultura
+CULTURA_ICONE = {c.split(" ",1)[1] if " " in c else c: c.split(" ",1)[0] if " " in c else "🌱"
+                 for seg in CULTURAS_POR_SEGMENTO.values() for c in seg}
+
+def get_icone_cultura(cultura):
+    """Retorna o ícone da cultura (com ou sem ícone no nome)."""
+    if not cultura: return "🌱"
+    nome = cultura_limpa(cultura)
+    return CULTURA_ICONE.get(nome, "🌱")
+
+# ─────────────────────────────────────────────
+# CONTROLE DE PLANOS — Free / Pro / Premium
+# ─────────────────────────────────────────────
+
+def verificar_limite(recurso: str) -> tuple:
+    """Retorna (pode: bool, usado: int, limite: int)"""
+    plano_key = st.session_state.get("sb_plano", "free")
+    plano     = PLANOS.get(plano_key, PLANOS["free"])
+    limite    = plano.get(recurso, 2)
+
+    if limite == -1:
+        return True, 0, -1  # ilimitado
+
+    if recurso == "areas":
+        usado = len(st.session_state.get("areas", []))
+    elif recurso == "estoque":
+        usado = len(st.session_state.get("estoque", []))
+    else:
+        return True, 0, -1
+
+    return usado < limite, usado, limite
+
+def bloco_upgrade(recurso: str, usado: int, limite: int):
+    """Banner de upgrade quando limite é atingido."""
+    plano_key = st.session_state.get("sb_plano", "free")
+    nomes     = {"areas": "áreas", "estoque": "itens de estoque"}
+    nome      = nomes.get(recurso, recurso)
+
+    # Próximo plano sugerido
+    if plano_key == "free":
+        prox_key   = "pro"
+        prox_preco = PLANOS["pro"]["preco"]
+        prox_nome  = PLANOS["pro"]["nome"]
+    else:
+        prox_key   = "premium"
+        prox_preco = PLANOS["premium"]["preco"]
+        prox_nome  = PLANOS["premium"]["nome"]
+
+    st.markdown(f"""
+    <div style='background:linear-gradient(135deg,#78350f,#92400e);
+    border-radius:12px;padding:18px 20px;border:2px solid #f59e0b;
+    margin:10px 0;text-align:center;'>
+    <b style='color:#fbbf24;font-size:16px;'>🔒 Limite atingido — {usado}/{limite} {nome}</b><br>
+    <span style='color:#fde68a;font-size:13px;'>
+    Faça upgrade para continuar usando o IAAGRO sem limites!
+    </span><br><br>
+    <span style='color:#fff;font-size:18px;font-weight:800;'>
+    {prox_nome} — R$ {prox_preco:.2f}/mês
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    msg = f"Quero+assinar+o+IAAGRO+{prox_nome.replace(' ','+')}+-+R$+{prox_preco:.2f}/mes"
+    # Links direto do Mercado Pago — mensal e anual
+    if prox_key == "premium":
+        link_mes = MP_LINK_PREMIUM_MES
+        link_ano = MP_LINK_PREMIUM_ANO
+        preco_ano = 99.90 * 12 * 0.85   # 15% desconto anual
+    else:
+        link_mes = MP_LINK_PRO_MES
+        link_ano = MP_LINK_PRO_ANO
+        preco_ano = 39.90 * 12 * 0.85
+
+    st.markdown(f"""
+    <div style='display:flex;gap:10px;margin-top:8px;'>
+    <a href='{link_mes}' target='_blank'
+       style='flex:1;display:block;background:#009ee3;color:#fff;text-align:center;
+       padding:10px;border-radius:8px;font-weight:700;text-decoration:none;font-size:13px;'>
+    💳 Mensal<br>R$ {prox_preco:.2f}/mês
+    </a>
+    <a href='{link_ano}' target='_blank'
+       style='flex:1;display:block;background:#00a650;color:#fff;text-align:center;
+       padding:10px;border-radius:8px;font-weight:700;text-decoration:none;font-size:13px;'>
+    🏆 Anual<br>R$ {preco_ano:.0f}/ano<br><span style='font-size:10px;'>(-15% desconto)</span>
+    </a>
+    </div>
+    <div style='text-align:center;margin-top:4px;'>
+    <span style='color:#94a3b8;font-size:11px;'>PIX • Cartão • Boleto — Mercado Pago</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+def get_culturas():
+    """Retorna lista de culturas (com ícone) filtrada pelo segmento ativo."""
+    seg = st.session_state.get("segmento")
+    if seg and seg in CULTURAS_POR_SEGMENTO:
+        return CULTURAS_POR_SEGMENTO[seg]
+    todas = []
+    seen = set()
+    for culturas in CULTURAS_POR_SEGMENTO.values():
+        for c in culturas:
+            if c not in seen:
+                todas.append(c)
+                seen.add(c)
+    return todas
+
+def cultura_limpa(c):
+    """Remove ícone do nome da cultura para usar nas lógicas internas."""
+    if c and " " in c and len(c.split(" ",1)[0]) <= 2:
+        return c.split(" ",1)[1]
+    return c
+
+# ─────────────────────────────────────────────
 # MENU: INÍCIO
 # ─────────────────────────────────────────────
-if menu == "Início":
-    st.markdown("## 🚜 IAAgro Pro V9")
-    st.markdown("**Gestão agrícola inteligente**")
+if menu == "🏠 Início":
 
-    total_areas      = len(st.session_state.areas)
-    total_estoque    = len(st.session_state.estoque)
-    total_aplicacoes = len(st.session_state.aplicacoes)
-    area_total       = sum(area.get("Hectares", 0) for area in st.session_state.areas)
+    # ── Segmentos disponíveis ──────────────────────────────────────────
+    SEGMENTOS = SEGMENTOS_INFO
 
-    produtividade_media = 0
-    if total_areas > 0:
-        produtividade_media = sum(
-            area.get("Meta Produtividade", 0) for area in st.session_state.areas
-        ) / total_areas
+    # ── Tela de seleção (só aparece se segmento não foi escolhido ainda) ──
+    if not st.session_state.segmento:
+        st.markdown("""
+        <div style='text-align:center;padding:30px 0 10px 0;'>
+        <span style='font-size:48px;'>🌱</span><br>
+        <span style='font-size:28px;font-weight:800;color:#22c55e;'>Bem-vindo ao IAAGRO</span><br>
+        <span style='font-size:16px;color:#94a3b8;'>Selecione seu segmento para personalizar o sistema</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("🌾 Áreas",       total_areas)
-    col2.metric("📦 Estoque",     total_estoque)
-    col3.metric("🚜 Aplicações",  total_aplicacoes)
-    col4.metric("📍 Área Total",  f"{area_total:.1f} ha")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-    st.divider()
+        for seg, info in SEGMENTOS.items():
+            col_btn, col_desc = st.columns([2, 5])
+            with col_btn:
+                if st.button(seg, key=f"seg_btn_{seg}", use_container_width=True):
+                    st.session_state.segmento = seg
+                    salvar_dados_iaagro()
+                    st.success(f"✅ Segmento **{seg}** selecionado! Bem-vindo.")
+                    st.rerun()
+            with col_desc:
+                st.markdown(
+                    f"<div style='padding:10px 0;color:#94a3b8;font-size:14px;'>{info['desc']}</div>",
+                    unsafe_allow_html=True
+                )
 
-    col5, col6 = st.columns(2)
-    with col5:
-        st.subheader("📈 Produtividade Média")
-        st.metric("Média", f"{produtividade_media:.1f} sc/ha")
-    with col6:
-        st.subheader("⚠️ Alertas de Estoque")
-        estoque_baixo = [item for item in st.session_state.estoque if item.get("Quantidade", 0) < 10]
-        if len(estoque_baixo) == 0:
-            st.markdown('<div style="background:#166534;color:#ffffff;padding:12px 18px;border-radius:10px;font-weight:700;font-size:15px;">✅ Nenhum alerta de estoque.</div>', unsafe_allow_html=True)
-        else:
-            for item in estoque_baixo:
-                nome = item.get("Insumo", item.get("Produto", "Produto"))
-                st.markdown(f'<div style="background:#92400e;color:#ffffff;padding:12px 18px;border-radius:10px;font-weight:700;font-size:15px;">⚠️ {nome} com estoque baixo.</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("⚙️ Você pode trocar o segmento a qualquer momento em Configurações.")
 
-    st.divider()
-    st.subheader("📋 Resumo das Áreas")
-
-    if total_areas == 0:
-        st.markdown('<div style="background:#1e3a5f;color:#ffffff;padding:14px 18px;border-radius:10px;font-weight:600;font-size:15px;">ℹ️ Nenhuma área cadastrada.</div>', unsafe_allow_html=True)
     else:
-        tabela_dashboard = []
-        for area in st.session_state.areas:
-            tabela_dashboard.append({
-                "Fazenda":    area.get("Fazenda", ""),
-                "Talhão":    area.get("Talhão", ""),
-                "Cultura":   area.get("Cultura", ""),
-                "Área ha":   area.get("Hectares", 0),
-                "Meta sc/ha": area.get("Meta Produtividade", 0)
-            })
-        df_areas = pd.DataFrame(tabela_dashboard)
-        st.dataframe(df_areas, use_container_width=True)
-        st.divider()
-        st.subheader("📊 Gráfico de Produtividade por Talhão")
-        st.bar_chart(df_areas.set_index("Talhão")["Meta sc/ha"])
+        # ── Dashboard principal após segmento selecionado ─────────────
+        seg_info = SEGMENTOS.get(st.session_state.segmento, {"cor":"#0f3460","borda":"#22c55e","desc":""})
 
-    if total_estoque > 0:
-        df_estoque = pd.DataFrame(st.session_state.estoque)
-        if "Insumo" in df_estoque.columns and "Quantidade" in df_estoque.columns:
+        col_banner, col_trocar = st.columns([5, 1])
+        with col_banner:
+            st.markdown(f"""
+            <div style='background:{seg_info["cor"]};border-radius:12px;padding:14px 20px;
+            border-left:5px solid {seg_info["borda"]};margin-bottom:8px;'>
+            <span style='font-size:22px;font-weight:800;color:#f1f5f9;'>🚜 IAAGRO — {st.session_state.segmento}</span><br>
+            <span style='font-size:13px;color:#94a3b8;'>{seg_info["desc"]}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_trocar:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            if st.button("🔄 Trocar\nsegmento", key="btn_trocar_segmento", use_container_width=True):
+                st.session_state.segmento = None
+                salvar_dados_iaagro()
+                st.rerun()
+
+        # Card do plano atual
+        _plano_key  = st.session_state.get("sb_plano", "free")
+        _plano_info = PLANOS.get(_plano_key, PLANOS["free"])
+        _areas_us   = len(st.session_state.get("areas", []))
+        _est_us     = len(st.session_state.get("estoque", []))
+        _lim_ar     = _plano_info["areas"]
+        _lim_est    = _plano_info["estoque"]
+        _bar_ar     = f"{_areas_us}/{_lim_ar}" if _lim_ar != -1 else f"{_areas_us}/∞"
+        _bar_est    = f"{_est_us}/{_lim_est}"  if _lim_est != -1 else f"{_est_us}/∞"
+
+        st.markdown(f"""
+        <div style='background:linear-gradient(135deg,{_plano_info["cor"]},{_plano_info["cor"]}cc);
+        border-radius:12px;padding:12px 18px;border:1px solid {_plano_info["borda"]};margin-bottom:12px;'>
+        <span style='color:{_plano_info["borda"]};font-weight:800;font-size:15px;'>{_plano_info["nome"]}</span>
+        <span style='color:#94a3b8;font-size:12px;float:right;'>
+        📍 {_bar_ar} áreas &nbsp;|&nbsp; 📦 {_bar_est} insumos
+        </span><br>
+        {"<span style='color:#d1fae5;font-size:12px;'>✅ Acesso completo ativo</span>" if _plano_key == "premium" else
+         f"<span style='color:#fde68a;font-size:12px;'>Upgrade para mais recursos — <b>R$ {PLANOS['pro' if _plano_key=='free' else 'premium']['preco']:.2f}/mês</b></span>"}
+        </div>
+        """, unsafe_allow_html=True)
+
+        if _plano_key != "premium":
+            _prox      = PLANOS["pro"] if _plano_key == "free" else PLANOS["premium"]
+            _lmes = MP_LINK_PRO_MES if _plano_key == "free" else MP_LINK_PREMIUM_MES
+            _lano = MP_LINK_PRO_ANO if _plano_key == "free" else MP_LINK_PREMIUM_ANO
+            _pano = _prox['preco'] * 12 * 0.85
+            st.markdown(f"""
+            <div style='display:flex;gap:8px;'>
+            <a href='{_lmes}' target='_blank'
+            style='flex:1;display:block;background:#009ee3;color:#fff;text-align:center;
+            padding:8px;border-radius:8px;font-weight:700;text-decoration:none;font-size:12px;'>
+            💳 Mensal R$ {_prox['preco']:.2f}
+            </a>
+            <a href='{_lano}' target='_blank'
+            style='flex:1;display:block;background:#00a650;color:#fff;text-align:center;
+            padding:8px;border-radius:8px;font-weight:700;text-decoration:none;font-size:12px;'>
+            🏆 Anual R$ {_pano:.0f}
+            </a>
+            </div>
+            """, unsafe_allow_html=True)
+
+        total_areas      = len(st.session_state.areas)
+        total_estoque    = len(st.session_state.estoque)
+        total_aplicacoes = len(st.session_state.aplicacoes)
+        area_total       = sum(a.get("Hectares", 0) for a in st.session_state.areas)
+        produtividade_media = (
+            sum(a.get("Meta Produtividade", 0) for a in st.session_state.areas) / total_areas
+            if total_areas > 0 else 0
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("🌾 Áreas",      total_areas)
+        col2.metric("📦 Estoque",    total_estoque)
+        col3.metric("🚜 Aplicações", total_aplicacoes)
+        col4.metric("📍 Área Total", f"{area_total:.1f} ha")
+
+        st.divider()
+
+        col5, col6 = st.columns(2)
+        with col5:
+            st.subheader("📈 Produtividade Média")
+            st.metric("Média", f"{produtividade_media:.1f} sc/ha")
+        with col6:
+            st.subheader("⚠️ Alertas de Estoque")
+            estoque_baixo = [i for i in st.session_state.estoque if i.get("Quantidade", 0) < 10]
+            if not estoque_baixo:
+                st.markdown('<div style="background:#166534;color:#fff;padding:12px 18px;border-radius:10px;font-weight:700;">✅ Nenhum alerta de estoque.</div>', unsafe_allow_html=True)
+            else:
+                for item in estoque_baixo:
+                    nome = item.get("Insumo", item.get("Produto", "Produto"))
+                    st.markdown(f'<div style="background:#92400e;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;margin-bottom:4px;">⚠️ {nome} com estoque baixo.</div>', unsafe_allow_html=True)
+
+        st.divider()
+        st.subheader("📋 Resumo das Áreas")
+        if total_areas == 0:
+            st.markdown('<div style="background:#1e3a5f;color:#fff;padding:14px 18px;border-radius:10px;font-weight:600;">ℹ️ Nenhuma área cadastrada. Vá em <b>Cadastro da Área</b> para começar.</div>', unsafe_allow_html=True)
+        else:
+            tabela_dashboard = [{
+                "Fazenda":    a.get("Fazenda",""),
+                "Talhão":     a.get("Talhão",""),
+                "Cultura":    a.get("Cultura",""),
+                "Área ha":    a.get("Hectares",0),
+                "Meta sc/ha": a.get("Meta Produtividade",0),
+            } for a in st.session_state.areas]
+            df_areas = pd.DataFrame(tabela_dashboard)
+            st.dataframe(df_areas, use_container_width=True)
             st.divider()
-            st.subheader("📦 Gráfico de Estoque")
-            st.bar_chart(df_estoque.set_index("Insumo")["Quantidade"])
+            st.subheader("📊 Produtividade por Talhão")
+            st.bar_chart(df_areas.set_index("Talhão")["Meta sc/ha"])
+
+        if total_estoque > 0:
+            df_estoque = pd.DataFrame(st.session_state.estoque)
+            if "Insumo" in df_estoque.columns and "Quantidade" in df_estoque.columns:
+                st.divider()
+                st.subheader("📦 Estoque por Produto")
+                st.bar_chart(df_estoque.set_index("Insumo")["Quantidade"])
 
 
 # ─────────────────────────────────────────────
 # MENU: ÁREAS CADASTRADAS
 # ─────────────────────────────────────────────
-elif menu == "Áreas Cadastradas":
+elif menu == "🌾 Lavoura":
+    _sub_lav = st.tabs(["➕ Cadastro da Área","📍 Áreas Cadastradas","🗺️ Mapa de Fertilidade","🌧️ Pluviômetro","📈 Histórico de Produtividade"])
+
+if menu == "🌾 Lavoura":
+  with _sub_lav[1]:
     st.header("Áreas Cadastradas")
 
     if len(st.session_state.areas) == 0:
@@ -2799,20 +4198,31 @@ elif menu == "Áreas Cadastradas":
         st.dataframe(tabela_areas, use_container_width=True)
 
         opcoes = [f"{area['ID']} - {area['Talhão']} - {area['Cultura']}" for area in st.session_state.areas]
-        escolha = st.selectbox("Selecionar área para trabalhar", opcoes)
+        escolha = st.selectbox("Selecionar área para trabalhar", opcoes, key="sel_selecionar__rea_2910")
 
         if st.button("Carregar Área Selecionada"):
             indice = opcoes.index(escolha)
             area   = st.session_state.areas[indice]
             st.session_state.id_area          = area["ID"]
             st.session_state.area_selecionada = area["ID"]
-            st.session_state.dados            = area.get("Dados", area.get("dados", {})).copy()
+            # Carrega dados completos da área (inclui análise de solo)
+            _dados_area = area.get("Dados", area.get("dados", {}))
+            st.session_state.dados = _dados_area.copy() if _dados_area else {}
             if "id_area" not in st.session_state.dados:
                 st.session_state.dados["id_area"] = area["ID"]
+            # Garante que campos da área estejam nos dados
+            st.session_state.dados.update({
+                "cultura":       area.get("Cultura", st.session_state.dados.get("cultura","Soja")),
+                "area":          area.get("Hectares", st.session_state.dados.get("area",0)),
+                "produtividade": area.get("Produtividade", st.session_state.dados.get("produtividade",50)),
+                "fazenda":       area.get("Fazenda", st.session_state.dados.get("fazenda","")),
+                "talhao":        area.get("Talhão", st.session_state.dados.get("talhao","")),
+            })
             st.session_state.aplicacoes = area.get("Aplicacoes", []).copy()
             st.session_state.estoque    = area.get("Estoque", []).copy()
             salvar_dados_iaagro()
-            success_box(f"Área {area['ID']} carregada com sucesso.")
+            success_box(f"✅ Área {area['ID']} carregada! {('Análise de solo disponível ✅' if 'ph' in st.session_state.dados else 'Sem análise de solo ainda.')}")
+            st.rerun()
 
         st.divider()
         st.subheader("Excluir Área Individual")
@@ -2845,22 +4255,18 @@ elif menu == "Áreas Cadastradas":
 # ─────────────────────────────────────────────
 # MENU: CADASTRO DA ÁREA
 # ─────────────────────────────────────────────
-elif menu == "Cadastro da Área":
+if menu == "🌾 Lavoura":
+  with _sub_lav[0]:
     st.header("Cadastro da Área")
 
-    fazenda   = st.text_input("Nome da fazenda",  st.session_state.dados.get("fazenda", ""))
-    talhao    = st.text_input("Nome do talhão",   st.session_state.dados.get("talhao", ""))
-    matricula = st.text_input("Matrícula da Área", st.session_state.dados.get("matricula", ""))
-    cidade    = st.text_input("Cidade / Estado",   st.session_state.dados.get("cidade", ""))
+    fazenda   = st.text_input("Nome da fazenda",  st.session_state.dados.get("fazenda", ""), key="txt_nome_da_fazenda_2960")
+    talhao    = st.text_input("Nome do talhão",   st.session_state.dados.get("talhao", ""), key="txt_nome_do_talh_o_2961")
+    matricula = st.text_input("Matrícula da Área", st.session_state.dados.get("matricula", ""), key="txt_matr_cula_da__r_2962")
+    cidade    = st.text_input("Cidade / Estado",   st.session_state.dados.get("cidade", ""), key="txt_cidade___estado_2963")
     area      = st.number_input("Área do talhão em hectares", min_value=0.0,
                                 value=float(st.session_state.dados.get("area", 10.0)))
 
-    culturas_disponiveis = [
-        "Soja","Milho","Trigo","Feijão","Canola","Aveia","Cana-de-açúcar",
-        "Arroz","Sorgo","Girassol","Cevada","Pastagem","Algodão","Café",
-        "Tabaco","Mandioca","Batata","Tomate","Cebola","Alho","Uva",
-        "Maçã","Laranja","Banana","Eucalipto","Pinus"
-    ]
+    culturas_disponiveis = get_culturas()
     config_culturas = {
         "Soja":          {"ph_ideal":"5.8 - 6.5","chuva_ideal":"450 - 800 mm","produtividade_media":65,"nutriente_principal":"Potássio"},
         "Milho":         {"ph_ideal":"5.5 - 6.8","chuva_ideal":"500 - 800 mm","produtividade_media":180,"nutriente_principal":"Nitrogênio"},
@@ -2942,7 +4348,10 @@ elif menu == "Cadastro da Área":
                     'Dica: use Google Maps para obter as coordenadas da área.</div>',
                     unsafe_allow_html=True)
 
-    if st.button("Salvar Nova Área"):
+    pode, usado, limite = verificar_limite("areas")
+    if not pode:
+        bloco_upgrade("areas", usado, limite)
+    elif st.button("Salvar Nova Área"):
         id_area  = f"AREA-{st.session_state.contador_area:03d}"
         nova_area = {
             "ID": id_area,
@@ -2991,33 +4400,100 @@ elif menu == "Cadastro da Área":
 # ─────────────────────────────────────────────
 # MENU: HISTÓRICO DE PRODUTIVIDADE
 # ─────────────────────────────────────────────
-elif menu == "Histórico de Produtividade":
+if menu == "🌾 Lavoura":
+  with _sub_lav[4]:
     st.header("📈 Histórico de Produtividade")
 
     if len(st.session_state.areas) == 0:
         warning_box("Cadastre uma área primeiro.")
     else:
-        lista_areas = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-        area_escolhida     = st.selectbox("Selecione a Área", lista_areas)
-        safra              = st.text_input("Safra", placeholder="2024/2025")
-        produtividade_real = st.number_input("Produtividade Real (sc/ha)", min_value=0.0, value=60.0)
-        custo_total        = st.number_input("Custo Total por hectare (R$)", min_value=0.0, value=0.0)
-        observacoes        = st.text_area("Observações da Safra")
+        lista_areas        = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
+        area_escolhida     = st.selectbox("Selecione a Área", lista_areas, key="sel_selecione_a__re_3106")
+        safra              = st.text_input("Safra", placeholder="2024/2025", key="txt_safra_3107")
 
-        if st.button("Salvar Histórico"):
+        # Cultura colhida — com ícones
+        _culturas_hist = get_culturas()
+        # Pega cultura da área selecionada como padrão
+        _id_hist = area_escolhida.split(" - ")[0]
+        _area_hist_obj = next((a for a in st.session_state.areas if a.get("ID") == _id_hist), None)
+        _cult_padrao = _area_hist_obj.get("Cultura", _culturas_hist[0]) if _area_hist_obj else _culturas_hist[0]
+        _idx_cult = _culturas_hist.index(_cult_padrao) if _cult_padrao in _culturas_hist else 0
+        cultura_colhida = st.selectbox("Cultura colhida", _culturas_hist,
+                                        index=_idx_cult, key="sel_cultura_hist")
+
+        produtividade_real = st.number_input("Produtividade Real (sc/ha)", min_value=0.0, value=60.0, key="num_produtividade_r_3108")
+        custo_total        = st.number_input("Custo Total por hectare (R$)", min_value=0.0, value=0.0, key="num_custo_total_por_3109")
+        observacoes        = st.text_area("Observações da Safra", key="txa_observa__es_da__3110")
+
+        if st.button("💾 Salvar Histórico", key="btn_salvar_hist", use_container_width=True):
             st.session_state.historico_produtividade.append({
                 "Área": area_escolhida, "Safra": safra,
+                "Cultura": cultura_colhida,
                 "Produtividade": produtividade_real,
                 "Custo": custo_total, "Observações": observacoes
             })
             salvar_dados_iaagro()
-            success_box("Histórico salvo com sucesso!")
+            success_box(f"Histórico salvo! {get_icone_cultura(cultura_colhida)} {cultura_limpa(cultura_colhida)} — {produtividade_real} sc/ha")
+            st.rerun()
 
         if len(st.session_state.historico_produtividade) > 0:
             df_hist = pd.DataFrame(st.session_state.historico_produtividade)
+            if "Cultura" not in df_hist.columns:
+                df_hist["Cultura"] = "—"
+
+            # ── Botão atualizar registro ──────────────────
+            st.divider()
+            st.subheader("✏️ Atualizar Registro")
+            _opcoes_hist = [
+                f"{i+1}. {r.get('Área','')} | {r.get('Safra','')} | {cultura_limpa(r.get('Cultura',''))} | {r.get('Produtividade',0)} sc/ha"
+                for i, r in enumerate(st.session_state.historico_produtividade)
+            ]
+            _sel_hist = st.selectbox("Selecione o registro para editar", _opcoes_hist, key="sel_hist_editar")
+            _idx_edit = _opcoes_hist.index(_sel_hist)
+            _reg_edit = st.session_state.historico_produtividade[_idx_edit]
+
+            col_e1, col_e2, col_e3 = st.columns(3)
+            with col_e1:
+                _safra_e  = st.text_input("Safra", value=_reg_edit.get("Safra",""), key="txt_hist_safra_edit")
+                _cult_e_list = get_culturas()
+                _cult_e_val  = _reg_edit.get("Cultura", _cult_e_list[0])
+                _cult_e_idx  = _cult_e_list.index(_cult_e_val) if _cult_e_val in _cult_e_list else 0
+                _cult_e   = st.selectbox("Cultura", _cult_e_list, index=_cult_e_idx, key="sel_hist_cult_edit")
+            with col_e2:
+                _prod_e   = st.number_input("Produtividade (sc/ha)", min_value=0.0,
+                                             value=float(_reg_edit.get("Produtividade",0)), key="num_hist_prod_edit")
+                _custo_e  = st.number_input("Custo (R$/ha)", min_value=0.0,
+                                             value=float(_reg_edit.get("Custo",0)), key="num_hist_custo_edit")
+            with col_e3:
+                _obs_e    = st.text_area("Observações", value=_reg_edit.get("Observações",""),
+                                          key="txt_hist_obs_edit", height=100)
+
+            col_btn1, col_btn2 = st.columns(2)
+            if col_btn1.button("💾 Atualizar Registro", key="btn_hist_atualizar", use_container_width=True):
+                st.session_state.historico_produtividade[_idx_edit] = {
+                    "Área":          _reg_edit.get("Área",""),
+                    "Safra":         _safra_e,
+                    "Cultura":       _cult_e,
+                    "Produtividade": _prod_e,
+                    "Custo":         _custo_e,
+                    "Observações":   _obs_e,
+                }
+                salvar_dados_iaagro()
+                success_box("✅ Registro atualizado!")
+                st.rerun()
+
+            if col_btn2.button("🗑️ Excluir Registro", key="btn_hist_excluir", use_container_width=True):
+                st.session_state.historico_produtividade.pop(_idx_edit)
+                salvar_dados_iaagro()
+                success_box("Registro excluído!")
+                st.rerun()
+
+            # ── Tabela e gráfico ──────────────────────────
+            st.divider()
+            st.subheader("📋 Todos os Registros")
             st.dataframe(df_hist, use_container_width=True)
             st.subheader("📊 Evolução Produtiva")
-            area_filtro = st.selectbox("Filtrar gráfico por área", df_hist["Área"].unique())
+            area_filtro = st.selectbox("Filtrar gráfico por área", df_hist["Área"].unique(), key="sel_filtrar_gr_fico_3125")
             df_area     = df_hist[df_hist["Área"] == area_filtro]
             grafico     = df_area.pivot_table(index="Safra", values="Produtividade", aggfunc="mean")
             st.line_chart(grafico)
@@ -3033,14 +4509,15 @@ elif menu == "Histórico de Produtividade":
 # ─────────────────────────────────────────────
 # MENU: PLUVIÔMETRO
 # ─────────────────────────────────────────────
-elif menu == "Pluviômetro":
+if menu == "🌾 Lavoura":
+  with _sub_lav[3]:
     st.header("🌧️ Pluviômetro Inteligente")
 
     if len(st.session_state.areas) == 0:
         warning_box("Cadastre uma área primeiro.")
     else:
-        lista_areas  = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-        area_chuva   = st.selectbox("Selecione a Área", lista_areas)
+        lista_areas   = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
+        area_chuva    = st.selectbox("Selecione a Área", lista_areas, key="sel_area_chuva_pluvio")
         id_area_chuva = area_chuva.split(" - ")[0]
         area_obj      = next((a for a in st.session_state.areas if a["ID"] == id_area_chuva), {})
         cultura_chuva = area_obj.get("Cultura", "Soja")
@@ -3050,77 +4527,210 @@ elif menu == "Pluviômetro":
             "Aveia":80.0,"Cana-de-açúcar":180.0,"Arroz":180.0,"Sorgo":90.0,
             "Girassol":90.0,"Cevada":80.0,"Pastagem":120.0,"Algodão":130.0,
             "Café":140.0,"Tabaco":110.0,"Mandioca":100.0,"Batata":100.0,
-            "Tomate":120.0,"Cebola":80.0,"Alho":70.0,"Uva":80.0,"Maçã":100.0,
-            "Laranja":130.0,"Banana":180.0,"Eucalipto":120.0,"Pinus":100.0
         }
-        chuva_ideal_auto = chuva_ideal_padrao.get(cultura_chuva, 120.0)
-        st.markdown(f'<div style="background:#0f3460;color:#ffffff;padding:12px 18px;border-radius:10px;font-weight:600;font-size:15px;border:1px solid #3b82f6;">🌱 <b>Cultura:</b> {cultura_chuva} &nbsp;|&nbsp; 🌧️ <b>Chuva ideal estimada:</b> {chuva_ideal_auto} mm</div>', unsafe_allow_html=True)
+        chuva_ideal_mes = chuva_ideal_padrao.get(cultura_limpa(cultura_chuva), 120.0)
 
-        mes        = st.selectbox("Mês", ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-                                          "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"])
-        chuva_real = st.number_input("Chuva acumulada (mm)", min_value=0.0, value=0.0)
-        chuva_ideal = st.number_input("Chuva ideal da cultura (mm)", min_value=0.0, value=chuva_ideal_auto)
+        st.markdown(f"""
+        <div style='background:#0f3460;color:#fff;padding:10px 16px;border-radius:8px;
+        border:1px solid #3b82f6;margin-bottom:12px;'>
+        🌱 <b>Cultura:</b> {cultura_chuva} &nbsp;|&nbsp;
+        🌧️ <b>Chuva ideal/mês:</b> {chuva_ideal_mes} mm
+        </div>
+        """, unsafe_allow_html=True)
 
-        if chuva_real < chuva_ideal * 0.7:
-            perda  = round((chuva_ideal - chuva_real) * 0.15, 1)
-            status = "⚠️ Déficit hídrico"
-        elif chuva_real > chuva_ideal * 1.3:
-            perda  = round((chuva_real - chuva_ideal) * 0.08, 1)
-            status = "⚠️ Excesso de chuva"
-        else:
-            perda  = 0
-            status = "✅ Chuva adequada"
+        # ── Registro diário ──────────────────────────────────
+        st.subheader("➕ Registrar Chuva Diária")
+        col_d1, col_d2, col_d3 = st.columns(3)
+        with col_d1:
+            data_chuva = st.date_input("Data", value=datetime.now().date(), key="date_chuva_diaria")
+        with col_d2:
+            mm_dia = st.number_input("Precipitação (mm)", min_value=0.0, max_value=500.0,
+                                      value=0.0, step=0.1, key="num_mm_dia",
+                                      help="Leitura do pluviômetro de campo")
+        with col_d3:
+            obs_dia = st.text_input("Observação", placeholder="Ex: Chuva forte tarde",
+                                     key="txt_obs_chuva")
 
-        percentual = min(chuva_real / chuva_ideal, 1.0) if chuva_ideal > 0 else 0.0
-        st.subheader("🌧️ Nível de Chuva")
-        st.progress(percentual)
-        st.write(f"{round(percentual * 100)}% da chuva ideal atingida")
-        st.subheader("📊 Diagnóstico Climático")
-        st.metric("Perda estimada", f"{perda}%")
-        info_box(status)
-
-        if st.button("Salvar Registro de Chuva"):
-            st.session_state.pluviometro.append({
-                "Área": area_chuva, "Mês": mes,
-                "Chuva Real": chuva_real, "Chuva Ideal": chuva_ideal,
-                "Perda Estimada": perda, "Status": status
-            })
-            salvar_dados_iaagro()
-            success_box("Registro salvo com sucesso!")
-
-        if len(st.session_state.pluviometro) > 0:
-            df_chuva      = pd.DataFrame(st.session_state.pluviometro)
-            st.subheader("📋 Histórico de Chuvas")
-            st.dataframe(df_chuva, use_container_width=True)
-            st.subheader("📈 Chuva Real x Chuva Ideal")
-            df_chuva_area = df_chuva[df_chuva["Área"] == area_chuva]
-            grafico_chuva = df_chuva_area.set_index("Mês")[["Chuva Real","Chuva Ideal"]]
-            st.line_chart(grafico_chuva)
-            st.subheader("🤖 Previsão IAAgro de Quebra de Safra")
-            perda_media       = df_chuva_area["Perda Estimada"].mean()
-            chuva_total       = df_chuva_area["Chuva Real"].sum()
-            chuva_ideal_total = df_chuva_area["Chuva Ideal"].sum()
-            if perda_media >= 15:
-                risco_safra = "🔴 Alto risco de quebra produtiva"
-                recomendacao_ia = "Reavaliar meta produtiva, reforçar monitoramento da lavoura e ajustar investimento."
-            elif perda_media >= 7:
-                risco_safra = "🟡 Risco moderado de quebra produtiva"
-                recomendacao_ia = "Acompanhar fases críticas da cultura e observar estresse hídrico."
+        if st.button("💾 Registrar", key="btn_reg_chuva", use_container_width=True):
+            if mm_dia > 0 or obs_dia:
+                _reg = {
+                    "area_id":  id_area_chuva,
+                    "area":     area_chuva,
+                    "data":     str(data_chuva),
+                    "ano":      data_chuva.year,
+                    "mes":      data_chuva.month,
+                    "mes_nome": ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                                 "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"][data_chuva.month],
+                    "mm":       round(mm_dia, 1),
+                    "obs":      obs_dia,
+                }
+                st.session_state.pluviometro.append(_reg)
+                salvar_dados_iaagro()
+                success_box(f"✅ {mm_dia} mm registrado em {data_chuva.strftime('%d/%m/%Y')}")
             else:
-                risco_safra = "🟢 Baixo risco climático até o momento"
-                recomendacao_ia = "Condição hídrica dentro de faixa aceitável."
-            col1, col2, col3 = st.columns(3)
-            col1.metric("🌧️ Chuva Total",  f"{chuva_total:.1f} mm")
-            col2.metric("🎯 Ideal Total",  f"{chuva_ideal_total:.1f} mm")
-            col3.metric("📉 Perda Média",  f"{perda_media:.1f}%")
-            info_box(risco_safra)
-            warning_box(recomendacao_ia)
+                warning_box("Digite a quantidade de chuva.")
+
+        # ── Filtro e acumulado mensal ─────────────────────────
+        _regs = [r for r in st.session_state.pluviometro
+                 if isinstance(r, dict) and r.get("area_id") == id_area_chuva]
+
+        if _regs:
+            import pandas as pd
+            df_pluvio = pd.DataFrame(_regs)
+
+            # Garante colunas necessárias
+            for col in ["data","ano","mes","mes_nome","mm"]:
+                if col not in df_pluvio.columns:
+                    df_pluvio[col] = 0 if col in ["ano","mes","mm"] else ""
+
+            df_pluvio["mm"] = pd.to_numeric(df_pluvio["mm"], errors="coerce").fillna(0)
+            df_pluvio["data_dt"] = pd.to_datetime(df_pluvio["data"], errors="coerce")
+            df_pluvio = df_pluvio.sort_values("data_dt", ascending=False)
+
+            # ── Acumulado mensal automático ──────────────────
+            st.subheader("📊 Acumulado Mensal")
+            df_mensal = (df_pluvio.groupby(["ano","mes","mes_nome"])["mm"]
+                         .sum().reset_index()
+                         .sort_values(["ano","mes"]))
+            df_mensal["ideal"] = chuva_ideal_mes
+            df_mensal["%ideal"] = (df_mensal["mm"] / chuva_ideal_mes * 100).round(1)
+            df_mensal["status"] = df_mensal["%ideal"].apply(
+                lambda x: "✅ Adequado" if 70<=x<=130
+                else ("⚠️ Déficit" if x < 70 else "⚠️ Excesso")
+            )
+            df_mensal["Período"] = df_mensal["mes_nome"].astype(str) + "/" + df_mensal["ano"].astype(str)
+
+            # Cards dos últimos 3 meses
+            _ultimos = df_mensal.tail(3).to_dict("records")
+            cols_m = st.columns(len(_ultimos))
+            for idx_m, row in enumerate(_ultimos):
+                _cor = "#14532d" if "Adequado" in row["status"] else "#78350f"
+                cols_m[idx_m].markdown(f"""
+                <div style='background:{_cor};border-radius:10px;padding:12px;text-align:center;'>
+                <b style='color:#fff;font-size:13px;'>{row['Período']}</b><br>
+                <span style='color:#fff;font-size:22px;font-weight:800;'>{row['mm']:.1f} mm</span><br>
+                <span style='color:#d1fae5;font-size:11px;'>{row['%ideal']}% do ideal</span><br>
+                <span style='color:#fde68a;font-size:11px;'>{row['status']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Gráfico acumulado mensal
+            if len(df_mensal) > 0:
+                st.markdown("**Chuva acumulada vs ideal por mês:**")
+                _chart_data = df_mensal.set_index("Período")[["mm","ideal"]]
+                _chart_data.columns = ["Chuva Real (mm)","Ideal (mm)"]
+                st.bar_chart(_chart_data)
+
+            # ── Registros diários ────────────────────────────
+            st.subheader("📋 Registros Diários")
+
+            # Filtro por mês/ano
+            _anos  = sorted(df_pluvio["ano"].dropna().unique().tolist(), reverse=True)
+            _meses_nomes = ["Todos","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                            "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+            col_f1, col_f2 = st.columns(2)
+            _ano_sel = col_f1.selectbox("Filtrar ano", ["Todos"] + [str(int(a)) for a in _anos], key="sel_ano_pluvio")
+            _mes_sel = col_f2.selectbox("Filtrar mês", _meses_nomes, key="sel_mes_pluvio")
+
+            df_filtrado = df_pluvio.copy()
+            if _ano_sel != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["ano"] == int(_ano_sel)]
+            if _mes_sel != "Todos":
+                _mes_num = _meses_nomes.index(_mes_sel)
+                df_filtrado = df_filtrado[df_filtrado["mes"] == _mes_num]
+
+            # Resumo do filtro
+            _total_filtro = df_filtrado["mm"].sum()
+            _dias_chuva   = (df_filtrado["mm"] > 0).sum()
+            _media_dia    = df_filtrado[df_filtrado["mm"]>0]["mm"].mean() if _dias_chuva > 0 else 0
+
+            col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+            col_r1.metric("🌧️ Total", f"{_total_filtro:.1f} mm")
+            col_r2.metric("📅 Dias c/ chuva", f"{_dias_chuva}")
+            col_r3.metric("📊 Média/dia", f"{_media_dia:.1f} mm")
+            col_r4.metric("🎯 % do ideal", f"{_total_filtro/chuva_ideal_mes*100:.0f}%" if _mes_sel != "Todos" else "-")
+
+            # Tabela diária
+            _cols_exib = ["data","mm","obs"] if "obs" in df_filtrado.columns else ["data","mm"]
+            _df_show = df_filtrado[_cols_exib].copy()
+            _df_show.columns = ["Data","mm","Obs"] if len(_cols_exib) == 3 else ["Data","mm"]
+            st.dataframe(_df_show.head(60), use_container_width=True)
+
+            # Excluir registro
+            with st.expander("🗑️ Excluir registro"):
+                _datas_disp = df_pluvio["data"].tolist()
+                if _datas_disp:
+                    _data_del = st.selectbox("Selecione a data para excluir",
+                                              _datas_disp, key="sel_del_chuva")
+                    if st.button("🗑️ Excluir", key="btn_del_chuva"):
+                        st.session_state.pluviometro = [
+                            r for r in st.session_state.pluviometro
+                            if not (isinstance(r, dict) and
+                                    r.get("data") == _data_del and
+                                    r.get("area_id") == id_area_chuva)
+                        ]
+                        salvar_dados_iaagro()
+                        success_box("Registro excluído!")
+                        st.rerun()
+
+            # ── Análise de risco ─────────────────────────────
+            st.subheader("🤖 Análise de Risco Hídrico")
+            _mensal_recente = df_mensal.tail(3)["mm"].tolist()
+            _media_3m = sum(_mensal_recente)/len(_mensal_recente) if _mensal_recente else 0
+            _desvio   = abs(_media_3m - chuva_ideal_mes) / chuva_ideal_mes * 100 if chuva_ideal_mes > 0 else 0
+
+            # Estimativa de perda por déficit ou excesso (igual ao modelo anterior)
+            if _media_3m < chuva_ideal_mes * 0.7:
+                _perda_est = round((_chuva_ideal_mes - _media_3m) * 0.15, 1) if hasattr(locals(), '_chuva_ideal_mes') else round((chuva_ideal_mes - _media_3m) * 0.15, 1)
+                _perda_est = round((chuva_ideal_mes - _media_3m) * 0.15, 1)
+                _status_h  = "⚠️ Déficit hídrico"
+                _risco     = "🔴 Alto risco hídrico — avaliar seguro agrícola"
+                _rec       = f"Déficit médio de {chuva_ideal_mes - _media_3m:.0f} mm/mês. Perda estimada: {_perda_est}%. Reavaliar meta produtiva."
+            elif _media_3m > chuva_ideal_mes * 1.3:
+                _perda_est = round((_media_3m - chuva_ideal_mes) * 0.08, 1)
+                _status_h  = "⚠️ Excesso de chuva"
+                _risco     = "🟡 Risco por excesso hídrico"
+                _rec       = f"Excesso médio de {_media_3m - chuva_ideal_mes:.0f} mm/mês. Perda estimada: {_perda_est}%. Monitorar doenças fúngicas e erosão."
+            else:
+                _perda_est = 0
+                _status_h  = "✅ Chuva adequada"
+                _risco     = "🟢 Condição hídrica adequada"
+                _rec       = "Precipitação dentro da faixa ideal para a cultura."
+
+            # Métricas de risco
+            _col_r1, _col_r2, _col_r3 = st.columns(3)
+            _col_r1.metric("🌧️ Média 3 meses", f"{_media_3m:.1f} mm")
+            _col_r2.metric("🎯 Ideal/mês", f"{chuva_ideal_mes} mm")
+            _col_r3.metric("📉 Perda estimada", f"{_perda_est}%",
+                           help="Estimativa de impacto na produtividade por déficit ou excesso hídrico")
+
+            info_box(_risco)
+            st.caption(_rec)
+
+            # Progresso do mês atual
+            _hoje = datetime.now()
+            _regs_mes_atual = [r for r in _regs
+                               if isinstance(r, dict)
+                               and r.get("mes") == _hoje.month
+                               and r.get("ano") == _hoje.year]
+            _total_mes_atual = sum(r.get("mm", 0) for r in _regs_mes_atual)
+            _pct_mes = min(_total_mes_atual / chuva_ideal_mes, 1.0) if chuva_ideal_mes > 0 else 0
+
+            st.subheader(f"📅 {['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][_hoje.month]}/{_hoje.year} — Progresso")
+            st.progress(_pct_mes)
+            st.caption(f"{_total_mes_atual:.1f} mm acumulados de {chuva_ideal_mes} mm ideais ({_pct_mes*100:.0f}%)")
+
+        else:
+            st.info("📝 Nenhum registro de chuva para esta área ainda. Registre a primeira leitura acima!")
+
+
 
 
 # ─────────────────────────────────────────────
 # MENU: MAPA DE FERTILIDADE
 # ─────────────────────────────────────────────
-elif menu == "Mapa de Fertilidade":
+if menu == "🌾 Lavoura":
+  with _sub_lav[2]:
     st.header("🗺️ Mapa de Fertilidade por Cores")
     st.subheader("🌦️ Mapa Climático dos Talhões")
 
@@ -3134,71 +4744,184 @@ elif menu == "Mapa de Fertilidade":
             historicos_area = [h for h in st.session_state.historico_produtividade if h["Área"].startswith(area["ID"])]
             if len(historicos_area) > 0:
                 media_hist = sum(h["Produtividade"] for h in historicos_area) / len(historicos_area)
-            if dados_area and "ph" in dados_area:
-                score, classe, alertas = score_solo(dados_area)
+
+            # ── Dados de calcário e gesso aplicados ──────
+            _corr       = st.session_state.get("corretivos_aplicados", [])
+            _calc_area  = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="calcario"]
+            _gesso_area = [c for c in _corr if isinstance(c,dict) and c.get("area_id")==area.get("ID","") and c.get("tipo")=="gesso"]
+            _calc_total  = round(sum(c.get("toneladas_ha",0) for c in _calc_area), 2)
+            _gesso_total = round(sum(c.get("toneladas_ha",0) for c in _gesso_area), 2)
+
+            # Usa pH pós-calagem no score se calcário foi aplicado
+            _dados_score = dados_area.copy() if dados_area else {}
+            _ph_orig     = _dados_score.get("ph", 0)
+            _ph_corrigido = _dados_score.get("ph_pos_calagem", _ph_orig)
+
+            # Se tem calcário mas ph_pos_calagem não foi calculado ainda, calcula agora
+            if _calc_total > 0 and _ph_corrigido == _ph_orig and _ph_orig > 0:
+                _elevacao_total = round((_calc_total * 0.75) * 0.3, 2)
+                _ph_corrigido   = min(round(_ph_orig + _elevacao_total, 1), 7.0)
+                _dados_score["ph_pos_calagem"] = _ph_corrigido
+
+            # Usa pH corrigido no score visual
+            if _calc_total > 0 and _ph_corrigido > _ph_orig:
+                _dados_score["ph"] = _ph_corrigido  # score usa pH pós-calagem
+
+            if _dados_score and "ph" in _dados_score:
+                score, classe, alertas = score_solo(_dados_score)
             else:
                 score = 0; classe = "Sem análise"; alertas = ["Sem análise de solo"]
+
             if   score >= 85: cor = "🟢 Verde"
             elif score >= 70: cor = "🟡 Amarelo"
             elif score >= 50: cor = "🟠 Laranja"
             else:             cor = "🔴 Vermelho"
-            registros_area = [r for r in st.session_state.pluviometro if r["Área"] == area.get("ID","")]
+
+            # Status calagem
+            if dados_area and "ph" in dados_area:
+                _dose_rec, _ = calcular_calcario_por_ph(dados_area.get("ph",5.5), area.get("Hectares",1))
+                if _calc_total == 0:
+                    _calc_status = "⚪ Não aplicado"
+                elif _calc_total >= _dose_rec:
+                    _calc_status = "✅ Meta atingida"
+                elif _calc_total >= _dose_rec * 0.5:
+                    _calc_status = "🟡 Parcial"
+                else:
+                    _calc_status = "🔴 Insuficiente"
+                _calc_color = {"✅ Meta atingida":"#14532d","🟡 Parcial":"#78350f",
+                               "🔴 Insuficiente":"#7f1d1d","⚪ Não aplicado":"#1e293b"}
+                _calc_rec_txt = f"{_dose_rec} t/ha"
+            else:
+                _calc_status = "⚪ Sem análise"
+                _calc_color  = {"⚪ Sem análise":"#1e293b"}
+                _calc_rec_txt = "-"
+
+            # ── Clima ────────────────────────────────────
+            registros_area = [r for r in st.session_state.pluviometro
+                              if isinstance(r, dict) and
+                              (r.get("area_id") == area.get("ID","") or
+                               r.get("Área") == area.get("ID",""))]
             if len(registros_area) > 0:
-                perda_media_clima = sum(r["Perda Estimada"] for r in registros_area) / len(registros_area)
+                if "Perda Estimada" in registros_area[0]:
+                    perda_media_clima = sum(r.get("Perda Estimada", 0) for r in registros_area) / len(registros_area)
+                else:
+                    _ideal = 120.0
+                    _meses = {}
+                    for r in registros_area:
+                        _k = f"{r.get('ano',0)}-{r.get('mes',0)}"
+                        _meses[_k] = _meses.get(_k, 0) + r.get("mm", 0)
+                    _perdas = []
+                    for _mm in _meses.values():
+                        if _mm < _ideal * 0.7:   _perdas.append((_ideal - _mm) * 0.15)
+                        elif _mm > _ideal * 1.3: _perdas.append((_mm - _ideal) * 0.08)
+                        else:                    _perdas.append(0)
+                    perda_media_clima = sum(_perdas) / len(_perdas) if _perdas else 0
                 if   perda_media_clima <= 5:  clima_cor = "🟢 Ideal"
                 elif perda_media_clima <= 12: clima_cor = "🟡 Atenção"
                 else:                         clima_cor = "🔴 Crítico"
             else:
                 clima_cor = "⚪ Sem dados"
+
             mapa_dados.append({
-                "ID": area.get("ID",""), "Fazenda": area.get("Fazenda",""),
-                "Talhão": area.get("Talhão",""), "Clima": clima_cor,
-                "Cultura": area.get("Cultura",""), "Área ha": area.get("Hectares",0),
-                "Score": score, "Classe": classe, "Cor": cor,
-                "Alertas": ", ".join(alertas)
+                "ID":             area.get("ID",""),
+                "Fazenda":        area.get("Fazenda",""),
+                "Talhão":         area.get("Talhão",""),
+                "Cultura":        area.get("Cultura",""),
+                "Área ha":        area.get("Hectares",0),
+                "Score":          score,
+                "Classe":         classe,
+                "Cor":            cor,
+                "Clima":          clima_cor,
+                "pH atual":       _ph_orig,
+                "pH pós-calagem": _ph_corrigido,
+                "Calcário t/ha":  _calc_total,
+                "Rec. calcário":  _calc_rec_txt,
+                "Status calagem": _calc_status,
+                "Gesso t/ha":     _gesso_total,
+                "Alertas":        ", ".join(alertas),
             })
+
         df_mapa = pd.DataFrame(mapa_dados)
+
+        # ── Visão geral ──────────────────────────────────
         st.subheader("📍 Visão geral dos talhões")
         st.dataframe(df_mapa, use_container_width=True)
-        st.subheader("🎨 Legenda")
-        st.write("🟢 Verde = solo excelente | 🟡 Amarelo = solo bom | 🟠 Laranja = solo médio | 🔴 Vermelho = solo crítico")
+
+        # ── Cards visuais com calagem ─────────────────────
         st.subheader("🛰️ Mapa Visual dos Talhões")
-        cols = st.columns(3)
+        st.write("🟢 Verde = solo excelente | 🟡 Amarelo = bom | 🟠 Laranja = médio | 🔴 Vermelho = crítico")
+        cols_card = st.columns(3)
         for i, linha in df_mapa.iterrows():
             cor_str = linha["Cor"]
             if "Verde"   in cor_str: fundo = "#16a34a"
             elif "Amarelo" in cor_str: fundo = "#eab308"
             elif "Laranja" in cor_str: fundo = "#f97316"
             else:                      fundo = "#dc2626"
-            with cols[i % 3]:
-                st.markdown(
-                    f"""<div style="background-color:{fundo};padding:18px;border-radius:18px;
-                    margin-bottom:15px;color:white;font-weight:bold;box-shadow:0 4px 12px rgba(0,0,0,0.25);">
-                    <h3>{linha['Talhão']}</h3><p>ID: {linha['ID']}</p>
-                    <p>Cultura: {linha['Cultura']}</p><p>Área: {linha['Área ha']} ha</p>
-                    <p>Classe: {linha['Classe']}</p><p>Score: {linha['Score']}</p>
-                    <p>{linha['Alertas']}</p></div>""",
-                    unsafe_allow_html=True
-                )
-        st.subheader("🌡️ Heatmap de Fertilidade")
-        df_heatmap = df_mapa[["Talhão","Score"]].copy()
-        st.write("Quanto mais alto o score, melhor a fertilidade do talhão.")
+            _cs = linha["Status calagem"]
+            _cc_borda = {"✅ Meta atingida":"#22c55e","🟡 Parcial":"#eab308",
+                         "🔴 Insuficiente":"#ef4444","⚪ Não aplicado":"#64748b",
+                         "⚪ Sem análise":"#64748b"}.get(_cs,"#64748b")
+            with cols_card[i % 3]:
+                st.markdown(f"""
+                <div style="background:{fundo};padding:16px;border-radius:14px;
+                margin-bottom:14px;color:white;font-weight:bold;box-shadow:0 4px 12px rgba(0,0,0,0.25);">
+                <h3 style="margin:0 0 6px 0;">{linha['Talhão']}</h3>
+                <p style="margin:2px 0;">{get_icone_cultura(linha['Cultura'])} {cultura_limpa(linha['Cultura'])} | {linha['Área ha']} ha</p>
+                <p style="margin:2px 0;">📊 Score: {linha['Score']} — {linha['Classe']}</p>
+                <p style="margin:2px 0;">🌧️ Clima: {linha['Clima']}</p>
+                <hr style="border-color:rgba(255,255,255,0.4);margin:8px 0;">
+                <p style="margin:2px 0;border-left:3px solid {_cc_borda};padding-left:8px;">
+                🪨 Calcário: <b>{linha['Calcário t/ha']} t/ha</b> aplicado (rec: {linha['Rec. calcário']})<br>
+                {_cs}<br>
+                🧱 Gesso: <b>{linha['Gesso t/ha']} t/ha</b><br>
+                🧪 pH: {linha['pH atual']} → <b>{linha['pH pós-calagem']}</b> (pós-calagem)
+                </p>
+                <p style="margin:6px 0 0 0;font-size:11px;opacity:0.85;">{linha['Alertas']}</p>
+                </div>""", unsafe_allow_html=True)
 
-        # Colorir manualmente sem depender de matplotlib/cmap
+        # ── Heatmap fertilidade ──────────────────────────
+        st.subheader("🌡️ Heatmap de Fertilidade")
+
         def cor_score(val):
             if val >= 70:   return "background-color: #14532d; color: white"
             elif val >= 40: return "background-color: #78350f; color: white"
             else:           return "background-color: #7f1d1d; color: white"
 
+        def cor_calc(val):
+            try:
+                v = float(val)
+                if v == 0:   return "background-color: #1e293b; color: #94a3b8"
+                elif v >= 2: return "background-color: #14532d; color: white"
+                elif v >= 1: return "background-color: #78350f; color: white"
+                else:        return "background-color: #7f1d1d; color: white"
+            except: return ""
+
+        def cor_ph(val):
+            try:
+                v = float(val)
+                if v >= 6.0: return "background-color: #14532d; color: white"
+                elif v >= 5.5: return "background-color: #78350f; color: white"
+                else:          return "background-color: #7f1d1d; color: white"
+            except: return ""
+
+        _heat_cols = ["Talhão","Score","pH atual","pH pós-calagem","Calcário t/ha","Gesso t/ha","Status calagem"]
+        df_heat = df_mapa[[c for c in _heat_cols if c in df_mapa.columns]].copy()
+
         try:
-            st.dataframe(
-                df_heatmap.style.applymap(cor_score, subset=["Score"]),
-                use_container_width=True
-            )
+            _styled = df_heat.style\
+                .applymap(cor_score, subset=["Score"])\
+                .applymap(cor_ph, subset=["pH atual","pH pós-calagem"])\
+                .applymap(cor_calc, subset=["Calcário t/ha","Gesso t/ha"])
+            st.dataframe(_styled, use_container_width=True)
         except Exception:
-            st.dataframe(df_heatmap, use_container_width=True)
+            st.dataframe(df_heat, use_container_width=True)
+
+        st.caption("🟢 Verde = ótimo | 🟡 Laranja = atenção | 🔴 Vermelho = crítico | ⚫ Cinza = sem dados")
+
+        # ── Ranking ──────────────────────────────────────
         st.subheader("📊 Ranking de Fertilidade")
         st.bar_chart(df_mapa.set_index("Talhão")["Score"])
+
         st.subheader("🛰️ Mapa GPS dos Talhões")
 
         # Coordenadas — prioridade: GPS salvo > área cadastrada > padrão
@@ -3223,7 +4946,7 @@ elif menu == "Mapa de Fertilidade":
                         st.session_state["_gps_mf_lon"] = geo["coords"]["longitude"]
                         st.rerun()
                 except Exception:
-                    pass
+                    pass  # erro silenciado intencionalmente
         if st.session_state.get("_gps_mf_lat"):
             latitude  = st.session_state["_gps_mf_lat"]
             longitude = st.session_state["_gps_mf_lon"]
@@ -3238,36 +4961,92 @@ elif menu == "Mapa de Fertilidade":
         ).add_to(mapa_folium)
         folium.LayerControl(position="topright", collapsed=False).add_to(mapa_folium)
         Draw(
-            draw_options={"polyline":False,"rectangle":True,"circle":False,"marker":False,"circlemarker":False,"polygon":True},
-            edit_options={"edit":True,"remove":True}
+            draw_options={
+                "polyline":     False,
+                "rectangle":    True,
+                "circle":       False,
+                "marker":       False,
+                "circlemarker": False,
+                "polygon": {
+                    "allowIntersection": True,
+                    "showArea": True,
+                    "metric": True,
+                }
+            },
+            edit_options={"edit": True, "remove": True}
         ).add_to(mapa_folium)
         folium.Marker(location=[latitude, longitude], popup="Minha localização",
                       tooltip="Local atual", icon=folium.Icon(color="darkgreen", icon="leaf")
         ).add_to(mapa_folium)
         dados_mapa_folium = st_folium(mapa_folium, width=900, height=500)
         st.subheader("💾 Salvar Desenho do Talhão")
+
+        st.info("💡 **Dica no celular:** Marque os pontos no sentido horário ao redor do talhão, sem cruzar as linhas. Use o botão **Delete last point** para desfazer o último ponto.")
+
         if dados_mapa_folium and dados_mapa_folium.get("last_active_drawing"):
             desenho = dados_mapa_folium["last_active_drawing"]
             coords  = desenho["geometry"]["coordinates"][0]
+
+            # Corrige automaticamente polígonos com bordas cruzadas usando convex hull
+            def convex_hull(points):
+                pts = sorted(set(map(tuple, points)))
+                if len(pts) <= 1: return pts
+                def cross(O, A, B):
+                    return (A[0]-O[0])*(B[1]-O[1]) - (A[1]-O[1])*(B[0]-O[0])
+                lower = []
+                for p in pts:
+                    while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+                        lower.pop()
+                    lower.append(p)
+                upper = []
+                for p in reversed(pts):
+                    while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+                        upper.pop()
+                    upper.append(p)
+                return lower[:-1] + upper[:-1]
+
             def calcular_area_ha(coords):
                 area_val = 0
                 for i in range(len(coords) - 1):
-                    x1, y1 = coords[i]; x2, y2 = coords[i + 1]
+                    x1, y1 = coords[i][0], coords[i][1]
+                    x2, y2 = coords[i+1][0], coords[i+1][1]
                     area_val += (x1 * y2) - (x2 * y1)
                 return abs(area_val) / 2 * 111139 * 111139 / 10000
+
             area_calculada = calcular_area_ha(coords)
             success_box(f"Área calculada automaticamente: {area_calculada:.2f} ha")
+
+            # Seleção da área para vincular o desenho
+            areas_disp = [f"{a.get('Fazenda','')} — {a.get('Talhão','')}" for a in st.session_state.areas]
+            area_vincular = st.selectbox("Vincular desenho à área:", ["— Não vincular —"] + areas_disp, key="sel_area_croqui")
+
             if st.button("Salvar desenho no talhão", key="salvar_desenho_talhao"):
+                pts_hull = convex_hull([[c[0], c[1]] for c in coords])
+                if len(pts_hull) >= 3:
+                    pts_hull.append(pts_hull[0])
+                    desenho["geometry"]["coordinates"][0] = [[p[0], p[1]] for p in pts_hull]
+
+                # Salva no session_state global
                 st.session_state.dados["desenho_talhao"] = desenho
+
+                # Salva também na área específica se selecionada
+                if area_vincular != "— Não vincular —":
+                    idx_area = areas_disp.index(area_vincular)
+                    st.session_state.areas[idx_area]["desenho"] = desenho
+                    st.session_state.areas[idx_area]["area_calculada_ha"] = round(area_calculada, 2)
+
                 salvar_dados_iaagro()
-                success_box("Desenho do talhão salvo com sucesso!")
-        else:
-            info_box("Desenhe um polígono no mapa para salvar.")
+                success_box("✅ Desenho do talhão salvo com sucesso!")
+
 
 # ─────────────────────────────────────────────
 # MENU: ANÁLISE DE SOLO
 # ─────────────────────────────────────────────
-elif menu == "Análise de Solo":
+elif menu == "🧪 Solo & Adubação":
+    _sub_solo = st.tabs(["🧪 Análise de Solo","🔬 Diagnóstico Completo","🌱 Adubação","📄 OCR Laudo de Solo","📊 Evolução da Fertilidade"])
+
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[0]:
     st.header("Análise de Solo")
 
     # Injeta estilo escuro no componente de upload via JS
@@ -3310,7 +5089,7 @@ elif menu == "Análise de Solo":
     }
     </style>
     """, unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("📄 Upload análise de solo", type=["xlsx","csv"])
+    uploaded_file = st.file_uploader("📄 Upload análise de solo", type=["xlsx","csv"], key="upl___upload_an_lis_3464")
     if uploaded_file is not None:
         if uploaded_file.name.endswith(".csv"):
             df_upload = pd.read_csv(uploaded_file)
@@ -3324,28 +5103,91 @@ elif menu == "Análise de Solo":
     else:
         col1, col2, col3 = st.columns(3)
         with col1:
-            ph       = st.number_input("pH do solo", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)))
-            fosforo  = st.number_input("Fósforo P", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)))
-            potassio = st.number_input("Potássio K", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)))
+            ph       = st.number_input("pH do solo (H₂O 1:1)", min_value=3.5, max_value=8.0, value=float(st.session_state.dados.get("ph", 5.5)), key="num_ph_do_solo_3478")
+            fosforo  = st.number_input("Fósforo P (mg/dm³ Mehlich-1)", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)), key="num_f_sforo_p_3479")
+            potassio = st.number_input("Potássio K (mg/dm³ Mehlich-1)", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)), key="num_pot_ssio_k_3480")
         with col2:
-            materia_organica = st.number_input("Matéria orgânica %", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)))
-            calcio   = st.number_input("Cálcio Ca", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)))
-            magnesio = st.number_input("Magnésio Mg", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)))
+            materia_organica = st.number_input("Matéria Orgânica MO (g/dm³)", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)), key="num_mat_ria_org_nic_3482", help="1% = 10 g/dm³")
+            calcio   = st.number_input("Cálcio Ca²⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)), key="num_c_lcio_ca_3483")
+            magnesio = st.number_input("Magnésio Mg²⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)), key="num_magn_sio_mg_3484")
         with col3:
-            aluminio = st.number_input("Alumínio Al", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)))
-            enxofre  = st.number_input("Enxofre S", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)))
-            ctc      = st.number_input("CTC", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)))
+            aluminio = st.number_input("Alumínio Al³⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("aluminio", 0.2)), key="num_alum_nio_al_3486")
+            enxofre  = st.number_input("Enxofre S (mg/dm³)", min_value=0.0, value=float(st.session_state.dados.get("enxofre", 8.0)), key="num_enxofre_s_3487")
+            ctc      = st.number_input("CTC pH7 (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("ctc", 8.0)), key="num_ctc_3488", help="Capacidade de Troca Catiônica")
 
-        st.subheader("Micronutrientes")
+        # ── Cálculo automático de V% e SB ──────────────────
+        sb_calc  = calcio + magnesio + (potassio / 391.0)  # K em cmolc
+        ctc_val  = ctc if ctc > 0 else (sb_calc + aluminio + 2.0)
+        v_calc   = round((sb_calc / ctc_val) * 100, 1) if ctc_val > 0 else 0.0
+        m_calc   = round((aluminio / (sb_calc + aluminio)) * 100, 1) if (sb_calc + aluminio) > 0 else 0.0
+
+        st.markdown(f"""
+        <div style='background:#0f3460;border-radius:8px;padding:10px 16px;border:1px solid #3b82f6;margin:8px 0;'>
+        <b style='color:#3b82f6;'>📊 Calculado automaticamente (CQFS RS/SC 2016)</b><br>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        SB = Ca + Mg + K = <b>{sb_calc:.2f} cmolc/dm³</b> &nbsp;|&nbsp;
+        <b>V% = {v_calc}%</b> {"🟢 Adequado" if v_calc >= 60 else "🟡 Médio" if v_calc >= 45 else "🔴 Baixo"} &nbsp;|&nbsp;
+        <b>m% = {m_calc}%</b> {"🟢 OK" if m_calc < 20 else "🔴 Alto"} &nbsp;|&nbsp;
+        Relação Ca/Mg = <b>{round(calcio/magnesio,1) if magnesio > 0 else '-'}</b>
+        {"✅" if 2<=round(calcio/magnesio,1)<=5 else "⚠️"  if magnesio > 0 else ""}
+        </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── V% manual (se vier do laudo) ──
+        v_laudo = st.number_input("V% do laudo (deixe 0 para usar o calculado)", min_value=0.0, max_value=100.0,
+                                   value=float(st.session_state.dados.get("v_percent", 0.0)), key="num_v_percent",
+                                   help="Saturação por bases — use se o laudo já fornecer o valor")
+        v_final = v_laudo if v_laudo > 0 else v_calc
+
+        st.subheader("🔬 Micronutrientes (mg/dm³ Mehlich-1)")
         col4, col5, col6 = st.columns(3)
         with col4:
-            boro  = st.number_input("Boro B", min_value=0.0, value=float(st.session_state.dados.get("boro", 0.3)))
-            zinco = st.number_input("Zinco Zn", min_value=0.0, value=float(st.session_state.dados.get("zinco", 1.0)))
+            boro  = st.number_input("Boro B", min_value=0.0, value=float(st.session_state.dados.get("boro", 0.3)), key="num_boro_b_3493")
+            zinco = st.number_input("Zinco Zn", min_value=0.0, value=float(st.session_state.dados.get("zinco", 1.0)), key="num_zinco_zn_3494")
         with col5:
-            manganes = st.number_input("Manganês Mn", min_value=0.0, value=float(st.session_state.dados.get("manganes", 5.0)))
-            cobre    = st.number_input("Cobre Cu", min_value=0.0, value=float(st.session_state.dados.get("cobre", 0.5)))
+            manganes = st.number_input("Manganês Mn", min_value=0.0, value=float(st.session_state.dados.get("manganes", 5.0)), key="num_mangan_s_mn_3496")
+            cobre    = st.number_input("Cobre Cu", min_value=0.0, value=float(st.session_state.dados.get("cobre", 0.5)), key="num_cobre_cu_3497")
         with col6:
-            argila = st.number_input("Argila %", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)))
+            ferro    = st.number_input("Ferro Fe", min_value=0.0, value=float(st.session_state.dados.get("ferro", 30.0)), key="num_ferro_fe", help="Referência: >9 mg/dm³")
+            molibdenio = st.number_input("Molibdênio Mo", min_value=0.0, value=float(st.session_state.dados.get("molibdenio", 0.1)), key="num_molibdenio", help="Referência: >0.1 mg/dm³")
+
+        st.subheader("🪨 Análise Física do Solo")
+        col7, col8, col9 = st.columns(3)
+        with col7:
+            argila   = st.number_input("Argila (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("argila", 35.0)), key="num_argila___3499")
+            silte    = st.number_input("Silte (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("silte", 25.0)), key="num_silte")
+        with col8:
+            areia    = st.number_input("Areia total (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("areia", 40.0)), key="num_areia")
+            dens_solo= st.number_input("Densidade do solo (g/cm³)", min_value=0.5, max_value=2.0, value=float(st.session_state.dados.get("dens_solo", 1.2)), key="num_dens_solo", help="Referência: <1.3 g/cm³ para argilosos")
+        with col9:
+            dens_part= st.number_input("Densidade de partículas (g/cm³)", min_value=1.0, max_value=3.5, value=float(st.session_state.dados.get("dens_part", 2.65)), key="num_dens_part", help="Padrão: 2.65 g/cm³")
+            umidade  = st.number_input("Umidade atual (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.dados.get("umidade", 0.0)), key="num_umidade")
+
+        # Calcula porosidade e textura automaticamente
+        _soma_granulo = argila + silte + areia
+        _porosidade = round((1 - dens_solo/dens_part)*100, 1) if dens_part > 0 else 0
+        if argila >= 60:    _textura = "Muito argiloso"
+        elif argila >= 35:  _textura = "Argiloso"
+        elif argila >= 25:  _textura = "Média argilosa"
+        elif argila >= 15:  _textura = "Franco-argiloso"
+        elif silte >= 50:   _textura = "Siltoso"
+        elif areia >= 70:   _textura = "Arenoso"
+        else:               _textura = "Franco"
+
+        if _soma_granulo > 0:
+            st.markdown(f"""
+            <div style='background:#0f3460;border-radius:8px;padding:10px 16px;border:1px solid #22c55e;margin:8px 0;'>
+            <b style='color:#22c55e;'>🪨 Física do Solo calculada</b><br>
+            <span style='color:#f1f5f9;font-size:13px;'>
+            Classe textural: <b>{_textura}</b> &nbsp;|&nbsp;
+            Porosidade total: <b>{_porosidade}%</b>
+            {"🟢 Boa" if _porosidade >= 50 else "🟡 Média" if _porosidade >= 40 else "🔴 Compactado"} &nbsp;|&nbsp;
+            Soma granulométrica: <b>{_soma_granulo:.0f}%</b>
+            {"✅" if 95<=_soma_granulo<=105 else "⚠️ Verificar soma"}
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
 
         # Validação de campos
         erros_val = []
@@ -3370,19 +5212,51 @@ elif menu == "Análise de Solo":
                     "ph": ph, "fosforo": fosforo, "potassio": potassio,
                     "materia_organica": materia_organica, "calcio": calcio, "magnesio": magnesio,
                     "aluminio": aluminio, "enxofre": enxofre, "ctc": ctc,
-                    "boro": boro, "zinco": zinco, "manganes": manganes, "cobre": cobre, "argila": argila
+                    "boro": boro, "zinco": zinco, "manganes": manganes, "cobre": cobre,
+                    "ferro": ferro, "molibdenio": molibdenio,
+                    "argila": argila, "silte": silte, "areia": areia,
+                    "dens_solo": dens_solo, "dens_part": dens_part, "umidade": umidade,
+                    "v_percent": v_final, "saturacao_bases": round(sb_calc, 2),
+                    "textura": _textura, "porosidade": _porosidade,
+                    "saturacao_al": m_calc,
                 })
-                atualizar_area_atual()
-                salvar_dados_iaagro()
-                # Salvar no banco histórico
+                # Calcula score/nota/classe e salva nos dados E na área
                 nota_s  = calcular_nota(st.session_state.dados)
                 score_s, classe_s, _ = score_solo(st.session_state.dados)
+                st.session_state.dados["nota_solo"]   = nota_s
+                st.session_state.dados["score_solo"]  = score_s
+                st.session_state.dados["classe_solo"] = classe_s
+
+                # Salva na área ativa (com chaves padronizadas para Evolução da Fertilidade)
                 id_area_atual = st.session_state.dados.get("id_area","")
+                for i, _a in enumerate(st.session_state.areas):
+                    if _a.get("ID") == id_area_atual:
+                        st.session_state.areas[i]["Dados"]       = st.session_state.dados.copy()
+                        st.session_state.areas[i]["dados"]       = st.session_state.dados.copy()
+                        st.session_state.areas[i]["Nota Solo"]   = nota_s
+                        st.session_state.areas[i]["score_solo"]  = score_s
+                        st.session_state.areas[i]["classe_solo"] = classe_s
+                        # Adiciona ao histórico de análises dentro da área (para Evolução)
+                        import datetime as _dt_solo
+                        _hist_entry = {
+                            "data":             _dt_solo.date.today().isoformat(),
+                            "ph":               ph, "fosforo": fosforo, "potassio": potassio,
+                            "materia_organica": materia_organica, "calcio": calcio,
+                            "magnesio":         magnesio, "aluminio": aluminio,
+                            "ctc":              ctc, "nota": nota_s,
+                            "score":            score_s, "classe": classe_s,
+                        }
+                        _hist_atual = st.session_state.areas[i].get("historico_solo", [])
+                        _hist_atual.append(_hist_entry)
+                        st.session_state.areas[i]["historico_solo"] = _hist_atual
+                        break
+
+                salvar_dados_iaagro()
+                # Tenta salvar no SQLite local também (funciona localmente)
                 if id_area_atual:
                     salvar_analise_solo_db(id_area_atual, st.session_state.dados, nota_s, score_s, classe_s)
-                # Checar alertas de estoque por email
                 checar_alertas_estoque()
-                success_box("Análise salva na área ativa e registrada no histórico!")
+                success_box(f"✅ Análise salva! Score: {score_s}/100 — {classe_s}")
 
         # ── Foto do talhão ──
         st.divider()
@@ -3413,9 +5287,26 @@ elif menu == "Análise de Solo":
 # ─────────────────────────────────────────────
 # MENU: DIAGNÓSTICO COMPLETO
 # ─────────────────────────────────────────────
-elif menu == "Diagnóstico Completo":
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[1]:
     st.header("Diagnóstico Completo")
     d = st.session_state.dados
+    # Busca dados da área com análise se session_state.dados não tiver pH
+    if "ph" not in d and st.session_state.areas:
+        _id_s = st.session_state.get("area_selecionada")
+        for _a in st.session_state.areas:
+            _dad = _a.get("Dados", _a.get("dados", {}))
+            if _dad and "ph" in _dad and (_id_s is None or _a.get("ID") == _id_s):
+                d = {**_dad, "cultura": _a.get("Cultura","Soja"),
+                     "area": _a.get("Hectares",0), "produtividade": _a.get("Produtividade",50)}
+                break
+        if "ph" not in d:  # pega qualquer área com análise
+            for _a in st.session_state.areas:
+                _dad = _a.get("Dados", _a.get("dados", {}))
+                if _dad and "ph" in _dad:
+                    d = {**_dad, "cultura": _a.get("Cultura","Soja"),
+                         "area": _a.get("Hectares",0), "produtividade": _a.get("Produtividade",50)}
+                    break
 
     if "ph" not in d:
         warning_box("Preencha primeiro a análise de solo.")
@@ -3459,7 +5350,9 @@ elif menu == "Diagnóstico Completo":
 
         st.subheader("💰 Inteligência Econômica")
         area          = float(d["area"])
-        preco_soja    = 135
+        _precos_data  = st.session_state.get("precos_data") or {}
+        _soja_sc      = _precos_data.get("soja_sc") or {}
+        preco_soja    = float(_soja_sc.get("preco", 115.0) or 115.0)
         custo_base    = 3200
         receita_estimada = produtividade_ia * preco_soja * area
         lucro_estimado   = receita_estimada - (custo_base * area)
@@ -3486,30 +5379,374 @@ elif menu == "Diagnóstico Completo":
         else:
             success_box("Sem indicação inicial forte para gesso.")
 
+        cultura_diag = d.get("cultura", "Soja")
+        score, classe_score, alertas_score = score_solo(d, cultura_diag)
+
+        # Tabela completa com micronutrientes
+        # Limites EMBRAPA/CQFS RS-SC 2016 por parâmetro
+        def _classif_micro(valor, lim_baixo, lim_medio):
+            if valor == 0: return "—"
+            if   valor < lim_baixo:  return "🔴 Baixo"
+            elif valor < lim_medio:  return "🟡 Médio"
+            else:                    return "🟢 Adequado"
+
         tabela = pd.DataFrame({
-            "Indicador": ["pH","Fósforo","Potássio","Matéria Orgânica","Cálcio","Magnésio","Enxofre","Alumínio","CTC","Argila"],
-            "Valor": [d["ph"],d["fosforo"],d["potassio"],d["materia_organica"],d["calcio"],d["magnesio"],d["enxofre"],d["aluminio"],d["ctc"],d["argila"]],
-            "Classificação": [
-                "Baixo" if d["ph"] < 5.5 else "Adequado",
-                classificar(d["fosforo"],15,30), classificar(d["potassio"],120,200),
-                classificar(d["materia_organica"],3,5), classificar(d["calcio"],3,6),
-                classificar(d["magnesio"],1,2), classificar(d["enxofre"],8,15),
-                "Alto" if d["aluminio"] > 0.3 else "Seguro",
-                classificar(d["ctc"],6,10), classificar(d["argila"],20,40)
+            "Indicador": [
+                "pH","Fósforo (mg/dm³)","Potássio (mg/dm³)",
+                "Matéria Orgânica (%)","Cálcio (cmolc/dm³)","Magnésio (cmolc/dm³)",
+                "Enxofre (mg/dm³)","Alumínio (cmolc/dm³)","CTC (cmolc/dm³)","Argila (%)",
+                "Zinco Zn (mg/dm³)","Boro B (mg/dm³)","Manganês Mn (mg/dm³)","Cobre Cu (mg/dm³)"
+            ],
+            "Valor": [
+                d.get("ph",0), d.get("fosforo",0), d.get("potassio",0),
+                d.get("materia_organica",0), d.get("calcio",0), d.get("magnesio",0),
+                d.get("enxofre",0), d.get("aluminio",0), d.get("ctc",0), d.get("argila",0),
+                d.get("zinco",0), d.get("boro",0), d.get("manganes",0), d.get("cobre",0)
+            ],
+            "Classificação (EMBRAPA)": [
+                "🔴 Baixo" if d.get("ph",0) < 5.5 else ("🟢 Adequado" if d.get("ph",0) <= 6.5 else "🟡 Alto"),
+                _classif_micro(d.get("fosforo",0), 6, 18),
+                _classif_micro(d.get("potassio",0), 60, 150),
+                _classif_micro(d.get("materia_organica",0), 2.5, 4.5),
+                _classif_micro(d.get("calcio",0), 2.0, 4.0),
+                _classif_micro(d.get("magnesio",0), 0.5, 1.5),
+                _classif_micro(d.get("enxofre",0), 5, 10),
+                "🟢 OK" if d.get("aluminio",0) <= 0.3 else ("🟡 Atenção" if d.get("aluminio",0) <= 1.0 else "🔴 Tóxico"),
+                _classif_micro(d.get("ctc",0), 5, 10),
+                _classif_micro(d.get("argila",0), 15, 35),
+                _classif_micro(d.get("zinco",0), 0.6, 1.5),
+                _classif_micro(d.get("boro",0), 0.2, 0.6),
+                _classif_micro(d.get("manganes",0), 1.2, 5.0),
+                _classif_micro(d.get("cobre",0), 0.2, 0.8),
+            ],
+            "Referência EMBRAPA": [
+                "5.8–6.5","6–30 (Mehlich-1)","60–200","2.5–4.5%","2–6","0.5–2",
+                "5–15","<0.3 ideal","6–15","20–60%",
+                "0.6–2.0","0.2–0.6","1.2–5.0","0.2–0.8"
             ]
         })
         st.dataframe(tabela, use_container_width=True)
+
+        # Parecer específico de micronutrientes
+        st.subheader("🔬 Parecer de Micronutrientes")
+        micro_alertas = []
+        zinco_v  = d.get("zinco",0)
+        boro_v   = d.get("boro",0)
+        mn_v     = d.get("manganes",0)
+        cu_v     = d.get("cobre",0)
+        enx_v    = d.get("enxofre",0)
+
+        # Zinco — crítico para milho, soja
+        if zinco_v > 0:
+            if zinco_v < 0.6:
+                micro_alertas.append(("🔴", "Zinco", f"{zinco_v} mg/dm³", "Deficiência crítica — aplicar 2-3 kg/ha ZnSO4 ou quelato", "Milho e soja muito sensíveis"))
+            elif zinco_v < 1.0:
+                micro_alertas.append(("🟡", "Zinco", f"{zinco_v} mg/dm³", "Nível médio — monitorar", "Foliar preventivo em culturas sensíveis"))
+
+        # Boro — crítico para soja, café, algodão
+        if boro_v > 0:
+            if boro_v < 0.2:
+                micro_alertas.append(("🔴", "Boro", f"{boro_v} mg/dm³", "Deficiência — aplicar 1-2 kg/ha B (ácido bórico ou ulexita)", "Soja: afeta enchimento de grãos"))
+            elif boro_v < 0.4:
+                micro_alertas.append(("🟡", "Boro", f"{boro_v} mg/dm³", "Nível baixo-médio — foliar recomendado no florescimento", "Soja, café e algodão"))
+
+        # Manganês — importante pH>6.5 causa deficiência
+        if mn_v > 0:
+            if mn_v < 1.2:
+                micro_alertas.append(("🔴", "Manganês", f"{mn_v} mg/dm³", "Deficiência — verificar pH (>6.5 indisponibiliza Mn)", "Soja mais sensível"))
+            elif mn_v > 20:
+                micro_alertas.append(("🟠", "Manganês", f"{mn_v} mg/dm³", "Nível elevado — pH baixo pode causar toxidez", "Elevar pH com calcário"))
+
+        # Cobre
+        if cu_v > 0 and cu_v < 0.2:
+            micro_alertas.append(("🟡", "Cobre", f"{cu_v} mg/dm³", "Baixo — aplicar CuSO4 0.5-1 kg/ha ou foliar", "Solos orgânicos mais suscetíveis"))
+
+        # Enxofre
+        if enx_v > 0 and enx_v < 5:
+            micro_alertas.append(("🔴", "Enxofre", f"{enx_v} mg/dm³", "Deficiência — usar gesso agrícola ou fertilizante com S", "Soja: 10-20 kg S/ha; Milho: 10-15 kg S/ha"))
+
+        if micro_alertas:
+            for icone, nut, val, rec, obs in micro_alertas:
+                st.markdown(f"""
+                <div style='background:#1e293b;border-radius:10px;padding:12px 16px;
+                margin-bottom:8px;border-left:4px solid {"#ef4444" if icone=="🔴" else "#f59e0b"}'>
+                <b style='color:#f1f5f9;'>{icone} {nut}: {val}</b><br>
+                <span style='color:#22c55e;font-size:13px;'>💊 Recomendação: {rec}</span><br>
+                <span style='color:#94a3b8;font-size:12px;'>📌 {obs}</span>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("✅ Micronutrientes dentro dos limites adequados (EMBRAPA/CQFS RS-SC).")
 
 
 # ─────────────────────────────────────────────
 # MENU: ADUBAÇÃO
 # ─────────────────────────────────────────────
-elif menu == "Adubação":
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[2]:
     st.header("🌱 Adubação Inteligente")
-    d = st.session_state.dados
 
+    # Busca dados da área selecionada — prioridade: area ativa > primeira área
+    d = st.session_state.dados
+    _id_sel = st.session_state.get("area_selecionada")
+
+    # Se dados não têm pH mas há áreas cadastradas, pega da área selecionada
+    if "ph" not in d and st.session_state.areas:
+        for _a in st.session_state.areas:
+            if _id_sel and _a.get("ID") == _id_sel:
+                _dados_area = _a.get("Dados", _a.get("dados", {}))
+                if _dados_area and "ph" in _dados_area:
+                    d = {**_dados_area,
+                         "cultura": _a.get("Cultura", "Soja"),
+                         "area":    _a.get("Hectares", 0),
+                         "produtividade": _a.get("Produtividade", 50)}
+                    break
+        # Se ainda não tem, pega da primeira área com análise
+        if "ph" not in d:
+            for _a in st.session_state.areas:
+                _dados_area = _a.get("Dados", _a.get("dados", {}))
+                if _dados_area and "ph" in _dados_area:
+                    d = {**_dados_area,
+                         "cultura": _a.get("Cultura", "Soja"),
+                         "area":    _a.get("Hectares", 0),
+                         "produtividade": _a.get("Produtividade", 50)}
+                    break
+
+    # Seletor de área quando há múltiplas
+    if st.session_state.areas:
+        _areas_adub = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Cultura','?')})"
+                       for a in st.session_state.areas
+                       if a.get("Dados") and "ph" in a.get("Dados", {})]
+        _areas_sem = [a for a in st.session_state.areas
+                      if not a.get("Dados") or "ph" not in a.get("Dados", {})]
+
+        if _areas_sem and not _areas_adub:
+            warning_box("Preencha a Análise de Solo para ver as recomendações de adubação.")
+        elif _areas_adub:
+            if len(_areas_adub) > 1:
+                _sel_adub = st.selectbox("📍 Área para adubação", _areas_adub, key="sel_area_adubacao")
+            else:
+                _sel_adub = _areas_adub[0]
+            _id_adub  = _sel_adub.split(" — ")[0]
+            _a_obj    = next((a for a in st.session_state.areas if a.get("ID") == _id_adub), None)
+            if _a_obj:
+                _dad = _a_obj.get("Dados", {})
+                if _dad:
+                    d = {**_dad,
+                         "cultura":       _a_obj.get("Cultura", d.get("cultura","Soja")),
+                         "area":          _a_obj.get("Hectares", d.get("area",0)),
+                         "produtividade": _a_obj.get("Produtividade", d.get("produtividade",50))}
+
+    st.divider()
+    st.subheader("🪨 Controle de Calcário e Gesso Aplicados")
+
+    if not st.session_state.areas:
+        warning_box("Cadastre uma área primeiro.")
+    else:
+        # Seletor explícito de área
+        _lista_areas_corr = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Fazenda','?')})"
+                             for a in st.session_state.areas]
+        _sel_area_corr = st.selectbox("📍 Área para corretivos",
+                                       _lista_areas_corr, key="sel_area_corretivos")
+        _id_area_atual = _sel_area_corr.split(" — ")[0]
+        # Inicializa registro de corretivos
+        if "corretivos_aplicados" not in st.session_state:
+            st.session_state.corretivos_aplicados = []
+
+        _corretivos = [c for c in st.session_state.corretivos_aplicados
+                       if isinstance(c, dict) and c.get("area_id") == _id_area_atual]
+
+        # ── Calcário aplicado ────────────────────────────
+        st.markdown("#### 🪨 Calcário")
+        col_ca1, col_ca2, col_ca3 = st.columns(3)
+        with col_ca1:
+            _data_calc = st.date_input("Data aplicação", key="date_calcario_aplic",
+                                        value=datetime.now().date())
+            _toneladas_calc = st.number_input("Quantidade aplicada (t/ha)", min_value=0.0,
+                                               step=0.1, key="num_calc_aplic",
+                                               help="Toneladas por hectare aplicadas")
+        with col_ca2:
+            _prnt_aplic = st.number_input("PRNT do produto (%)", min_value=0.0, max_value=100.0,
+                                           value=75.0, step=1.0, key="num_prnt_aplic",
+                                           help="Verificar na embalagem — padrão 75%")
+            _tipo_calc = st.selectbox("Tipo de calcário",
+                ["Calcário Dolomítico (Ca+Mg — ideal solos com Mg baixo)",
+                 "Calcário Calcítico (só Ca — usar se Mg já adequado)",
+                 "Calcário Magnesiano (predomina Mg)",
+                 "Cal Virgem (CaO — ação rápida)",
+                 "Cal Hidratada (Ca(OH)₂ — ação rápida)",
+                 "Outro"], key="sel_tipo_calc",
+                help="Dolomítico: >12% MgO | Calcítico: <12% MgO (CQFS RS/SC 2016)")
+
+            # Mostra info sobre o tipo escolhido
+            if "Dolomítico" in _tipo_calc:
+                st.caption("🟢 **Dolomítico:** fornece Ca e Mg — recomendado quando Ca/Mg < 2:1 ou Mg < 0.5 cmolc/dm³")
+            elif "Calcítico" in _tipo_calc:
+                st.caption("🔵 **Calcítico:** fornece só Ca — usar quando Mg já está adequado (>1.0 cmolc/dm³)")
+            elif "Magnesiano" in _tipo_calc:
+                st.caption("🟡 **Magnesiano:** predomina Mg — usar em solos com Mg muito baixo")
+        with col_ca3:
+            _incorporado = st.checkbox("Incorporado ao solo", value=True, key="chk_incorporado",
+                                        help="Incorporado com grade ou arado")
+            _obs_calc = st.text_input("Observação", placeholder="Ex: Aplicado antes do plantio",
+                                       key="txt_obs_calc")
+
+        if st.button("💾 Registrar Calcário", key="btn_reg_calc", use_container_width=True):
+            if _toneladas_calc <= 0:
+                st.error(f"❌ Digite a quantidade em t/ha (valor atual: {_toneladas_calc})")
+            elif not _id_area_atual:
+                st.error("❌ Selecione uma área primeiro")
+            else:
+                _reg_calc = {
+                    "area_id":      _id_area_atual,
+                    "tipo":         "calcario",
+                    "produto":      _tipo_calc,
+                    "data":         str(_data_calc),
+                    "toneladas_ha": round(_toneladas_calc, 2),
+                    "prnt":         _prnt_aplic,
+                    "incorporado":  _incorporado,
+                    "obs":          _obs_calc,
+                    "corrigido_em": datetime.now().isoformat(),
+                }
+                st.session_state.corretivos_aplicados.append(_reg_calc)
+                # Atualiza dados DENTRO da área correta no array areas
+                _ph_atual = 5.5
+                for _area_obj in st.session_state.areas:
+                    if _area_obj.get("ID") == _id_area_atual:
+                        _dados_area = _area_obj.get("Dados", _area_obj.get("dados", {}))
+                        _ph_atual   = _dados_area.get("ph", 5.5) if _dados_area else 5.5
+                        break
+                _elevacao = round((_toneladas_calc * _prnt_aplic / 100) * 0.3, 2)
+                _ph_novo  = min(round(_ph_atual + _elevacao, 1), 7.0)
+                # Persiste ph_pos_calagem e calcario_aplicado_ha dentro de cada área
+                for _area_obj in st.session_state.areas:
+                    if _area_obj.get("ID") == _id_area_atual:
+                        if "Dados" not in _area_obj:
+                            _area_obj["Dados"] = {}
+                        _area_obj["Dados"]["ph_pos_calagem"]      = _ph_novo
+                        _area_obj["Dados"]["calcario_aplicado_ha"] = round(
+                            _area_obj["Dados"].get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
+                        break
+                # Atualiza também dados da área ativa se for a mesma
+                if st.session_state.get("area_selecionada") == _id_area_atual:
+                    st.session_state.dados["ph_pos_calagem"]      = _ph_novo
+                    st.session_state.dados["calcario_aplicado_ha"] = round(
+                        st.session_state.dados.get("calcario_aplicado_ha", 0) + _toneladas_calc, 2)
+                salvar_dados_iaagro()
+                success_box(f"✅ {_toneladas_calc} t/ha de {_tipo_calc} registrado! pH estimado pós-calagem: {_ph_novo}")
+                st.rerun()
+                warning_box("Informe a quantidade aplicada.")
+
+        # ── Gesso aplicado ───────────────────────────────
+        st.markdown("#### 🧱 Gesso Agrícola")
+        col_g1, col_g2, col_g3 = st.columns(3)
+        with col_g1:
+            _data_gesso = st.date_input("Data aplicação", key="date_gesso_aplic",
+                                         value=datetime.now().date())
+            _ton_gesso  = st.number_input("Quantidade aplicada (t/ha)", min_value=0.0,
+                                           step=0.1, key="num_gesso_aplic")
+        with col_g2:
+            _tipo_gesso = st.selectbox("Tipo de gesso",
+                ["Gesso Agrícola","FCA (Fosfogesso)","Outro"], key="sel_tipo_gesso")
+            _pureza_gesso = st.number_input("Pureza CaSO₄ (%)", min_value=0.0, max_value=100.0,
+                                             value=85.0, step=1.0, key="num_pureza_gesso")
+        with col_g3:
+            _obs_gesso = st.text_input("Observação", placeholder="Ex: Para subsolagem",
+                                        key="txt_obs_gesso")
+            _prof_gesso = st.selectbox("Profundidade alvo",
+                ["0-20 cm","20-40 cm","40-60 cm","Superficial"], key="sel_prof_gesso")
+
+        if st.button("💾 Registrar Gesso", key="btn_reg_gesso", use_container_width=True):
+            if _ton_gesso > 0:
+                _reg_gesso = {
+                    "area_id":      _id_area_atual,
+                    "tipo":         "gesso",
+                    "produto":      _tipo_gesso,
+                    "data":         str(_data_gesso),
+                    "toneladas_ha": round(_ton_gesso, 2),
+                    "pureza":       _pureza_gesso,
+                    "profundidade": _prof_gesso,
+                    "obs":          _obs_gesso,
+                    "corrigido_em": datetime.now().isoformat(),
+                }
+                st.session_state.corretivos_aplicados.append(_reg_gesso)
+                # Atualiza gesso dentro da área correta
+                for _area_obj in st.session_state.areas:
+                    if _area_obj.get("ID") == _id_area_atual:
+                        if "Dados" not in _area_obj:
+                            _area_obj["Dados"] = {}
+                        _area_obj["Dados"]["gesso_aplicado_ha"] = round(
+                            _area_obj["Dados"].get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
+                        break
+                if st.session_state.get("area_selecionada") == _id_area_atual:
+                    st.session_state.dados["gesso_aplicado_ha"] = round(
+                        st.session_state.dados.get("gesso_aplicado_ha", 0) + _ton_gesso, 2)
+                salvar_dados_iaagro()
+                success_box(f"✅ {_ton_gesso} t/ha de {_tipo_gesso} registrado!")
+                st.rerun()
+            else:
+                warning_box("Informe a quantidade aplicada.")
+
+        # ── Histórico e status por área ──────────────────
+        if _corretivos:
+            import pandas as pd
+            st.markdown("#### 📋 Histórico de Corretivos")
+
+            df_corr = pd.DataFrame(_corretivos)
+            _calc_total = df_corr[df_corr["tipo"]=="calcario"]["toneladas_ha"].sum() if "tipo" in df_corr else 0
+            _gesso_total = df_corr[df_corr["tipo"]=="gesso"]["toneladas_ha"].sum() if "tipo" in df_corr else 0
+
+            # Status vs recomendado
+            _d_atual = st.session_state.dados
+            _ph_atual = _d_atual.get("ph", 5.5)
+            _dose_rec, _ = calcular_calcario_por_ph(_ph_atual, _d_atual.get("area", 1))
+            _, _dose_gesso_rec, _, _ = calcular_gesso(_d_atual)
+            _ph_pos = _d_atual.get("ph_pos_calagem", _ph_atual)
+
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            col_s1.metric("🪨 Calcário aplicado", f"{_calc_total:.2f} t/ha",
+                          delta=f"Rec: {_dose_rec} t/ha")
+            col_s2.metric("🧱 Gesso aplicado", f"{_gesso_total:.2f} t/ha",
+                          delta=f"Rec: {_dose_gesso_rec:.1f} t/ha")
+            col_s3.metric("pH atual", f"{_ph_atual}")
+            col_s4.metric("pH estimado pós-calagem", f"{_ph_pos}",
+                          delta=f"+{round(_ph_pos-_ph_atual,1)}" if _ph_pos > _ph_atual else "sem aplicação")
+
+            # Alertas
+            if _calc_total < _dose_rec * 0.7:
+                st.warning(f"⚠️ Calcário aplicado ({_calc_total:.1f} t/ha) abaixo do recomendado ({_dose_rec} t/ha)")
+            elif _calc_total >= _dose_rec:
+                st.success(f"✅ Meta de calagem atingida! ({_calc_total:.1f}/{_dose_rec} t/ha)")
+
+            if _gesso_total < _dose_gesso_rec * 0.7 and _dose_gesso_rec > 0:
+                st.warning(f"⚠️ Gesso aplicado ({_gesso_total:.1f} t/ha) abaixo do recomendado ({_dose_gesso_rec:.1f} t/ha)")
+            elif _gesso_total >= _dose_gesso_rec and _dose_gesso_rec > 0:
+                st.success(f"✅ Meta de gessagem atingida! ({_gesso_total:.1f}/{_dose_gesso_rec:.1f} t/ha)")
+
+            # Tabela
+            _cols_show = [c for c in ["data","tipo","produto","toneladas_ha","prnt","incorporado","obs"] if c in df_corr.columns]
+            st.dataframe(df_corr[_cols_show].rename(columns={
+                "data":"Data","tipo":"Tipo","produto":"Produto",
+                "toneladas_ha":"t/ha","prnt":"PRNT%","incorporado":"Incorporado","obs":"Obs"
+            }), use_container_width=True)
+
+            # Excluir
+            with st.expander("🗑️ Excluir registro"):
+                _opts = [f"{c.get('data','')} — {c.get('produto','')} — {c.get('toneladas_ha',0)} t/ha"
+                         for c in _corretivos]
+                _del = st.selectbox("Selecione", _opts, key="sel_del_corretivo")
+                if st.button("🗑️ Excluir", key="btn_del_corretivo"):
+                    _idx = _opts.index(_del)
+                    _all = [i for i,c in enumerate(st.session_state.corretivos_aplicados)
+                            if c.get("area_id") == _id_area_atual]
+                    st.session_state.corretivos_aplicados.pop(_all[_idx])
+                    salvar_dados_iaagro()
+                    success_box("Registro excluído!")
+                    st.rerun()
+        else:
+            st.info("📝 Nenhum corretivo registrado para esta área ainda.")
     if "ph" not in d:
-        warning_box("Preencha primeiro o Cadastro da Área e a Análise de Solo.")
+        warning_box("Preencha primeiro a Análise de Solo na aba 🧪 Análise de Solo.")
     else:
         cultura      = d.get("cultura", "Soja")
         area         = d.get("area", 0)
@@ -3565,7 +5802,7 @@ elif menu == "Adubação":
         </div>''', unsafe_allow_html=True)
 
         st.subheader("📍 Taxa Variável Inteligente")
-        zona = st.selectbox("Zona do talhão", ["Baixa Produtividade","Média Produtividade","Alta Produtividade"])
+        zona = st.selectbox("Zona do talhão", ["Baixa Produtividade","Média Produtividade","Alta Produtividade"], key="sel_zona_do_talh_o_3723")
         fator_zona = 0.85 if zona == "Baixa Produtividade" else (1.15 if zona == "Alta Produtividade" else 1.0)
         produtividade_ajustada = produtividade * fator_zona
         n    *= fator_zona
@@ -3580,44 +5817,74 @@ elif menu == "Adubação":
         st.divider()
 
         st.subheader("Recomendação Base")
+        # Recomendação base por cultura (EMBRAPA/IAPAR - Sul do Brasil)
+        # N em kg/ha de N puro; P e K em kg/ha de P2O5 e K2O
         if cultura == "Soja":
+            # Soja fixa N biologicamente - adubação de base é P e K
             n_ha    = 0
-            p2o5_ha = max(40, 100 - fosforo * 2)
-            k2o_ha  = max(40, 120 - potassio * 0.5)
+            p2o5_ha = 120 if fosforo < 9 else (90 if fosforo < 18 else (60 if fosforo < 30 else 40))
+            k2o_ha  = 120 if potassio < 0.15 else (90 if potassio < 0.30 else (60 if potassio < 0.45 else 40))
+            # Ajuste por produtividade meta (sc/ha)
+            if produtividade > 70: p2o5_ha += 20; k2o_ha += 20
         elif cultura == "Milho":
-            n_ha    = max(80, produtividade * 3)
-            p2o5_ha = max(50, 120 - fosforo * 2)
-            k2o_ha  = max(50, 140 - potassio * 0.5)
+            # N parcelado: 1/3 base + 2/3 cobertura; aqui mostra total
+            n_ha    = 30 if produtividade <= 80 else (40 if produtividade <= 120 else 50)  # N base
+            p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else (40 if fosforo < 30 else 30))
+            k2o_ha  = 80 if potassio < 0.15 else (60 if potassio < 0.30 else (40 if potassio < 0.45 else 30))
+            if produtividade > 100: n_ha += 10; p2o5_ha += 20; k2o_ha += 20
+        elif cultura == "Trigo":
+            n_ha    = 30  # N base (30-40 kg/ha); cobertura separada
+            p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else (40 if fosforo < 30 else 30))
+            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else (30 if potassio < 0.45 else 20))
+        elif cultura == "Feijão":
+            n_ha    = 20  # N base
+            p2o5_ha = 100 if fosforo < 9 else (80 if fosforo < 18 else (60 if fosforo < 30 else 40))
+            k2o_ha  = 80 if potassio < 0.15 else (60 if potassio < 0.30 else (40 if potassio < 0.45 else 30))
+        elif cultura == "Canola":
+            n_ha    = 40
+            p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else 40)
+            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else 30)
+        elif cultura == "Aveia":
+            n_ha    = 20
+            p2o5_ha = 60 if fosforo < 9 else (40 if fosforo < 18 else 30)
+            k2o_ha  = 40 if potassio < 0.15 else (30 if potassio < 0.30 else 20)
         else:
-            n_ha    = max(60, produtividade * 2.5)
-            p2o5_ha = max(40, 100 - fosforo * 2)
-            k2o_ha  = max(40, 120 - potassio * 0.5)
-        if materia_organica >= 4:
-            n_ha *= 0.85
+            n_ha    = 30
+            p2o5_ha = 60 if fosforo < 9 else (40 if fosforo < 18 else 30)
+            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else 30)
 
-        map_ha   = p2o5_ha / 0.52
-        kcl_ha   = k2o_ha  / 0.60
-        ureia_ha = n_ha    / 0.45 if n_ha > 0 else 0
+        # Redução de N por matéria orgânica alta
+        if materia_organica >= 3.5:
+            n_ha = max(0, n_ha - 10)
+        if materia_organica >= 5.0:
+            n_ha = max(0, n_ha - 20)
+
+        # Aplicar fator de zona de produtividade
+        n_ha    = round(n_ha    * fator_zona, 1)
+        p2o5_ha = round(p2o5_ha * fator_zona, 1)
+        k2o_ha  = round(k2o_ha  * fator_zona, 1)
+
+        # Converter para produtos comerciais
+        map_ha   = round(p2o5_ha / 0.52, 1)   # MAP 11-52-00: 52% P2O5
+        kcl_ha   = round(k2o_ha  / 0.60, 1)   # KCl 00-00-60: 60% K2O
+        ureia_ha = round(n_ha    / 0.45, 1) if n_ha > 0 else 0  # Ureia 45% N
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Nitrogênio", f"{n:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
-        col2.metric("P₂O₅",      f"{p2o5:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
-        col3.metric("K₂O",       f"{k2o:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
+        col1.metric("Nitrogênio", f"{n_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
+        col2.metric("P₂O₅",      f"{p2o5_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
+        col3.metric("K₂O",       f"{k2o_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
         st.divider()
 
         st.subheader("Produtos Recomendados")
-        map_ha_ajustado  = map_ha  * fator_zona
-        kcl_ha_ajustado  = kcl_ha  * fator_zona
-        ureia_ha_ajustado = ureia_ha * fator_zona
         col1, col2, col3 = st.columns(3)
-        col1.metric("MAP 11-52-00", f"{map_ha_ajustado:.1f} kg/ha")
-        col2.metric("KCl 00-00-60", f"{kcl_ha_ajustado:.1f} kg/ha")
-        col3.metric("Ureia 45% N",  f"{ureia_ha_ajustado:.1f} kg/ha")
+        col1.metric("MAP 11-52-00", f"{map_ha:.1f} kg/ha")
+        col2.metric("KCl 00-00-60", f"{kcl_ha:.1f} kg/ha")
+        col3.metric("Ureia 45% N",  f"{ureia_ha:.1f} kg/ha")
 
         st.subheader("Total para a Área")
-        total_map  = map_ha_ajustado  * area
-        total_kcl  = kcl_ha_ajustado  * area
-        total_ureia = ureia_ha_ajustado * area
+        total_map   = round(map_ha   * area, 1)
+        total_kcl   = round(kcl_ha   * area, 1)
+        total_ureia = round(ureia_ha  * area, 1)
         col1, col2, col3 = st.columns(3)
         col1.metric("MAP Total",   f"{total_map:.1f} kg")
         col2.metric("KCl Total",   f"{total_kcl:.1f} kg")
@@ -3670,6 +5937,7 @@ elif menu == "Adubação":
         else:
             success_box("Micronutrientes em faixa aceitável.")
 
+
         st.divider()
         st.subheader("Salvar Recomendação")
         recomendacao_adubacao = {
@@ -3686,1733 +5954,1881 @@ elif menu == "Adubação":
             success_box("Recomendação de adubação salva com sucesso.")
 
 # ─────────────────────────────────────────────
-# MENU: CUSTOS
+# MENU: OCR LAUDO DE SOLO
 # ─────────────────────────────────────────────
-elif menu == "Custos":
-    st.header("Custos Estimados")
-    d = st.session_state.dados
-
-    if "ph" not in d:
-        warning_box("Preencha primeiro Cadastro da Área e Análise de Solo.")
-    else:
-        dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"])
-        precisa_gesso, dose_gesso, total_gesso, _ = calcular_gesso(d)
-
-        preco_calcario    = st.number_input("Preço calcário R$/t",     min_value=0.0, value=180.0)
-        frete_calcario    = st.number_input("Frete calcário R$/t",     min_value=0.0, value=50.0)
-        aplicacao_calcario = st.number_input("Aplicação calcário R$/ha", min_value=0.0, value=80.0)
-        preco_gesso       = st.number_input("Preço gesso R$/t",        min_value=0.0, value=120.0)
-        frete_gesso       = st.number_input("Frete gesso R$/t",        min_value=0.0, value=50.0)
-        aplicacao_gesso   = st.number_input("Aplicação gesso R$/ha",   min_value=0.0, value=70.0)
-
-        custo_total_calcario = (total_calcario * preco_calcario
-                                + total_calcario * frete_calcario
-                                + d["area"] * aplicacao_calcario)
-        custo_total_gesso    = (total_gesso * preco_gesso
-                                + total_gesso * frete_gesso
-                                + d["area"] * aplicacao_gesso)
-
-        st.divider()
-        st.subheader("💰 Custos Complementares")
-        custo_semente      = st.number_input("Custo sementes R$/ha",       min_value=0.0, step=1.0)
-        custo_fertilizante = st.number_input("Custo fertilizantes R$/ha",  min_value=0.0, step=1.0)
-        custo_defensivos   = st.number_input("Custo defensivos R$/ha",     min_value=0.0, step=1.0)
-        custo_diesel       = st.number_input("Custo diesel/máquinas R$/ha", min_value=0.0, step=1.0)
-        outros_custos      = st.number_input("Outros custos R$/ha",        min_value=0.0, step=1.0)
-
-        custo_operacional_total = (custo_semente + custo_fertilizante + custo_defensivos + custo_diesel + outros_custos) * d["area"]
-        custo_total_safra       = custo_total_calcario + custo_total_gesso + custo_operacional_total
-        custo_por_hectare       = custo_total_safra / d["area"] if d["area"] > 0 else 0
-
-        st.divider()
-        st.subheader("📊 Resumo Financeiro")
-        st.metric("Custo Total Safra",    f"R$ {custo_total_safra:,.2f}")
-        st.metric("Custo por Hectare",    f"R$ {custo_por_hectare:,.2f}/ha")
-
-        if "produtividade" in d:
-            preco_saca   = st.number_input("Preço da saca R$", min_value=0.0, step=1.0)
-            faturamento  = d["produtividade"] * preco_saca * d["area"]
-            lucro        = faturamento - custo_total_safra
-            margem       = (lucro / faturamento * 100) if faturamento > 0 else 0
-            st.metric("Faturamento Estimado", f"R$ {faturamento:,.2f}")
-            st.metric("Lucro Estimado",       f"R$ {lucro:,.2f}")
-            st.metric("Margem Estimada",      f"{margem:.1f}%")
-
-
-# ─────────────────────────────────────────────
-elif menu == "Estoque de Insumos":
-    st.header("📦 Estoque de Insumos")
-    st.subheader("➕ Cadastrar Produto")
-
-    # ── CSS do autocomplete + tema escuro global ─────────────────────────
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[3]:
+    st.header("📄 OCR — Leitura Automática de Laudo de Solo")
     st.markdown("""
-    <style>
-    /* ── Selectbox — fundo escuro igual ao upload ── */
-    div[data-baseweb="select"] > div {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #f1f5f9 !important;
-    }
-    div[data-baseweb="select"] > div:focus-within {
-        border-color: #4ade80 !important;
-        box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
-    }
-    /* Texto dentro do selectbox */
-    div[data-baseweb="select"] span,
-    div[data-baseweb="select"] div {
-        color: #f1f5f9 !important;
-        background-color: transparent !important;
-    }
-    /* Dropdown do selectbox (lista de opções) */
-    ul[data-baseweb="menu"],
-    div[data-baseweb="popover"] > div,
-    div[data-baseweb="menu"] {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-    }
-    /* Itens do selectbox */
-    li[role="option"] {
-        background-color: #0d1b2a !important;
-        color: #f1f5f9 !important;
-    }
-    li[role="option"]:hover,
-    li[role="option"][aria-selected="true"] {
-        background-color: #0f3460 !important;
-        border-left: 3px solid #22c55e !important;
-        color: #6ee7b7 !important;
-    }
-    /* ── Text input — fundo escuro ── */
-    div[data-testid="stTextInput"] input,
-    div[data-testid="stTextArea"] textarea {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #f1f5f9 !important;
-        caret-color: #22c55e !important;
-    }
-    div[data-testid="stTextInput"] input:focus,
-    div[data-testid="stTextArea"] textarea:focus {
-        border-color: #4ade80 !important;
-        box-shadow: 0 0 0 3px rgba(34,197,94,0.2) !important;
-    }
-    div[data-testid="stTextInput"] input::placeholder,
-    div[data-testid="stTextArea"] textarea::placeholder {
-        color: #4a7b6f !important;
-    }
-    /* ── Number input ── */
-    div[data-testid="stNumberInput"] input {
-        background-color: #0d1b2a !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #f1f5f9 !important;
-    }
-    div[data-testid="stNumberInput"] button {
-        background-color: #0f3460 !important;
-        border-color: #22c55e !important;
-        color: #22c55e !important;
-    }
-    /* ── Labels dos inputs ── */
-    div[data-testid="stTextInput"] label,
-    div[data-testid="stSelectbox"] label,
-    div[data-testid="stNumberInput"] label,
-    div[data-testid="stTextArea"] label {
-        color: #22c55e !important;
-        font-weight: 700 !important;
-        font-size: 13px !important;
-    }
-    /* ── Botões gerais ── */
-    div[data-testid="stButton"] > button {
-        background-color: #0f3460 !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 10px !important;
-        color: #ffffff !important;
-        font-weight: 800 !important;
-        font-size: 13px !important;
-        transition: all 0.15s !important;
-        text-shadow: none !important;
-    }
-    div[data-testid="stButton"] > button * {
-        color: #ffffff !important;
-        font-weight: 800 !important;
-    }
-    div[data-testid="stButton"] > button p {
-        color: #ffffff !important;
-        font-weight: 800 !important;
-        font-size: 13px !important;
-    }
-    div[data-testid="stButton"] > button:hover {
-        background-color: #22c55e !important;
-        color: #0d1b2a !important;
-        border-color: #4ade80 !important;
-    }
-    div[data-testid="stButton"] > button:hover *,
-    div[data-testid="stButton"] > button:hover p {
-        color: #0d1b2a !important;
-    }
-    /* ── Botão primário "Usar este produto" / "Analisar" ── */
-    div[data-testid="stButton"] > button[kind="primary"],
-    div[data-testid="stButton"] > button.primary {
-        background-color: #16a34a !important;
-        border-color: #22c55e !important;
-        color: #fff !important;
-    }
-    /* ── Upload widget ── */
-    div[data-testid="stFileUploader"] > div {
-        background-color: #0d1b2a !important;
-        border: 2px dashed #22c55e !important;
-        border-radius: 12px !important;
-        color: #f1f5f9 !important;
-    }
-    div[data-testid="stFileUploader"] label {
-        color: #22c55e !important;
-        font-weight: 700 !important;
-    }
-    div[data-testid="stFileUploaderDropzone"] {
-        background-color: #0d1b2a !important;
-    }
-    div[data-testid="stFileUploaderDropzone"] span,
-    div[data-testid="stFileUploaderDropzone"] p {
-        color: #94a3b8 !important;
-    }
-    /* ── Checkbox ── */
-    div[data-testid="stCheckbox"] label {
-        color: #f1f5f9 !important;
-    }
-    /* ── Autocomplete dropdown HTML customizado ── */
-    .autocomplete-container { position: relative; margin-bottom: 6px; }
-    .autocomplete-dropdown {
-        position: absolute; top: 100%; left: 0; right: 0;
-        background: #0d1b2a; border: 2px solid #22c55e;
-        border-radius: 10px; max-height: 260px; overflow-y: auto;
-        z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-    }
-    .autocomplete-item {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 9px 14px; cursor: pointer;
-        border-left: 3px solid transparent;
-        transition: all 0.12s;
-        background: #0d1b2a;
-    }
-    .autocomplete-item:hover {
-        background: #0f3460 !important;
-        border-left: 3px solid #22c55e !important;
-    }
-    .autocomplete-item .prod-nome { font-size: 13px; font-weight: 600; color: #f1f5f9; }
-    .autocomplete-item .prod-ia   { font-size: 10px; color: #93c5fd; margin-top: 2px; }
-    .autocomplete-item .prod-badge {
-        font-size: 10px; font-weight: 700; padding: 2px 8px;
-        border-radius: 20px; white-space: nowrap; margin-left: 8px;
-    }
-    .badge-BASF       { background: #1e3a8a; color: #93c5fd; }
-    .badge-Syngenta   { background: #14532d; color: #86efac; }
-    .badge-Bayer      { background: #7f1d1d; color: #fca5a5; }
-    .badge-UPL        { background: #78350f; color: #fcd34d; }
-    .badge-Timac-Agro { background: #6b21a8; color: #f0abfc; }
-    .badge-Mosaic     { background: #065f46; color: #6ee7b7; }
-    .badge-Outros     { background: #1e293b; color: #94a3b8; }
-    .autocomplete-header {
-        padding: 6px 14px 4px; font-size: 10px; font-weight: 800;
-        color: #22c55e; letter-spacing: 1px;
-        border-bottom: 1px solid #0f3460;
-    }
-    /* ── Scrollbar do dropdown ── */
-    .autocomplete-dropdown::-webkit-scrollbar { width: 5px; }
-    .autocomplete-dropdown::-webkit-scrollbar-track { background: #0d1b2a; }
-    .autocomplete-dropdown::-webkit-scrollbar-thumb { background: #22c55e; border-radius: 4px; }
-    </style>
+    <div style='background:#0f3460;border-radius:12px;padding:14px 18px;
+    border-left:5px solid #22c55e;margin-bottom:16px;'>
+    <b style='color:#22c55e;'>📌 Como funciona</b><br>
+    <span style='color:#f1f5f9;font-size:13px;'>
+    Faça upload do laudo de solo em PDF ou imagem (JPG/PNG).
+    O sistema extrai automaticamente os valores e preenche a Análise de Solo.
+    </span>
+    </div>
     """, unsafe_allow_html=True)
 
-    # ── Autocomplete via session_state ───────────────────────────────────
-    if "ac_query"       not in st.session_state: st.session_state.ac_query       = ""
-    if "ac_selecionado" not in st.session_state: st.session_state.ac_selecionado = None
-    if "ac_fab"         not in st.session_state: st.session_state.ac_fab         = "Todos"
+    col_ocr1, col_ocr2 = st.columns(2)
+    with col_ocr1:
+        arquivo_ocr = st.file_uploader(
+            "📎 Upload do laudo (PDF, JPG, PNG)",
+            type=["pdf","jpg","jpeg","png"],
+            key="upl_ocr_laudo"
+        )
+    with col_ocr2:
+        _idioma_ocr = st.selectbox("Idioma do laudo", ["por","eng"], key="sel_idioma_ocr",
+                                    help="por = Português | eng = Inglês")
+        _auto_preencher = st.checkbox("Preencher análise automaticamente", value=True,
+                                       key="chk_auto_preencher")
 
-    # Filtro por fabricante (botões em linha)
-    fabricantes = ["Todos", "BASF", "Syngenta", "Bayer", "UPL", "Timac Agro", "Mosaic",
-                   "Corteva", "FMC", "ADAMA", "Ouro Fino", "Ihara", "Nortox", "Outros"]
-    fab_cores = {
-        "Todos":      ("#22c55e","#0f3460"),
-        "BASF":       ("#93c5fd","#1e3a8a"),
-        "Syngenta":   ("#86efac","#14532d"),
-        "Bayer":      ("#fca5a5","#7f1d1d"),
-        "UPL":        ("#fcd34d","#78350f"),
-        "Timac Agro": ("#f0abfc","#6b21a8"),
-        "Mosaic":     ("#6ee7b7","#065f46"),
-        "Corteva":    ("#67e8f9","#164e63"),
-        "FMC":        ("#a5b4fc","#1e1b4b"),
-        "ADAMA":      ("#bef264","#365314"),
-        "Ouro Fino":  ("#fde68a","#713f12"),
-        "Ihara":      ("#f9a8d4","#4a044e"),
-        "Nortox":     ("#5eead4","#134e4a"),
-        "Outros":     ("#94a3b8","#1e293b"),
-    }
+    if arquivo_ocr:
+        texto_ocr = ""
+        with st.spinner("🔍 Lendo laudo..."):
+            try:
+                if arquivo_ocr.type == "application/pdf":
+                    texto_ocr = extrair_texto_pdf(arquivo_ocr)
+                else:
+                    from PIL import Image as _PIL
+                    _img = _PIL.open(arquivo_ocr)
+                    texto_ocr = pytesseract.image_to_string(_img, lang=_idioma_ocr)
+            except Exception as _e:
+                st.error(f"❌ Erro ao ler arquivo: {_e}")
 
-    FAB_ESTILOS = {
-        "Todos":      {"bg":"#166534", "border":"#22c55e", "emoji":"🔎"},
-        "BASF":       {"bg":"#1e3a8a", "border":"#93c5fd", "emoji":"🔵"},
-        "Syngenta":   {"bg":"#14532d", "border":"#86efac", "emoji":"🟢"},
-        "Bayer":      {"bg":"#7f1d1d", "border":"#fca5a5", "emoji":"🔴"},
-        "UPL":        {"bg":"#92400e", "border":"#fcd34d", "emoji":"🟠"},
-        "Timac Agro": {"bg":"#6b21a8", "border":"#f0abfc", "emoji":"🟣"},
-        "Mosaic":     {"bg":"#065f46", "border":"#6ee7b7", "emoji":"🌊"},
-        "Corteva":    {"bg":"#164e63", "border":"#67e8f9", "emoji":"🔷"},
-        "FMC":        {"bg":"#1e1b4b", "border":"#a5b4fc", "emoji":"🟦"},
-        "ADAMA":      {"bg":"#365314", "border":"#bef264", "emoji":"🌿"},
-        "Ouro Fino":  {"bg":"#713f12", "border":"#fde68a", "emoji":"🟡"},
-        "Ihara":      {"bg":"#4a044e", "border":"#f9a8d4", "emoji":"🌸"},
-        "Nortox":     {"bg":"#134e4a", "border":"#5eead4", "emoji":"🌀"},
-        "Outros":     {"bg":"#374151", "border":"#9ca3af", "emoji":"⚪"},
-    }
+        if texto_ocr and texto_ocr.strip():
+            with st.expander("📋 Texto extraído (bruto)", expanded=False):
+                st.text(texto_ocr[:3000])
 
-    st.markdown("**🏭 Filtrar por Fabricante:**")
+            # Parseia valores
+            _vals = parsear_laudo_ocr(texto_ocr)
+            _encontrados = {k: v for k, v in _vals.items() if v is not None}
 
-    # Renderiza todos os botões como forms HTML — fundo e texto totalmente controlados
-    cols_fab = st.columns(len(fabricantes)) if fabricantes else st.columns(1)
-    for i, fab in enumerate(fabricantes):
-        est   = FAB_ESTILOS[fab]
-        ativo = st.session_state.ac_fab == fab
-        bg    = est["bg"]
-        borda = f'4px solid {est["border"]}' if ativo else f'2px solid {est["border"]}55'
-        opac  = "1.0" if ativo else "0.65"
-        sombra= f'0 0 10px {est["border"]}88' if ativo else "none"
-        with cols_fab[i]:
-            with st.form(key=f"form_fab_{fab}", border=False):
-                st.markdown(
-                    f'<div style="'
-                    f'background:{bg};'
-                    f'border:{borda};'
-                    f'border-radius:10px;'
-                    f'padding:8px 4px;'
-                    f'text-align:center;'
-                    f'font-size:12px;'
-                    f'font-weight:900;'
-                    f'color:#ffffff;'
-                    f'opacity:{opac};'
-                    f'box-shadow:{sombra};'
-                    f'letter-spacing:0.3px;'
-                    f'margin-bottom:2px;'
-                    f'">{est["emoji"]} {fab}</div>',
-                    unsafe_allow_html=True
-                )
-                if st.form_submit_button("✔", use_container_width=True):
-                    st.session_state.ac_fab = fab
-                    st.session_state.ac_query = ""
-                    st.session_state.ac_selecionado = None
-                    st.rerun()
+            if _encontrados:
+                st.success(f"✅ {len(_encontrados)} parâmetros encontrados no laudo!")
 
-    # Indicador visual do filtro ativo
-    fab_ativo = st.session_state.ac_fab
-    qtd_fab = len([p for p in CATALOGO_PRODUTOS if fab_ativo == "Todos" or p["fab"] == fab_ativo])
-    st.markdown(f"""
-    <div style="background:#0f3460;color:#93c5fd;padding:7px 14px;border-radius:8px;
-    font-size:12px;font-weight:700;margin:4px 0 10px 0;">
-    🔎 Fabricante ativo: <b>{fab_ativo}</b> — {qtd_fab} produtos disponíveis
-    </div>""", unsafe_allow_html=True)
+                # Monta tabela de preview
+                _preview_rows = []
+                _labels = {
+                    "ph": "pH", "fosforo": "Fósforo P (mg/dm³)",
+                    "potassio": "Potássio K (mg/dm³)", "calcio": "Cálcio Ca (cmolc/dm³)",
+                    "magnesio": "Magnésio Mg (cmolc/dm³)", "aluminio": "Alumínio Al (cmolc/dm³)",
+                    "materia_organica": "Matéria Orgânica (%)", "ctc": "CTC (cmolc/dm³)",
+                    "enxofre": "Enxofre S (mg/dm³)", "boro": "Boro B",
+                    "zinco": "Zinco Zn", "manganes": "Manganês Mn",
+                    "cobre": "Cobre Cu",
+                }
+                for k, v in _encontrados.items():
+                    _preview_rows.append({
+                        "Parâmetro": _labels.get(k, k),
+                        "Valor extraído": v,
+                        "Chave": k,
+                    })
 
-    # ── Campo de busca ────────────────────────────────────────────────────
-    query_input = st.text_input(
-        "🔍 Nome comercial, ingrediente ativo ou categoria",
-        value=st.session_state.ac_query,
-        placeholder="Ex: Fox Xpro, glifosato, fungicida...",
-        key="input_busca_produto"
-    )
+                import pandas as _pd
+                st.dataframe(_pd.DataFrame(_preview_rows)[["Parâmetro","Valor extraído"]],
+                             use_container_width=True, hide_index=True)
 
-    if query_input != st.session_state.ac_query:
-        st.session_state.ac_query = query_input
-        if st.session_state.ac_selecionado and query_input != st.session_state.ac_selecionado["nome"]:
-            st.session_state.ac_selecionado = None
+                if _auto_preencher:
+                    if st.button("✅ Aplicar valores na Análise de Solo", key="btn_aplicar_ocr",
+                                 use_container_width=True, type="primary"):
+                        for k, v in _encontrados.items():
+                            try:
+                                st.session_state.dados[k] = float(v)
+                            except Exception:
+                                pass
+                        atualizar_area_atual()
+                        salvar_dados_iaagro()
+                        success_box("✅ Valores aplicados! Vá para a aba 🧪 Análise de Solo para conferir.")
+                else:
+                    st.info("ℹ️ Marque 'Preencher análise automaticamente' para aplicar os valores.")
+            else:
+                st.warning("⚠️ Nenhum parâmetro reconhecido automaticamente. Verifique o texto extraído acima e preencha manualmente.")
 
-    # ── Filtra catálogo ───────────────────────────────────────────────────
-    catalogo_filtrado = CATALOGO_PRODUTOS if fab_ativo == "Todos" else [
-        p for p in CATALOGO_PRODUTOS if p["fab"] == fab_ativo
-    ]
+        elif arquivo_ocr:
+            st.error("❌ Não foi possível extrair texto do arquivo. Verifique se o PDF não é escaneado sem OCR ou tente uma imagem JPG/PNG do laudo.")
 
-    # ── Mostra resultados ao digitar ──────────────────────────────────────
-    if st.session_state.ac_query and not st.session_state.ac_selecionado:
-        q = st.session_state.ac_query.lower()
-        starts   = [p for p in catalogo_filtrado if p["nome"].lower().startswith(q)]
-        contains = [p for p in catalogo_filtrado
-                    if not p["nome"].lower().startswith(q)
-                    and (q in p["nome"].lower() or q in p["ia"].lower() or q in p["cat"].lower())]
-        resultados = (starts + contains)[:20]
+    # Dicas de uso
+    st.divider()
+    st.markdown("""
+    <div style='background:#0f3460;border-radius:10px;padding:12px 16px;border:1px solid #334155;'>
+    <b style='color:#6ee7b7;'>💡 Dicas para melhor resultado</b><br>
+    <span style='color:#cbd5e1;font-size:13px;'>
+    • <b>PDF digital</b> (gerado por computador) tem melhor precisão que PDF escaneado<br>
+    • Para laudos escaneados, tire foto com boa iluminação e envie como JPG<br>
+    • Laudos IAC/Embrapa e CQFS RS/SC são reconhecidos automaticamente<br>
+    • Após aplicar, confira os valores na aba <b>🧪 Análise de Solo</b>
+    </span>
+    </div>
+    """, unsafe_allow_html=True)
 
-        if resultados:
-            FAB_EM = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠",
-                      "Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}
-            CAT_EM = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛",
-                      "Acaricida":"🕷️","Nematicida":"🪱","Fungicida Biológico":"🌱",
-                      "Inseticida Biológico":"🦠","Foliar / Nutrição":"💧",
-                      "Tratamento de Sementes":"🌾","Regulador de Crescimento":"📈",
-                      "Adjuvante":"⚗️","Fertilizante":"🧪","Bioestimulante":"✨"}
+# ─────────────────────────────────────────────
+# MENU: EVOLUÇÃO DA FERTILIDADE DO SOLO
+# ─────────────────────────────────────────────
+if menu == "🧪 Solo & Adubação":
+  with _sub_solo[4]:
+    st.header("📊 Evolução da Fertilidade do Solo")
 
-            st.markdown(f'<div style="background:#0f3460;color:#22c55e;padding:6px 14px;'
-                        f'border-radius:8px 8px 0 0;font-size:11px;font-weight:800;letter-spacing:1px;">'
-                        f'🌿 {len(resultados)} RESULTADO{"S" if len(resultados)!=1 else ""} — clique para selecionar</div>',
-                        unsafe_allow_html=True)
+    if not st.session_state.areas:
+        st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
+        border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;">
+        ℹ️ Cadastre e analise áreas para ver o histórico.</div>''', unsafe_allow_html=True)
+    else:
+        opcoes_area_fert = [f"{a['ID']} - {a.get('Talhão','')}" for a in st.session_state.areas]
+        area_hist_fert   = st.selectbox("Selecione a área", opcoes_area_fert, key="hist_solo_area_fert")
+        id_area_fert     = area_hist_fert.split(" - ")[0]
 
-            # Opções formatadas para o radio
-            opcoes_labels = []
-            for p in resultados:
-                em_fab = FAB_EM.get(p["fab"], "⚪")
-                em_cat = CAT_EM.get(p["cat"], "🌱")
-                opcoes_labels.append(f"{em_cat} {p['nome']}  |  {em_fab} {p['fab']}  ·  {p['cat']}  —  {p['ia'][:50]}")
+        # Tenta carregar do SQLite primeiro
+        df_hist_fert = carregar_historico_solo_db(id_area_fert)
 
-            escolha_idx = st.radio(
-                "Resultados:",
-                range(len(opcoes_labels)),
-                format_func=lambda i: opcoes_labels[i],
-                key="radio_produto_catalogo",
-                label_visibility="collapsed"
-            )
+        # Se SQLite vazio, usa historico_solo da área (salvo no Supabase via areas[])
+        if df_hist_fert.empty:
+            _area_fert = next((a for a in st.session_state.areas if a.get("ID") == id_area_fert), None)
+            if _area_fert:
+                _hist_sb = _area_fert.get("historico_solo", [])
+                if _hist_sb:
+                    import pandas as _pd_fert
+                    df_hist_fert = _pd_fert.DataFrame(_hist_sb)
+                else:
+                    # Busca dados de solo: tenta Dados, dados, ou session_state.dados se for a área ativa
+                    _d = (_area_fert.get("Dados") or _area_fert.get("dados") or {})
+                    if not _d.get("ph") and st.session_state.dados.get("id_area") == id_area_fert:
+                        _d = st.session_state.dados
+                    if _d and _d.get("ph"):
+                        import pandas as _pd_fert
+                        df_hist_fert = _pd_fert.DataFrame([{
+                            "data":             "Análise atual",
+                            "ph":               float(_d.get("ph", 0)),
+                            "fosforo":          float(_d.get("fosforo", 0)),
+                            "potassio":         float(_d.get("potassio", 0)),
+                            "materia_organica": float(_d.get("materia_organica", 0)),
+                            "calcio":           float(_d.get("calcio", 0)),
+                            "magnesio":         float(_d.get("magnesio", 0)),
+                            "aluminio":         float(_d.get("aluminio", 0)),
+                            "nota":             float(_d.get("nota_solo", _area_fert.get("Nota Solo", 0)) or 0),
+                            "score":            float(_d.get("score_solo", _area_fert.get("score_solo", 0)) or 0),
+                            "classe":           _d.get("classe_solo", _area_fert.get("classe_solo", "—")),
+                        }])
 
-            if st.button("✅ Usar este produto", key="btn_usar_produto", use_container_width=True):
-                prod_sel = resultados[escolha_idx]
-                st.session_state.ac_selecionado = prod_sel
-                st.session_state.ac_query = prod_sel["nome"]
+        if df_hist_fert.empty:
+            st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
+            border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">
+            ⚠️ Nenhuma análise salva para esta área ainda.<br>
+            <span style='font-weight:400;font-size:13px;'>
+            Preencha e salve a análise na aba <b>🧪 Análise de Solo</b>.
+            </span></div>''', unsafe_allow_html=True)
+        else:
+            # Tabela de histórico
+            _cols_disp = [c for c in ["data","ph","fosforo","potassio","materia_organica",
+                                       "calcio","magnesio","score","classe"]
+                          if c in df_hist_fert.columns]
+            st.dataframe(df_hist_fert[_cols_disp], use_container_width=True, hide_index=True)
+
+            # Gráficos de evolução
+            st.markdown("#### 📈 Evolução dos Parâmetros")
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.caption("Score de qualidade do solo")
+                _cols_score = [c for c in ["score","nota"] if c in df_hist_fert.columns]
+                if _cols_score:
+                    st.line_chart(df_hist_fert.set_index("data")[_cols_score])
+            with col_g2:
+                st.caption("pH e macronutrientes")
+                _cols_nutr = [c for c in ["ph","fosforo","potassio"] if c in df_hist_fert.columns]
+                if _cols_nutr:
+                    st.line_chart(df_hist_fert.set_index("data")[_cols_nutr])
+
+            col_g3, col_g4 = st.columns(2)
+            with col_g3:
+                st.caption("Bases trocáveis")
+                _cols_bases = [c for c in ["calcio","magnesio","aluminio"] if c in df_hist_fert.columns]
+                if _cols_bases:
+                    st.line_chart(df_hist_fert.set_index("data")[_cols_bases])
+            with col_g4:
+                st.caption("Matéria orgânica")
+                if "materia_organica" in df_hist_fert.columns:
+                    st.line_chart(df_hist_fert.set_index("data")[["materia_organica"]])
+
+# ─────────────────────────────────────────────
+# MENU: CUSTOS
+# ─────────────────────────────────────────────
+elif menu == "💰 Financeiro":
+    _sub_fin = st.tabs([
+        "🌾 Custos da Lavoura",
+        "🔧 Custos Complementares",
+        "🤝 Contratos de Troca",
+        "📊 Evolução por Safra",
+        "💹 Dashboard",
+        "🧾 Imposto de Renda Rural",
+    ])
+
+# ── ABA 0: CUSTOS DA LAVOURA ─────────────────────────────────────────────
+if menu == "💰 Financeiro":
+  with _sub_fin[0]:
+    st.header("🌾 Custos da Lavoura")
+
+    # Busca área ativa
+    d = st.session_state.dados
+    if "ph" not in d and st.session_state.areas:
+        for _a in st.session_state.areas:
+            _dad = _a.get("Dados", _a.get("dados", {}))
+            if _dad and "ph" in _dad:
+                d = {**_dad, "cultura": _a.get("Cultura","Soja"),
+                     "area": _a.get("Hectares",0), "produtividade": _a.get("Produtividade",50)}
+                break
+
+    if not st.session_state.areas:
+        warning_box("Cadastre uma área primeiro.")
+    else:
+        # Só safra — sem seletor de área
+        _safra_fin = st.text_input("🌾 Safra", placeholder="2024/2025", key="txt_safra_fin")
+
+        st.divider()
+        st.subheader("📦 Insumos do Estoque (automático)")
+        st.caption("Gerado a partir das aplicações registradas. Clique em 🗑️ para remover a aplicação.")
+
+        # Calcula custo total de TODAS as aplicações (todas as áreas)
+        _custo_insumos = 0.0
+        _det_insumos   = []
+        for _ap_idx, ap in enumerate(st.session_state.aplicacoes):
+            for p in ap.get("Produtos", []):
+                _nome_p  = p.get("Produto","")
+                _total   = p.get("Total usado", 0)
+                _unid    = p.get("Unidade","L/ha")
+                _item_e  = next((e for e in st.session_state.estoque if e.get("Insumo") == _nome_p), None)
+                _preco_u = _item_e.get("Valor Unitário R$", 0) if _item_e else 0
+                def _conv(q, u):
+                    u = (u or "").lower()
+                    if "ml" in u: return q/1000
+                    if "g/" in u or u == "g": return q/1000
+                    return q
+                _qtd_base     = _conv(_total, _unid)
+                _custo_p      = _qtd_base * _preco_u
+                _custo_insumos += _custo_p
+                _det_insumos.append({
+                    "ap_idx":      _ap_idx,
+                    "Aplicação":   ap.get("Estádio", ap.get("Aplicação","")),
+                    "Produto":     _nome_p,
+                    "Tipo":        _item_e.get("Categoria","") if _item_e else p.get("Tipo",""),
+                    "Qtd":         f"{_qtd_base:.2f} L/kg",
+                    "R$ unit":     f"R$ {_preco_u:.2f}",
+                    "Custo R$":    f"R$ {_custo_p:.2f}",
+                })
+
+        if _det_insumos:
+            # Header
+            _hcols = st.columns([2.5, 2, 1.5, 1.5, 1.2, 1.2, 0.7])
+            for _h, _lbl in zip(_hcols, ["Aplicação","Produto","Tipo","Qtd","R$/un","Custo",""]): 
+                _h.markdown(f"<span style='color:#6ee7b7;font-size:11px;font-weight:800;'>{_lbl}</span>",
+                            unsafe_allow_html=True)
+            st.markdown("<hr style='margin:4px 0;border-color:#1e4976;'>", unsafe_allow_html=True)
+
+            _ap_indices_deletar = set()
+            for _li, _row in enumerate(_det_insumos):
+                _rc = st.columns([2.5, 2, 1.5, 1.5, 1.2, 1.2, 0.7])
+                _rc[0].markdown(f"<span style='color:#f1f5f9;font-size:12px;'>{_row['Aplicação']}</span>",
+                                unsafe_allow_html=True)
+                _rc[1].markdown(f"<span style='color:#6ee7b7;font-size:12px;font-weight:600;'>{_row['Produto']}</span>",
+                                unsafe_allow_html=True)
+                _rc[2].markdown(f"<span style='color:#94a3b8;font-size:11px;'>{_row['Tipo']}</span>",
+                                unsafe_allow_html=True)
+                _rc[3].markdown(f"<span style='color:#f1f5f9;font-size:12px;'>{_row['Qtd']}</span>",
+                                unsafe_allow_html=True)
+                _rc[4].markdown(f"<span style='color:#94a3b8;font-size:12px;'>{_row['R$ unit']}</span>",
+                                unsafe_allow_html=True)
+                _rc[5].markdown(f"<span style='color:#22c55e;font-size:12px;font-weight:700;'>{_row['Custo R$']}</span>",
+                                unsafe_allow_html=True)
+                if _rc[6].button("🗑️", key=f"del_insumo_{_li}_{_row['ap_idx']}",
+                                  help=f"Remover aplicação: {_row['Aplicação']}"):
+                    _ap_indices_deletar.add(_row["ap_idx"])
+
+            if _ap_indices_deletar:
+                st.session_state.aplicacoes = [
+                    a for i, a in enumerate(st.session_state.aplicacoes)
+                    if i not in _ap_indices_deletar
+                ]
+                salvar_dados_iaagro()
+                success_box(f"✅ {len(_ap_indices_deletar)} aplicação(ões) removida(s).")
                 st.rerun()
 
+            st.markdown(f"""
+            <div style='background:#14532d;border-radius:10px;padding:10px 16px;margin-top:8px;'>
+            <span style='color:#6ee7b7;font-size:13px;font-weight:700;'>
+            💰 Total insumos (todas aplicações): R$ {_custo_insumos:,.2f}
+            </span></div>""", unsafe_allow_html=True)
         else:
-            st.markdown(f'<div style="background:#1e293b;color:#f87171;padding:10px 14px;'
-                        f'border-radius:8px;font-size:13px;font-weight:600;margin:4px 0;">'
-                        f'❌ Nenhum produto encontrado para "<b>{st.session_state.ac_query}</b>"</div>',
-                        unsafe_allow_html=True)
+            st.info("Nenhuma aplicação registrada ainda.")
 
-    # Card do produto selecionado
-    if st.session_state.ac_selecionado:
-        p = st.session_state.ac_selecionado
-        fab_bg = {"BASF":"#1e3a8a","Syngenta":"#14532d","Bayer":"#7f1d1d","UPL":"#78350f","Timac Agro":"#6b21a8","Mosaic":"#065f46","Outros":"#1e293b"}.get(p["fab"],"#1e293b")
-        fab_tx = {"BASF":"#93c5fd","Syngenta":"#86efac","Bayer":"#fca5a5","UPL":"#fcd34d","Timac Agro":"#f0abfc","Mosaic":"#6ee7b7","Outros":"#94a3b8"}.get(p["fab"],"#94a3b8")
-        fab_em = {"BASF":"🔵","Syngenta":"🟢","Bayer":"🔴","UPL":"🟠","Timac Agro":"🟣","Mosaic":"🌊","Outros":"⚪"}.get(p["fab"],"⚪")
-        cat_em = {"Fungicida":"🍄","Herbicida":"🌿","Inseticida":"🐛","Acaricida":"🕷️",
-                  "Tratamento de Sementes":"🌾","Foliar / Nutrição":"💧",
-                  "Regulador de Crescimento":"📈","Adjuvante":"⚗️","Nematicida":"🪱",
-                  "Inseticida Biológico":"🦠","Bioestimulante":"✨"}.get(p["cat"],"🌱")
+        st.divider()
+        st.subheader("➕ Lançar Custo da Lavoura")
+
+        CAT_LAVOURA = [
+            "Semente","Fertilizante (Base)","Fertilizante (Cobertura)","Herbicida",
+            "Fungicida","Inseticida","Adjuvante/Óleo","Calcário","Gesso Agrícola",
+            "Inoculante","Micronutriente","Seguro Agrícola","Arrendamento","Frete",
+            "Armazenagem","Assistência Técnica","Outros"
+        ]
+        col_l1, col_l2, col_l3 = st.columns(3)
+        _cat_l  = col_l1.selectbox("Categoria", CAT_LAVOURA, key="sel_cat_lavoura")
+        _desc_l = col_l2.text_input("Descrição", key="txt_desc_lavoura")
+        _val_l  = col_l3.number_input("Valor R$", min_value=0.0, key="num_val_lavoura")
+        _data_l = st.date_input("Data", key="dat_lavoura")
+
+        if st.button("💾 Lançar Custo", key="btn_lancar_lavoura", use_container_width=True):
+            if _val_l > 0:
+                if "dre_registros" not in st.session_state:
+                    st.session_state.dre_registros = []
+                st.session_state.dre_registros.append({
+                    "Safra": _safra_fin, "Área ID": "geral", "Tipo": "Custo Variável",
+                    "Categoria": _cat_l, "Descrição": _desc_l,
+                    "Valor R$": _val_l, "Área ha": 0, "Valor/ha": 0,
+                    "Data": str(_data_l), "Origem": "lavoura",
+                })
+                salvar_dados_iaagro()
+                success_box(f"✅ R$ {_val_l:.2f} — {_cat_l}")
+            else:
+                warning_box("Informe um valor maior que zero.")
+
+        # Resumo por safra
+        _regs_l = [r for r in st.session_state.get("dre_registros",[])
+                   if r.get("Origem") == "lavoura"
+                   and (not _safra_fin or r.get("Safra") == _safra_fin)]
+        if _regs_l:
+            st.divider()
+            st.subheader("📋 Custos lançados")
+            import pandas as pd
+            df_l = pd.DataFrame(_regs_l)
+            _total_l = df_l["Valor R$"].sum()
+            col_s1, col_s2 = st.columns(2)
+            col_s1.metric("Total custos lançados", f"R$ {_total_l:,.2f}")
+            col_s2.metric("Total geral (insumos + custos)", f"R$ {(_total_l + _custo_insumos):,.2f}")
+            st.dataframe(df_l[["Data","Safra","Categoria","Descrição","Valor R$"]]
+                         .rename(columns={"Valor R$":"R$"}),
+                         use_container_width=True, hide_index=True)
+
+            with st.expander("🗑️ Excluir lançamento"):
+                _opts_l = [f"{r.get('Data','')} — {r.get('Categoria','')} — R${r.get('Valor R$',0):.2f}"
+                           for r in _regs_l]
+                _del_l = st.selectbox("Selecione", _opts_l, key="sel_del_lavoura")
+                if st.button("🗑️ Excluir", key="btn_del_lavoura"):
+                    _idx_l = _opts_l.index(_del_l)
+                    _all_l = [i for i,r in enumerate(st.session_state.dre_registros)
+                              if r.get("Origem") == "lavoura"]
+                    st.session_state.dre_registros.pop(_all_l[_idx_l])
+                    salvar_dados_iaagro()
+                    st.rerun()
+
+# ── ABA 1: CUSTOS COMPLEMENTARES ─────────────────────────────────────────
+if menu == "💰 Financeiro":
+  with _sub_fin[1]:
+    st.header("🔧 Custos Complementares")
+    st.caption("Conserto de máquinas, peças, diesel, revisões e aquisições")
+
+    CAT_COMP = [
+        "Diesel e lubrificantes","Conserto de máquinas","Compra de peças",
+        "Revisão preventiva","Aquisição de maquinário","Pneus",
+        "Mão de obra mecânica","Implementos","Outros"
+    ]
+    col_c1, col_c2, col_c3 = st.columns(3)
+    _cat_c  = col_c1.selectbox("Categoria", CAT_COMP, key="sel_cat_comp")
+    _desc_c = col_c2.text_input("Descrição detalhada", key="txt_desc_comp",
+                                  placeholder="Ex: Revisão 500h Plantadeira")
+    _val_c  = col_c3.number_input("Valor R$", min_value=0.0, key="num_val_comp")
+    col_c4, col_c5 = st.columns(2)
+    _data_c   = col_c4.date_input("Data", key="dat_comp")
+    _maquina  = col_c5.text_input("Máquina/Equipamento", key="txt_maquina_comp",
+                                    placeholder="Ex: Trator John Deere 6110J")
+
+    if st.button("💾 Lançar", key="btn_lancar_comp", use_container_width=True):
+        if _val_c > 0:
+            if "dre_registros" not in st.session_state:
+                st.session_state.dre_registros = []
+            st.session_state.dre_registros.append({
+                "Safra": "", "Área ID": "geral", "Tipo": "Custo Fixo",
+                "Categoria": _cat_c, "Descrição": f"{_desc_c} — {_maquina}",
+                "Valor R$": _val_c, "Área ha": 0, "Valor/ha": 0,
+                "Data": str(_data_c), "Origem": "complementar",
+            })
+            salvar_dados_iaagro()
+            success_box(f"✅ R$ {_val_c:.2f} — {_cat_c}")
+        else:
+            warning_box("Informe um valor.")
+
+    _regs_c = [r for r in st.session_state.get("dre_registros",[])
+               if r.get("Origem") == "complementar"]
+    if _regs_c:
+        st.divider()
+        import pandas as pd
+        df_c = pd.DataFrame(_regs_c)
+        _total_c = df_c["Valor R$"].sum()
+        col_rc1, col_rc2 = st.columns(2)
+        col_rc1.metric("Total Complementar", f"R$ {_total_c:,.2f}")
+        col_rc2.metric("Maior custo", f"R$ {df_c['Valor R$'].max():,.2f}")
+        st.dataframe(df_c[["Data","Categoria","Descrição","Valor R$"]]
+                     .rename(columns={"Valor R$":"R$"}),
+                     use_container_width=True, hide_index=True)
+        # Gráfico por categoria
+        _cat_group = df_c.groupby("Categoria")["Valor R$"].sum().sort_values(ascending=False)
+        st.bar_chart(_cat_group)
+
+        with st.expander("🗑️ Excluir lançamento"):
+            _opts_c = [f"{r.get('Data','')} — {r.get('Categoria','')} — R${r.get('Valor R$',0):.2f}"
+                       for r in _regs_c]
+            _del_c = st.selectbox("Selecione", _opts_c, key="sel_del_comp")
+            if st.button("🗑️ Excluir", key="btn_del_comp"):
+                _idx_c = _opts_c.index(_del_c)
+                _all_c = [i for i,r in enumerate(st.session_state.dre_registros)
+                          if r.get("Origem") == "complementar"]
+                st.session_state.dre_registros.pop(_all_c[_idx_c])
+                salvar_dados_iaagro()
+                st.rerun()
+
+# ── ABA 2: CONTRATOS DE TROCA ─────────────────────────────────────────────
+if menu == "💰 Financeiro":
+  with _sub_fin[2]:
+    st.header("🤝 Contratos de Troca (Barter)")
+
+    # Garante que contratos_troca está inicializado (sem sobrescrever dados carregados)
+    if "contratos_troca" not in st.session_state:
+        st.session_state.contratos_troca = dados_carregados.get("contratos_troca", [])
+
+    st.subheader("➕ Novo Contrato")
+    col_t1, col_t2, col_t3 = st.columns(3)
+    _grao_t   = col_t1.selectbox("Grão", ["Milho","Soja","Feijão","Trigo","Sorgo","Outro"], key="sel_grao_troca")
+    _qtd_sacs = col_t2.number_input("Sacas (60kg)", min_value=0.0, key="num_qtd_sacs")
+    _preco_sc = col_t3.number_input("Valor por saca R$", min_value=0.0, key="num_preco_sc")
+
+    _valor_troca = _qtd_sacs * _preco_sc
+    if _valor_troca > 0:
+        st.info(f"💰 Valor total: **R$ {_valor_troca:,.2f}**")
+
+    _data_entrega = st.date_input("📅 Data de entrega", key="dat_troca")
+
+    if st.button("💾 Registrar Contrato", key="btn_reg_troca", use_container_width=True):
+        if _qtd_sacs > 0 and _preco_sc > 0:
+            st.session_state.contratos_troca.append({
+                "Grão":           _grao_t,
+                "Sacas":          _qtd_sacs,
+                "Valor/sc R$":    _preco_sc,
+                "Valor total R$": _valor_troca,
+                "Data entrega":   str(_data_entrega),
+            })
+            salvar_dados_iaagro()
+            success_box(f"✅ {_qtd_sacs:.0f} sc × R$ {_preco_sc:.2f} = R$ {_valor_troca:,.2f}")
+            st.rerun()
+        else:
+            warning_box("Informe quantidade e valor.")
+
+    if st.session_state.contratos_troca:
+        st.divider()
+        import pandas as _pd_b
+        df_t = _pd_b.DataFrame(st.session_state.contratos_troca)
+        _total_t  = df_t["Valor total R$"].sum()
+        _total_sc = df_t["Sacas"].sum()
+
+        col_rt1, col_rt2 = st.columns(2)
+        col_rt1.metric("💰 Valor total em contratos", f"R$ {_total_t:,.2f}")
+        col_rt2.metric("🌾 Total de sacas", f"{_total_sc:,.0f} sc")
+
+        st.markdown("#### 📋 Contratos registrados")
+        for _idx_t, _cont in enumerate(st.session_state.contratos_troca):
+            _col_c1, _col_c2, _col_c3, _col_c4, _col_c5 = st.columns([2,1.5,1.5,2,0.8])
+            _col_c1.markdown(
+                f"<div style='background:#0f3460;border-radius:8px;padding:8px 12px;"
+                f"border-left:3px solid #22c55e;'>"
+                f"<span style='color:#6ee7b7;font-weight:700;font-size:13px;'>🌾 {_cont.get('Grão','')}</span>"
+                f"</div>", unsafe_allow_html=True)
+            _col_c2.markdown(
+                f"<div style='background:#0f3460;border-radius:8px;padding:8px 12px;'>"
+                f"<span style='color:#94a3b8;font-size:11px;'>SACAS</span><br>"
+                f"<span style='color:#f1f5f9;font-weight:700;'>{_cont.get('Sacas',0):.0f} sc</span>"
+                f"</div>", unsafe_allow_html=True)
+            _col_c3.markdown(
+                f"<div style='background:#0f3460;border-radius:8px;padding:8px 12px;'>"
+                f"<span style='color:#94a3b8;font-size:11px;'>R$/SC</span><br>"
+                f"<span style='color:#f1f5f9;font-weight:700;'>R$ {_cont.get('Valor/sc R$',0):.2f}</span>"
+                f"</div>", unsafe_allow_html=True)
+            _col_c4.markdown(
+                f"<div style='background:#14532d;border-radius:8px;padding:8px 12px;'>"
+                f"<span style='color:#6ee7b7;font-size:11px;'>TOTAL</span><br>"
+                f"<span style='color:#22c55e;font-weight:800;'>R$ {_cont.get('Valor total R$',0):,.2f}</span><br>"
+                f"<span style='color:#64748b;font-size:10px;'>📅 {_cont.get('Data entrega','')}</span>"
+                f"</div>", unsafe_allow_html=True)
+            if _col_c5.button("🗑️", key=f"del_barter_{_idx_t}",
+                               help=f"Excluir contrato {_cont.get('Grão','')}"):
+                st.session_state.contratos_troca.pop(_idx_t)
+                salvar_dados_iaagro()
+                st.rerun()
+            st.markdown("<div style='margin:4px 0;'></div>", unsafe_allow_html=True)
+
+# ── ABA 3: EVOLUÇÃO POR SAFRA ─────────────────────────────────────────────
+if menu == "💰 Financeiro":
+  with _sub_fin[3]:
+    st.header("📊 Evolução por Safra")
+
+    _todos_regs = st.session_state.get("dre_registros", [])
+    if not _todos_regs:
+        info_box("Nenhum lançamento ainda. Use as abas de custos para registrar.")
+    else:
+        import pandas as pd
+        df_ev = pd.DataFrame(_todos_regs)
+        df_ev["Valor R$"] = pd.to_numeric(df_ev["Valor R$"], errors="coerce").fillna(0)
+
+        # Filtros
+        col_ev1, col_ev2 = st.columns(2)
+        _safras_ev = ["Todas"] + sorted(df_ev["Safra"].dropna().unique().tolist(), reverse=True)
+        _safra_ev  = col_ev1.selectbox("Safra", _safras_ev, key="sel_safra_ev")
+        _tipo_ev   = col_ev2.selectbox("Tipo", ["Todos","Custo Variável","Custo Fixo","Receita"], key="sel_tipo_ev")
+
+        df_f = df_ev.copy()
+        if _safra_ev != "Todas": df_f = df_f[df_f["Safra"] == _safra_ev]
+        if _tipo_ev  != "Todos": df_f = df_f[df_f["Tipo"] == _tipo_ev]
+
+        _total_cv = df_f[df_f["Tipo"]=="Custo Variável"]["Valor R$"].sum()
+        _total_cf = df_f[df_f["Tipo"]=="Custo Fixo"]["Valor R$"].sum()
+        _total_rc = df_f[df_f["Tipo"]=="Receita"]["Valor R$"].sum()
+        _result   = _total_rc - _total_cv - _total_cf
+
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        col_m1.metric("💚 Receitas",       f"R$ {_total_rc:,.2f}")
+        col_m2.metric("🔴 Custo variável", f"R$ {_total_cv:,.2f}")
+        col_m3.metric("🟡 Custo fixo",     f"R$ {_total_cf:,.2f}")
+        col_m4.metric("💰 Resultado",      f"R$ {_result:,.2f}",
+                      delta="lucro" if _result >= 0 else "prejuízo")
+
+        st.divider()
+        st.subheader("📈 Evolução por Categoria")
+        _cat_sum = df_f.groupby(["Categoria","Tipo"])["Valor R$"].sum().reset_index()
+        if not _cat_sum.empty:
+            st.bar_chart(_cat_sum.set_index("Categoria")["Valor R$"])
+
+        st.subheader("📋 Todos os Lançamentos")
+        _cols_show = [c for c in ["Data","Safra","Categoria","Descrição","Tipo","Valor R$","Origem"] if c in df_f.columns]
+        st.dataframe(df_f[_cols_show].sort_values("Data", ascending=False),
+                     use_container_width=True, hide_index=True)
+
+        # Receita manual
+        st.divider()
+        st.subheader("➕ Lançar Receita")
+        col_r1, col_r2, col_r3 = st.columns(3)
+        _cat_r  = col_r1.selectbox("Categoria receita",
+                                    ["Venda de grãos","Venda de soja","Venda de milho",
+                                     "Venda de feijão","Prêmios/seguros","Arrendamento recebido","Outros"],
+                                    key="sel_cat_rec_ev")
+        _val_r  = col_r2.number_input("Valor R$", min_value=0.0, key="num_val_rec_ev")
+        _sfr_r  = col_r3.text_input("Safra", key="txt_safra_rec_ev")
+        _desc_r = st.text_input("Descrição", key="txt_desc_rec_ev")
+        if st.button("💾 Lançar Receita", key="btn_lancar_rec_ev", use_container_width=True):
+            if _val_r > 0:
+                st.session_state.dre_registros.append({
+                    "Safra": _sfr_r, "Área ID": "geral", "Tipo": "Receita",
+                    "Categoria": _cat_r, "Descrição": _desc_r,
+                    "Valor R$": _val_r, "Área ha": 0, "Valor/ha": 0,
+                    "Data": str(datetime.now().date()), "Origem": "receita",
+                })
+                salvar_dados_iaagro()
+                success_box(f"✅ Receita de R$ {_val_r:,.2f} lançada!")
+                st.rerun()
+
+# ── ABA 4: DASHBOARD ─────────────────────────────────────────────────────
+if menu == "💰 Financeiro":
+  with _sub_fin[4]:
+    st.header("💹 Dashboard Financeiro")
+
+    _todos = st.session_state.get("dre_registros", [])
+    _contr = st.session_state.get("contratos_troca", [])
+
+    if not _todos and not _contr:
+        info_box("Nenhum dado financeiro ainda.")
+    else:
+        import pandas as pd
+
+        df_d = pd.DataFrame(_todos) if _todos else pd.DataFrame()
+        if not df_d.empty:
+            df_d["Valor R$"] = pd.to_numeric(df_d["Valor R$"], errors="coerce").fillna(0)
+
+        _total_custo = df_d["Valor R$"].sum() if not df_d.empty else 0
+        _total_rec   = df_d[df_d["Tipo"]=="Receita"]["Valor R$"].sum() if not df_d.empty else 0
+        _total_cv    = df_d[df_d["Tipo"]=="Custo Variável"]["Valor R$"].sum() if not df_d.empty else 0
+        _total_cf    = df_d[df_d["Tipo"]=="Custo Fixo"]["Valor R$"].sum() if not df_d.empty else 0
+        _total_barter= sum(c.get("Valor total R$",0) for c in _contr)
+        _resultado   = _total_rec - _total_cv - _total_cf
+
+        # KPIs principais
+        col_k1, col_k2, col_k3 = st.columns(3)
+        col_k1.metric("💚 Receita total",    f"R$ {_total_rec:,.2f}")
+        col_k2.metric("🔴 Custo total",      f"R$ {(_total_cv+_total_cf):,.2f}")
+        col_k3.metric("💰 Resultado",        f"R$ {_resultado:,.2f}",
+                      delta=f"{'▲ Lucro' if _resultado>=0 else '▼ Prejuízo'}")
+
+        col_k4, col_k5, col_k6 = st.columns(3)
+        col_k4.metric("🤝 Barter registrado", f"R$ {_total_barter:,.2f}")
+        _n_aplic = len(st.session_state.aplicacoes)
+        col_k5.metric("🚜 Aplicações",        f"{_n_aplic}")
+        _n_areas = len(st.session_state.areas)
+        col_k6.metric("📍 Áreas",             f"{_n_areas}")
+
+        if not df_d.empty:
+            st.divider()
+            st.subheader("📊 Custo por Categoria")
+            _cat_d = df_d[df_d["Tipo"]!="Receita"].groupby("Categoria")["Valor R$"].sum().sort_values(ascending=False)
+            if not _cat_d.empty:
+                st.bar_chart(_cat_d)
+
+            st.subheader("📈 Resultado por Safra")
+            _sfr_d = df_d.groupby(["Safra","Tipo"])["Valor R$"].sum().unstack(fill_value=0)
+            if not _sfr_d.empty:
+                st.dataframe(_sfr_d, use_container_width=True)
+
+# ── ABA 5: IR RURAL ──────────────────────────────────────────────────────
+if menu == "💰 Financeiro":
+  with _sub_fin[5]:
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🧾 Imposto de Renda Rural</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Apuração simplificada — Lei 8.023/90 | Valores salvos automaticamente
+    </p></div>""", unsafe_allow_html=True)
+
+    # ── Init session_state IR ──────────────────────────────────────────────
+    for _k, _v in [("ir_ano",2025),("ir_nome",""),("ir_cpf",""),
+                    ("ir_cidade",""),("ir_area_total",0.0),
+                    ("ir_receitas",{}),("ir_despesas",{})]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
+    # ── Dados do produtor ──────────────────────────────────────────────────
+    with st.expander("👤 Dados do Produtor", expanded=False):
+        _ci1, _ci2, _ci3 = st.columns(3)
+        st.session_state.ir_nome       = _ci1.text_input("Nome", value=st.session_state.ir_nome, key="ir_nome_inp")
+        st.session_state.ir_cpf        = _ci1.text_input("CPF", value=st.session_state.ir_cpf, key="ir_cpf_inp")
+        st.session_state.ir_cidade     = _ci2.text_input("Cidade/UF", value=st.session_state.ir_cidade, key="ir_cid_inp")
+        st.session_state.ir_area_total = _ci2.number_input("Área total (ha)", min_value=0.0, value=float(st.session_state.ir_area_total), key="ir_area_inp")
+        st.session_state.ir_ano        = _ci3.selectbox("Ano-calendário", [2025,2024,2023,2022], key="ir_ano_sel")
+
+    # ── Auto-importação dos lançamentos do DRE ─────────────────────────────
+    _dre_all = st.session_state.get("dre_registros", [])
+    _dre_ano = [r for r in _dre_all if str(r.get("Safra","")).startswith(str(st.session_state.ir_ano)[:4])]
+
+    _rec_dre  = sum(r["Valor R$"] for r in _dre_ano if r.get("Tipo") == "Receita")
+    _desp_dre = sum(r["Valor R$"] for r in _dre_ano if r.get("Tipo") in ("Custo Variável","Custo Fixo","Custo"))
+
+    # Também soma custos da lavoura
+    _custos_lavoura = sum(r["Valor R$"] for r in _dre_all
+                          if r.get("Origem") == "lavoura")
+    _custos_comp    = sum(r["Valor R$"] for r in _dre_all
+                          if r.get("Origem") == "complementar")
+
+    _total_despesas_auto = _desp_dre + _custos_lavoura + _custos_comp
+
+    if _rec_dre > 0 or _total_despesas_auto > 0:
         st.markdown(f"""
-        <div style="background:{fab_bg};border:2px solid {fab_tx}33;border-radius:12px;
-        padding:12px 16px;margin:6px 0 12px 0;display:flex;align-items:center;gap:12px;">
-            <div style="font-size:26px;">{cat_em}</div>
-            <div style="flex:1;">
-                <div style="color:#ffffff;font-weight:800;font-size:15px;">{p['nome']}</div>
-                <div style="color:{fab_tx};font-size:12px;margin-top:3px;">{fab_em} {p['fab']} · {p['cat']}</div>
-                <div style="color:#94a3b8;font-size:11px;margin-top:2px;">I.A.: {p['ia']}</div>
-            </div>
+        <div style='background:#14532d;border-radius:10px;padding:12px 16px;
+        border-left:4px solid #22c55e;margin-bottom:12px;'>
+        <b style='color:#6ee7b7;'>✅ Valores importados automaticamente dos seus lançamentos</b><br>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        💰 Receitas lançadas: <b>R$ {_rec_dre:,.2f}</b> &nbsp;|&nbsp;
+        📉 Despesas/custos: <b>R$ {_total_despesas_auto:,.2f}</b>
+        </span></div>""", unsafe_allow_html=True)
+        if st.button("🔄 Sincronizar com lançamentos do Financeiro", key="btn_sync_ir"):
+            # Receitas
+            if _rec_dre > 0:
+                st.session_state.ir_receitas["venda_graos"] = round(
+                    float(st.session_state.ir_receitas.get("venda_graos",0)) + _rec_dre, 2)
+            # Despesas por categoria do DRE
+            _mapa_cat = {
+                "Semente":"sementes","Fertilizante":"fertilizantes",
+                "Defensivo":"fertilizantes","Diesel":"combustivel",
+                "Combustível":"combustivel","Mão de obra":"mao_de_obra",
+                "Maquinário":"manutencao","Frete":"frete","Seguro":"seguro",
+                "Arrendamento":"arrendamento_pg",
+            }
+            for _r in _dre_ano:
+                if _r.get("Tipo") in ("Custo Variável","Custo Fixo","Custo"):
+                    _chave = _mapa_cat.get(_r.get("Categoria",""), "outras_despesas")
+                    st.session_state.ir_despesas[_chave] = round(
+                        float(st.session_state.ir_despesas.get(_chave,0)) + _r["Valor R$"], 2)
+            # Custos lavoura e complementares → fertilizantes e outros
+            if _custos_lavoura > 0:
+                st.session_state.ir_despesas["fertilizantes"] = round(
+                    float(st.session_state.ir_despesas.get("fertilizantes",0)) + _custos_lavoura, 2)
+            if _custos_comp > 0:
+                st.session_state.ir_despesas["outras_despesas"] = round(
+                    float(st.session_state.ir_despesas.get("outras_despesas",0)) + _custos_comp, 2)
+            salvar_dados_iaagro()
+            success_box("✅ Valores sincronizados!")
+            st.rerun()
+
+    # ── Receitas manuais ────────────────────────────────────────────────────
+    st.markdown("#### 💰 Receitas da Atividade Rural")
+    _rec_items = [
+        ("venda_graos","🌾 Venda de grãos (R$)"),
+        ("venda_animais","🐄 Venda de animais (R$)"),
+        ("arrendamento","🏡 Arrendamento recebido (R$)"),
+        ("subvencoes","💰 Subvenções/PAA (R$)"),
+        ("indenizacoes","🛡️ Seguro agrícola (R$)"),
+        ("outras_receitas","➕ Outras receitas (R$)"),
+    ]
+    _rc1, _rc2 = st.columns(2)
+    for i, (k, lbl) in enumerate(_rec_items):
+        with (_rc1 if i%2==0 else _rc2):
+            st.session_state.ir_receitas[k] = st.number_input(
+                lbl, min_value=0.0, value=float(st.session_state.ir_receitas.get(k,0)),
+                key=f"ir_r_{k}", format="%.2f")
+
+    st.markdown("#### 📉 Despesas Dedutíveis")
+    _desp_items = [
+        ("sementes","🌱 Sementes e mudas (R$)"),
+        ("fertilizantes","🧪 Fertilizantes e defensivos (R$)"),
+        ("mao_de_obra","👷 Mão de obra (R$)"),
+        ("combustivel","⛽ Combustível (R$)"),
+        ("manutencao","🔧 Manutenção de máquinas (R$)"),
+        ("arrendamento_pg","🏡 Arrendamento pago (R$)"),
+        ("frete","🚛 Fretes (R$)"),
+        ("seguro","🛡️ Seguros rurais (R$)"),
+        ("assistencia_tec","👨‍🔬 Assistência técnica (R$)"),
+        ("juros","💳 Juros de financiamentos (R$)"),
+        ("outras_despesas","➕ Outras despesas (R$)"),
+    ]
+    _dc1, _dc2 = st.columns(2)
+    for i, (k, lbl) in enumerate(_desp_items):
+        with (_dc1 if i%2==0 else _dc2):
+            st.session_state.ir_despesas[k] = st.number_input(
+                lbl, min_value=0.0, value=float(st.session_state.ir_despesas.get(k,0)),
+                key=f"ir_d_{k}", format="%.2f")
+
+    if st.button("💾 Salvar dados do IR", key="btn_salvar_ir", use_container_width=True):
+        salvar_dados_iaagro()
+        success_box("✅ Dados do IR salvos!")
+
+    # ── Cálculo ─────────────────────────────────────────────────────────────
+    st.divider()
+    _rec_total  = sum(st.session_state.ir_receitas.values())
+    _desp_total = sum(st.session_state.ir_despesas.values())
+    _resultado  = _rec_total - _desp_total
+    _ISENCAO    = 142798.50
+    _BASE       = max(_resultado, 0.0)
+
+    _tabela_ir = [
+        (27110.40, 0.000, 0.00),
+        (33919.80, 0.075, 2033.28),
+        (45012.60, 0.150, 4576.08),
+        (55976.16, 0.225, 7947.24),
+        (float("inf"), 0.275, 10752.00),
+    ]
+    _ir = 0.0; _aliq = 0.0
+    if _BASE > _ISENCAO:
+        for _lim, _a, _ded in _tabela_ir:
+            if _BASE <= _lim:
+                _ir = _BASE * _a - _ded
+                _aliq = _a; break
+
+    _ir = max(_ir, 0.0)
+
+    # Cards resultado
+    _kc = st.columns(4)
+    _kc[0].metric("💰 Receita Bruta",    f"R$ {_rec_total:,.2f}")
+    _kc[1].metric("📉 Despesas Dedut.", f"R$ {_desp_total:,.2f}")
+    _kc[2].metric("📊 Resultado Líquido", f"R$ {_resultado:,.2f}",
+                   delta="Lucro" if _resultado >= 0 else "Prejuízo")
+    _kc[3].metric("🧾 IR Estimado",       f"R$ {_ir:,.2f}",
+                   delta=f"Alíquota {_aliq*100:.1f}%" if _ir > 0 else "Isento")
+
+    # Status fiscal
+    if _resultado <= 0:
+        st.success("✅ Resultado negativo — não há IR a pagar. O prejuízo pode ser compensado.")
+    elif _BASE <= _ISENCAO:
+        st.success(f"✅ Resultado abaixo do limite de isenção (R$ {_ISENCAO:,.2f}) — não há IR a pagar.")
+    else:
+        st.warning(f"⚠️ IR estimado: **R$ {_ir:,.2f}** — consulte seu contador.")
+
+    # Tabela resumo
+    with st.expander("📋 Detalhamento completo"):
+        import pandas as _pd_ir
+        _rows_ir = [
+            {"Item":"(+) Receita Bruta",         "Valor R$": _rec_total},
+            {"Item":"(-) Despesas Dedutíveis",    "Valor R$":-_desp_total},
+            {"Item":"= Resultado Líquido",        "Valor R$": _resultado},
+            {"Item":"Limite de Isenção",          "Valor R$": _ISENCAO},
+            {"Item":"Base de Cálculo IR",         "Valor R$": _BASE},
+            {"Item":f"Alíquota {_aliq*100:.1f}%","Valor R$": _ir},
+        ]
+        st.dataframe(_pd_ir.DataFrame(_rows_ir), use_container_width=True, hide_index=True)
+        st.caption("⚠️ Estimativa para planejamento. Declare com contador habilitado.")
+
+# ─────────────────────────────────────────────
+# MENU: OPERACIONAL
+# ─────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
+# MENU: OPERACIONAL
+# ─────────────────────────────────────────────
+elif menu == "📦 Operacional":
+    _sub_op = st.tabs(["📦 Estoque de Insumos","🚜 Aplicações","⏱️ Prazo de Carência","📋 Ordem de Serviço","📜 Receituário Agronômico"])
+
+if menu == "📦 Operacional":
+  with _sub_op[0]:
+    # ── HEADER com KPIs ──────────────────────────────────────────────────────
+    import pandas as _pd_est
+
+    _est = st.session_state.estoque
+    _df_est = _pd_est.DataFrame(_est) if _est else _pd_est.DataFrame()
+
+    _total_itens   = len(_df_est)
+    _valor_total   = float(_df_est["Valor Total R$"].sum()) if not _df_est.empty and "Valor Total R$" in _df_est else 0
+    _criticos      = sum(1 for i in _est if float(i.get("Quantidade",0)) <= 0)
+    _baixos        = sum(1 for i in _est if 0 < float(i.get("Quantidade",0)) <= 5)
+
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>📦 Estoque de Insumos</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Controle de defensivos, fertilizantes e insumos agrícolas
+    </p></div>
+    """, unsafe_allow_html=True)
+
+    # KPIs
+    _kc1, _kc2, _kc3, _kc4 = st.columns(4)
+    _kc1.markdown(f"""<div style='background:#0f3460;border-radius:12px;padding:14px;text-align:center;border:1px solid #1e4976;'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>📦 TOTAL ITENS</div>
+    <div style='color:#6ee7b7;font-size:28px;font-weight:800;'>{_total_itens}</div>
+    </div>""", unsafe_allow_html=True)
+    _kc2.markdown(f"""<div style='background:#0f3460;border-radius:12px;padding:14px;text-align:center;border:1px solid #1e4976;'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>💰 VALOR TOTAL</div>
+    <div style='color:#22c55e;font-size:22px;font-weight:800;'>R$ {_valor_total:,.0f}</div>
+    </div>""", unsafe_allow_html=True)
+    _kc3.markdown(f"""<div style='background:{"#7f1d1d" if _criticos>0 else "#0f3460"};border-radius:12px;padding:14px;text-align:center;border:1px solid {"#ef4444" if _criticos>0 else "#1e4976"};'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>❌ ZERADOS</div>
+    <div style='color:#{"ef4444" if _criticos>0 else "6ee7b7"};font-size:28px;font-weight:800;'>{_criticos}</div>
+    </div>""", unsafe_allow_html=True)
+    _kc4.markdown(f"""<div style='background:{"#78350f" if _baixos>0 else "#0f3460"};border-radius:12px;padding:14px;text-align:center;border:1px solid {"#f59e0b" if _baixos>0 else "#1e4976"};'>
+    <div style='color:#94a3b8;font-size:12px;font-weight:600;'>⚠️ ESTOQUE BAIXO</div>
+    <div style='color:#{"f59e0b" if _baixos>0 else "6ee7b7"};font-size:28px;font-weight:800;'>{_baixos}</div>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── ABAS DE ENTRADA ──────────────────────────────────────────────────────
+    _tab_cat, _tab_manual, _tab_nfe = st.tabs([
+        "🔍 Buscar Catálogo", "✏️ Cadastro Manual", "📄 Importar NF-e XML"
+    ])
+
+    # ── TAB 1: CATÁLOGO ───────────────────────────────────────────────────────
+    with _tab_cat:
+        st.markdown("#### 🔍 Buscar produto no catálogo")
+        _busca_prod = st.text_input("Digite o nome ou ingrediente ativo",
+                                     placeholder="Ex: Roundup, glifosato, Fox...",
+                                     key="txt_busca_produto_catalogo")
+        _resultados = buscar_produtos_catalogo(_busca_prod) if _busca_prod else []
+
+        if _busca_prod and _resultados:
+            _opcoes_cat = [f"{p['nome']} ({p['fab']}) — {p['cat']}" for p in _resultados[:20]]
+            _sel_cat    = st.selectbox("Selecione o produto", _opcoes_cat, key="sel_prod_catalogo")
+            _prod_sel   = _resultados[_opcoes_cat.index(_sel_cat)]
+            st.markdown(f"""
+            <div style='background:#0f3460;border-radius:10px;padding:10px 14px;
+            border-left:4px solid #22c55e;margin:8px 0;'>
+            🧪 <b style='color:#6ee7b7;'>IA:</b> {_prod_sel['ia']} &nbsp;|&nbsp;
+            <b style='color:#6ee7b7;'>Cat:</b> {_prod_sel['cat']} &nbsp;|&nbsp;
+            <b style='color:#6ee7b7;'>Fab:</b> {_prod_sel['fab']}
+            </div>""", unsafe_allow_html=True)
+
+            col_cat1, col_cat2, col_cat3 = st.columns(3)
+            _qtd_cat   = col_cat1.number_input("Quantidade", min_value=0.0, key="num_qtd_catalogo")
+            _unid_cat  = col_cat2.selectbox("Unidade", ["L","kg","mL","g","sc","un"], key="sel_unid_catalogo")
+            _emb_cat   = col_cat2.selectbox("Embalagem",
+                            ["1 L","5 L","10 L","20 L","50 L","100 L",
+                             "1 kg","5 kg","10 kg","20 kg","50 kg",
+                             "200 mL","500 mL","1000 mL","100 g","500 g","1000 g","Outro"],
+                            key="sel_emb_catalogo")
+            _preco_cat = col_cat3.number_input("Preço unitário R$", min_value=0.0, key="num_preco_catalogo")
+            _lote_cat  = col_cat3.text_input("Lote/Validade", key="txt_lote_catalogo")
+            _estmin_cat = col_cat1.number_input("Estoque mínimo", min_value=0.0, value=5.0, key="num_estmin_cat")
+
+            if st.button("✅ Adicionar ao Estoque", key="btn_add_catalogo",
+                         use_container_width=True, type="primary"):
+                if _qtd_cat > 0:
+                    # Verifica se já existe — soma quantidade
+                    _existe = next((i for i in st.session_state.estoque
+                                    if i["Insumo"] == _prod_sel["nome"]), None)
+                    if _existe:
+                        _existe["Quantidade"] = round(float(_existe.get("Quantidade",0)) + _qtd_cat, 4)
+                        _existe["Valor Total R$"] = round(_existe["Quantidade"] * _preco_cat, 2)
+                        if _preco_cat > 0:
+                            _existe["Valor Unitário R$"] = _preco_cat
+                        success_box(f"✅ Saldo atualizado: {_prod_sel['nome']} → {_existe['Quantidade']} {_unid_cat}")
+                    else:
+                        st.session_state.estoque.append({
+                            "Insumo": _prod_sel["nome"], "Categoria": _prod_sel["cat"],
+                            "Fabricante": _prod_sel["fab"], "Ingrediente Ativo": _prod_sel["ia"],
+                            "Quantidade": _qtd_cat, "Unidade": _unid_cat, "Embalagem": _emb_cat,
+                            "Valor Unitário R$": _preco_cat,
+                            "Valor Total R$": round(_qtd_cat * _preco_cat, 2),
+                            "Lote": _lote_cat, "Estoque Mínimo": _estmin_cat,
+                        })
+                        success_box(f"✅ {_prod_sel['nome']} — {_qtd_cat} {_unid_cat} adicionado!")
+                    salvar_dados_iaagro()
+                    st.rerun()
+                else:
+                    warning_box("Informe a quantidade.")
+        elif _busca_prod:
+            st.info("Produto não encontrado no catálogo. Use a aba **✏️ Cadastro Manual**.")
+
+    # ── TAB 2: MANUAL ────────────────────────────────────────────────────────
+    with _tab_manual:
+        st.markdown("#### ✏️ Cadastrar produto manualmente")
+        col_e1, col_e2, col_e3 = st.columns(3)
+        nome_usar   = col_e1.text_input("Nome do insumo *", key="txt_nome_usar")
+        categ_usar  = col_e2.selectbox("Categoria", ["Herbicida","Fungicida","Inseticida","Adjuvante",
+                                        "Óleo","Fertilizante foliar","Semente","Calcário","Gesso",
+                                        "Fertilizante sólido","Micronutriente","Inoculante","Outro"],
+                                        key="sel_cat_usar")
+        qtd_usar    = col_e3.number_input("Quantidade *", min_value=0.0, key="num_qtd_usar")
+        col_e4, col_e5, col_e6 = st.columns(3)
+        unid_usar   = col_e4.selectbox("Unidade", ["L","kg","mL","g","sc","un"], key="sel_unid_usar")
+        emb_usar    = col_e5.selectbox("Embalagem",
+                        ["1 L","5 L","10 L","20 L","50 L","100 L",
+                         "1 kg","5 kg","10 kg","20 kg","50 kg",
+                         "200 mL","500 mL","1000 mL","Outro"],
+                        key="sel_emb_usar")
+        preco_usar  = col_e6.number_input("Preço unitário R$", min_value=0.0, key="num_preco_usar")
+        col_e7, col_e8, col_e9 = st.columns(3)
+        ia_usar     = col_e7.text_input("Ingrediente ativo", key="txt_ia_usar")
+        lote_usar   = col_e8.text_input("Lote/Validade", key="txt_lote_usar")
+        estmin_usar = col_e9.number_input("Estoque mínimo", min_value=0.0, value=5.0, key="num_estmin_usar")
+
+        if st.button("✅ Adicionar ao Estoque", key="btn_add_estoque",
+                     use_container_width=True, type="primary"):
+            if nome_usar.strip() and qtd_usar > 0:
+                _existe = next((i for i in st.session_state.estoque
+                                if i["Insumo"] == nome_usar.strip()), None)
+                if _existe:
+                    _existe["Quantidade"] = round(float(_existe.get("Quantidade",0)) + qtd_usar, 4)
+                    _existe["Valor Total R$"] = round(_existe["Quantidade"] * preco_usar, 2)
+                    success_box(f"✅ Saldo atualizado: {nome_usar} → {_existe['Quantidade']} {unid_usar}")
+                else:
+                    st.session_state.estoque.append({
+                        "Insumo": nome_usar.strip(), "Categoria": categ_usar,
+                        "Ingrediente Ativo": ia_usar, "Quantidade": qtd_usar,
+                        "Unidade": unid_usar, "Embalagem": emb_usar,
+                        "Valor Unitário R$": preco_usar,
+                        "Valor Total R$": round(qtd_usar * preco_usar, 2),
+                        "Lote": lote_usar, "Estoque Mínimo": estmin_usar,
+                    })
+                    success_box(f"✅ {nome_usar} adicionado ao estoque.")
+                salvar_dados_iaagro()
+                st.rerun()
+            else:
+                warning_box("Informe nome e quantidade.")
+
+    # ── TAB 3: NF-e XML ──────────────────────────────────────────────────────
+    with _tab_nfe:
+        st.markdown("#### 📄 Importar Nota Fiscal Eletrônica (XML)")
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
+        border-left:4px solid #22c55e;margin-bottom:12px;'>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        📧 Faça upload do XML da NF-e recebida por e-mail ou do sistema do fornecedor.
+        Todos os produtos entram no estoque automaticamente com quantidade e valor.
+        </span></div>""", unsafe_allow_html=True)
+
+        _xml_file = st.file_uploader("📎 Upload do XML da NF-e",
+                                      type=["xml"], key="upl_nfe_xml")
+        if _xml_file:
+            try:
+                import xml.etree.ElementTree as _ET
+                _tree = _ET.parse(_xml_file)
+                _root = _tree.getroot()
+
+                # Detecta o namespace real do XML automaticamente
+                _tag_root = _root.tag
+                if _tag_root.startswith("{"):
+                    _ns_uri = _tag_root[1:_tag_root.find("}")]
+                else:
+                    _ns_uri = "http://www.portalfiscal.inf.br/nfe"
+                _ns = {"nfe": _ns_uri}
+
+                def _txt(el, tag, ns):
+                    _e = el.find(tag, ns)
+                    return _e.text.strip() if _e is not None and _e.text else ""
+
+                # Dados da NF
+                _inf = _root.find(".//nfe:infNFe", _ns)
+                if _inf is None:
+                    _inf = _root.find(".//{http://www.portalfiscal.inf.br/nfe}infNFe")
+                _emit_nome = ""
+                _n_nf = ""
+                _dt_emis = ""
+                if _inf is not None:
+                    _emit_nome = _txt(_inf, "nfe:emit/nfe:xNome", _ns) or _txt(_inf, "{http://www.portalfiscal.inf.br/nfe}emit/{http://www.portalfiscal.inf.br/nfe}xNome", {})
+                    _n_nf = _txt(_inf, "nfe:ide/nfe:nNF", _ns)
+                    _dt_emis = _txt(_inf, "nfe:ide/nfe:dhEmi", _ns)[:10] if _txt(_inf, "nfe:ide/nfe:dhEmi", _ns) else ""
+
+                # Itens
+                _dets = _root.findall(".//nfe:det", _ns)
+                if not _dets:
+                    _dets = _root.findall(".//{http://www.portalfiscal.inf.br/nfe}det")
+
+                _itens_nfe = []
+                for _det in _dets:
+                    _prod_el = _det.find("nfe:prod", _ns)
+                    if _prod_el is None:
+                        _prod_el = _det.find("{http://www.portalfiscal.inf.br/nfe}prod")
+                    if _prod_el is None:
+                        continue
+                    def _t(tag):
+                        _e = _prod_el.find(f"nfe:{tag}", _ns)
+                        if _e is None:
+                            _e = _prod_el.find(f"{{http://www.portalfiscal.inf.br/nfe}}{tag}")
+                        return _e.text.strip() if _e is not None and _e.text else ""
+
+                    _nome_prod = _t("xProd")
+                    _qtd_str   = _t("qCom")
+                    _unid_str  = _t("uCom")
+                    _vul_str   = _t("vUnCom")
+                    _vtot_str  = _t("vProd")
+                    try: _qtd_f  = float(_qtd_str.replace(",","."))
+                    except: _qtd_f = 0.0
+                    try: _vul_f  = float(_vul_str.replace(",","."))
+                    except: _vul_f = 0.0
+                    try: _vtot_f = float(_vtot_str.replace(",","."))
+                    except: _vtot_f = round(_qtd_f * _vul_f, 2)
+
+                    # Normaliza unidade
+                    _unid_map = {"UN":"un","UNID":"un","L":"L","LT":"L","KG":"kg",
+                                 "G":"g","ML":"mL","SC":"sc","SAC":"sc","CX":"un"}
+                    _unid_norm = _unid_map.get(_unid_str.upper(), _unid_str.lower() or "un")
+                    _itens_nfe.append({
+                        "Insumo": _nome_prod, "Quantidade": _qtd_f,
+                        "Unidade": _unid_norm, "Valor Unitário R$": _vul_f,
+                        "Valor Total R$": _vtot_f,
+                    })
+
+                if _itens_nfe:
+                    st.success(f"✅ NF-e nº {_n_nf} de **{_emit_nome or 'Fornecedor'}** — {len(_itens_nfe)} produto(s)")
+                    if _dt_emis:
+                        st.caption(f"📅 Emissão: {_dt_emis}")
+
+                    import pandas as _pd_nfe
+                    st.dataframe(_pd_nfe.DataFrame(_itens_nfe)[["Insumo","Quantidade","Unidade","Valor Unitário R$","Valor Total R$"]],
+                                 use_container_width=True, hide_index=True)
+
+                    if st.button("✅ Importar todos para o Estoque", key="btn_importar_nfe",
+                                 use_container_width=True, type="primary"):
+                        _importados = 0
+                        for _it in _itens_nfe:
+                            if not _it["Insumo"] or _it["Quantidade"] <= 0:
+                                continue
+                            _existe = next((i for i in st.session_state.estoque
+                                           if i["Insumo"] == _it["Insumo"]), None)
+                            _obs = f"NF-e nº {_n_nf} — {_emit_nome} — {_dt_emis}"
+                            if _existe:
+                                _existe["Quantidade"] = round(float(_existe.get("Quantidade",0)) + _it["Quantidade"], 4)
+                                _existe["Valor Total R$"] = round(_existe["Quantidade"] * _it["Valor Unitário R$"], 2)
+                                if _it["Valor Unitário R$"] > 0:
+                                    _existe["Valor Unitário R$"] = _it["Valor Unitário R$"]
+                            else:
+                                st.session_state.estoque.append({
+                                    "Insumo": _it["Insumo"], "Categoria": "Outro",
+                                    "Quantidade": _it["Quantidade"], "Unidade": _it["Unidade"],
+                                    "Valor Unitário R$": _it["Valor Unitário R$"],
+                                    "Valor Total R$": _it["Valor Total R$"],
+                                    "Fabricante": _emit_nome, "Lote": _obs,
+                                    "Estoque Mínimo": 5.0,
+                                })
+                            _importados += 1
+                        salvar_dados_iaagro()
+                        success_box(f"✅ {_importados} produto(s) importado(s) da NF-e para o estoque!")
+                        st.rerun()
+                else:
+                    st.warning("Nenhum produto encontrado no XML. Verifique se é uma NF-e válida.")
+            except Exception as _ex:
+                st.error(f"❌ Erro ao processar XML: {_ex}")
+                st.info("Verifique se o arquivo é um XML de NF-e válido (modelo 55).")
+
+    # ── TABELA DO ESTOQUE ────────────────────────────────────────────────────
+    st.markdown("---")
+    if st.session_state.estoque:
+        _df_show = _pd_est.DataFrame(st.session_state.estoque)
+        for _col in ["Embalagem","Ingrediente Ativo","Fabricante","Lote","Estoque Mínimo"]:
+            if _col not in _df_show.columns:
+                _df_show[_col] = "—" if _col != "Estoque Mínimo" else 5.0
+
+        _df_show["Status"] = _df_show.apply(
+            lambda r: "❌ Zerado" if float(r.get("Quantidade",0)) <= 0 else
+                      ("⚠️ Baixo" if float(r.get("Quantidade",0)) <= float(r.get("Estoque Mínimo",5)) else "✅ OK"),
+            axis=1
+        )
+
+        # Filtros
+        _col_f1, _col_f2, _col_f3 = st.columns(3)
+        _filtro_cat = _col_f1.selectbox("Filtrar por categoria",
+                        ["Todas"] + sorted(_df_show["Categoria"].dropna().unique().tolist()),
+                        key="filtro_cat_estoque")
+        _filtro_status = _col_f2.selectbox("Filtrar por status",
+                        ["Todos","✅ OK","⚠️ Baixo","❌ Zerado"], key="filtro_status_estoque")
+        _busca_tabela = _col_f3.text_input("🔍 Buscar", placeholder="Nome do produto...",
+                                            key="busca_tabela_estoque")
+
+        _df_filtered = _df_show.copy()
+        if _filtro_cat != "Todas":
+            _df_filtered = _df_filtered[_df_filtered["Categoria"] == _filtro_cat]
+        if _filtro_status != "Todos":
+            _df_filtered = _df_filtered[_df_filtered["Status"] == _filtro_status]
+        if _busca_tabela:
+            _df_filtered = _df_filtered[_df_filtered["Insumo"].str.contains(_busca_tabela, case=False, na=False)]
+
+        # Cards de alertas
+        _alertas = [i for i in st.session_state.estoque if float(i.get("Quantidade",0)) <= float(i.get("Estoque Mínimo",5))]
+        if _alertas:
+            with st.expander(f"🔔 {len(_alertas)} alerta(s) de estoque", expanded=True):
+                for _al in _alertas:
+                    _cor = "#7f1d1d" if float(_al.get("Quantidade",0)) <= 0 else "#78350f"
+                    _ico = "❌" if float(_al.get("Quantidade",0)) <= 0 else "⚠️"
+                    st.markdown(f"""
+                    <div style='background:{_cor};border-radius:8px;padding:8px 14px;
+                    margin:3px 0;display:flex;justify-content:space-between;align-items:center;'>
+                    <span style='color:#fff;font-weight:600;'>{_ico} {_al.get('Insumo','')}</span>
+                    <span style='color:#fca5a5;font-size:13px;'>
+                    {_al.get('Quantidade',0):.2f} {_al.get('Unidade','')} restante
+                    (mín: {_al.get('Estoque Mínimo',5):.0f})
+                    </span>
+                    </div>""", unsafe_allow_html=True)
+
+        # Tabela principal
+        _cols_exib = [c for c in ["Insumo","Categoria","Quantidade","Unidade",
+                                   "Valor Unitário R$","Valor Total R$","Lote","Status"]
+                      if c in _df_filtered.columns]
+        st.dataframe(_df_filtered[_cols_exib], use_container_width=True, hide_index=True)
+
+        # Editar quantidade manualmente
+        with st.expander("✏️ Ajustar quantidade / excluir produto"):
+            _nomes_est = [i["Insumo"] for i in st.session_state.estoque]
+            _prod_edit = st.selectbox("Produto", _nomes_est, key="sel_prod_edit_est")
+            _item_edit = next((i for i in st.session_state.estoque if i["Insumo"] == _prod_edit), None)
+            if _item_edit:
+                col_ed1, col_ed2 = st.columns(2)
+                _nova_qtd = col_ed1.number_input("Nova quantidade",
+                                                  min_value=0.0,
+                                                  value=float(_item_edit.get("Quantidade",0)),
+                                                  key="num_nova_qtd_edit")
+                _novo_min = col_ed2.number_input("Novo estoque mínimo",
+                                                  min_value=0.0,
+                                                  value=float(_item_edit.get("Estoque Mínimo",5)),
+                                                  key="num_novo_min_edit")
+                col_btn1, col_btn2 = st.columns(2)
+                if col_btn1.button("💾 Salvar ajuste", key="btn_salvar_edit_est", use_container_width=True):
+                    _item_edit["Quantidade"] = _nova_qtd
+                    _item_edit["Estoque Mínimo"] = _novo_min
+                    _item_edit["Valor Total R$"] = round(_nova_qtd * float(_item_edit.get("Valor Unitário R$",0)), 2)
+                    salvar_dados_iaagro()
+                    success_box(f"✅ {_prod_edit} atualizado: {_nova_qtd} {_item_edit.get('Unidade','')}")
+                    st.rerun()
+                if col_btn2.button("🗑️ Excluir produto", key="btn_excluir_est", use_container_width=True):
+                    st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != _prod_edit]
+                    salvar_dados_iaagro()
+                    success_box(f"{_prod_edit} removido.")
+                    st.rerun()
+    else:
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:12px;padding:30px;text-align:center;
+        border:2px dashed #1e4976;margin:20px 0;'>
+        <div style='font-size:48px;'>📦</div>
+        <div style='color:#94a3b8;font-size:16px;margin-top:8px;'>Estoque vazio</div>
+        <div style='color:#64748b;font-size:13px;'>Use as abas acima para adicionar produtos</div>
         </div>""", unsafe_allow_html=True)
 
-        if st.button("🔄 Trocar produto", key="btn_trocar_produto"):
-            st.session_state.ac_selecionado = None
-            st.session_state.ac_query = ""
-            st.rerun()
-
-        nome_insumo = p["nome"]
-        # Mapeia categoria do catálogo para categoria do estoque
-        cat_map = {
-            "Fungicida":"Fungicida","Herbicida":"Herbicida","Inseticida":"Inseticida",
-            "Acaricida":"Outro","Nematicida":"Outro","Fungicida Biológico":"Biológico",
-            "Inseticida Biológico":"Biológico","Bioestimulante":"Foliar",
-            "Foliar / Nutrição":"Foliar","Regulador de Crescimento":"Outro",
-            "Adjuvante":"Adjuvante","Tratamento de Sementes":"Outro",
-            "Fertilizante":"Fertilizante",
-        }
-        cat_sugerida = cat_map.get(p["cat"], "Outro")
-    else:
-        nome_insumo  = st.session_state.ac_query if st.session_state.ac_query else ""
-        cat_sugerida = "Fungicida"
-
-    # ── Campos complementares ─────────────────────────────────────────────
-    st.divider()
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        # Nome editável (pré-preenchido pelo autocomplete)
-        nome_final = st.text_input("Nome do produto / insumo", value=nome_insumo, key="nome_insumo_final")
-        categoria  = st.selectbox("Categoria", [
-            "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-            "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-        ], index=["Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                  "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                 ].index(cat_sugerida) if cat_sugerida in [
-                  "Fertilizante","Cloreto de Potássio","Ureia","Fungicida","Inseticida",
-                  "Herbicida","Biológico","Foliar","Semente","Calcário","Gesso Agrícola","Adjuvante","Outro"
-                 ] else 0)
-        cultura    = st.selectbox("Cultura", ["Soja","Milho","Ambos"], key="cultura_estoque")
-        litros_ha  = st.number_input("Litros de calda por hectare", min_value=0.0, value=75.0, key="litros_ha_estoque")
-        capacidade_tanque = st.number_input("Capacidade do tanque (L)", min_value=0, value=2000, key="tanque_estoque")
-    with col2:
-        quantidade  = st.number_input("Quantidade em estoque", min_value=0.0, value=0.0)
-        unidade     = st.selectbox("Unidade do estoque", ["kg","ton","litros","sacos","galões","unidades"])
-    with col3:
-        valor_unitario = st.number_input("Valor unitário R$", min_value=0.0, value=0.0)
-        estoque_minimo = st.number_input("Estoque mínimo", min_value=0.0, value=0.0)
-
-    observacao = st.text_area("Observação")
-
-    if st.button("Adicionar Produto ao Estoque"):
-        nome_usar = nome_final.strip() if nome_final.strip() else nome_insumo.strip()
-        if not nome_usar:
-            error_box("Digite ou selecione o nome do produto.")
-        else:
-            novo_item = {
-                "Insumo": nome_usar, "Categoria": categoria,
-                "Quantidade": quantidade, "Unidade": unidade,
-                "Valor Unitário R$": valor_unitario,
-                "Valor Total R$": quantidade * valor_unitario,
-                "Estoque Mínimo": estoque_minimo,
-                "Observação": observacao, "Cultura": cultura,
-                "Dose ha": dose_ha, "Litros ha": litros_ha,
-                "Tanque litros": capacidade_tanque,
-                "Fabricante": st.session_state.ac_selecionado["fab"] if st.session_state.ac_selecionado else "",
-                "Ingrediente Ativo": st.session_state.ac_selecionado["ia"] if st.session_state.ac_selecionado else "",
-            }
-            st.session_state.estoque.append(novo_item)
-            # Reseta autocomplete após adicionar
-            st.session_state.ac_selecionado = None
-            st.session_state.ac_query = ""
-            salvar_dados_iaagro()
-            success_box(f"✅ {nome_usar} adicionado ao estoque.")
-
-    st.subheader("Estoque Atual")
-    if len(st.session_state.estoque) == 0:
-        info_box("Nenhum produto cadastrado ainda.")
-    else:
-        tabela_estoque = pd.DataFrame(st.session_state.estoque)
-
-        st.markdown("### 🗑️ Excluir Produto")
-        produto_excluir = st.selectbox(
-            "Selecione o produto",
-            [item["Insumo"] for item in st.session_state.estoque],
-            key="produto_excluir_estoque"
-        )
-        if st.button("❌ Excluir Produto", key="btn_excluir_produto"):
-            st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != produto_excluir]
-            salvar_dados_iaagro()
-            success_box(f"{produto_excluir} removido do estoque.")
-            st.rerun()
-
-        tabela_estoque["Status"] = tabela_estoque.apply(
-            lambda linha: "Estoque baixo" if linha["Quantidade"] <= linha["Estoque Mínimo"] else "OK", axis=1
-        )
-        st.dataframe(tabela_estoque, use_container_width=True)
-
-        st.subheader("🚨 Alertas Inteligentes")
-        for item in st.session_state.estoque:
-            qtd  = item.get("Quantidade", 0)
-            nome = item.get("Insumo", "Produto")
-            if   qtd <= 0:   error_box(f"❌ {nome}: estoque zerado!")
-            elif qtd <= 500: warning_box(f"⚠️ {nome}: estoque baixo ({qtd:.1f} kg/L)")
-            else:            success_box(f"✅ {nome}: estoque OK ({qtd:.1f} kg/L)")
-
-        col4, col5, col6 = st.columns(3)
-        col4.metric("Itens cadastrados",      len(tabela_estoque))
-        col5.metric("Valor total em estoque", f"R$ {tabela_estoque['Valor Total R$'].sum():,.2f}")
-        col6.metric("Itens com estoque baixo", len(tabela_estoque[tabela_estoque["Status"] == "Estoque baixo"]))
-
-# ─────────────────────────────────────────────
-# MENU: APLICAÇÕES
-# CORREÇÕES:
-#   - operador/pulverizador/velocidade/pressao/clima movidos para fora do loop
-#   - loop aninhado duplicado removido
-#   - key duplicada no botão corrigida com índice único
-# ─────────────────────────────────────────────
-elif menu == "Aplicações":
+  with _sub_op[1]:
     st.header("🚜 Aplicações Agrícolas")
 
     if "aplicacoes" not in st.session_state:
         st.session_state.aplicacoes = []
 
+    ESTADIOS = [
+        "🚜 Plantio","🌱 Pré-plantio","🌿 Pós-plantio / V0","🌾 V1 – V3","🌾 V4 – V6",
+        "🌾 V7 – VT","🌸 R1 – R2 (Floração)","🫘 R3 – R4 (Granação)",
+        "🫘 R5 – R6","🌾 Pré-colheita","📋 Outro",
+    ]
+    TIPOS_PRODUTO = ["Herbicida","Fungicida","Inseticida","Adjuvante",
+                     "Óleo mineral/vegetal","Fertilizante foliar","Regulador","Outro"]
+
     if len(st.session_state.estoque) == 0:
         warning_box("Cadastre produtos no estoque antes de registrar aplicações.")
     else:
-        tipos_aplicacao = [
-            "Pré-plantio","Pós-plantio","V0","Herbicida seletivo",
-            "1ª Fungicida","2ª Fungicida","3ª Fungicida","4ª Fungicida",
-            "5ª Fungicida","6ª Fungicida","Outra"
+        # ── SELEÇÃO DE CULTURA ATIVA ────────────────────────────────────────────
+        if "aplic_cultura_ativa" not in st.session_state:
+            st.session_state.aplic_cultura_ativa = None
+        if "aplic_ha_ativo" not in st.session_state:
+            st.session_state.aplic_ha_ativo = 0.0
+
+        _CULTURAS_PLAN = [
+            "🌱 Soja","🌽 Milho 1ª Safra","🌽 Milho 2ª Safra (Safrinha)",
+            "🌾 Trigo","🌾 Aveia","🌻 Canola","🌱 Feijão","🍚 Arroz","🌾 Sorgo","🌿 Outro"
         ]
-        tipo_aplicacao = st.selectbox("Tipo de aplicação", tipos_aplicacao)
-        nome_aplicacao = st.text_input("Nome da aplicação", placeholder="Ex: Aplicação de inseticida") if tipo_aplicacao == "Outra" else tipo_aplicacao
 
-        col_a, col_b, col_c = st.columns(3)
-        with col_a: data_aplicacao = st.date_input("Data da aplicação")
-        with col_b: area_aplicada  = st.number_input("Área aplicada em hectares", min_value=0.0, value=float(st.session_state.dados.get("area", 0.0)))
-        with col_c: litros_por_hectare = st.number_input("Volume de calda L/ha", min_value=0.0, value=75.0)
+        st.markdown("""
+        <div style='background:linear-gradient(135deg,#14532d,#0f3d20);border-radius:14px;
+        padding:16px 20px;margin-bottom:16px;border:1px solid #22c55e44;'>
+        <b style='color:#6ee7b7;font-size:15px;'>🌾 Planejamento de Safra por Cultura</b><br>
+        <span style='color:#94a3b8;font-size:12px;'>
+        Selecione a cultura e o total de hectares. Monte todas as aplicações e gere o PDF.
+        Depois inicie o planejamento da próxima cultura.
+        </span></div>""", unsafe_allow_html=True)
 
-        capacidade_tanque  = st.number_input("Capacidade do tanque em litros", min_value=0.0, value=3000.0)
-        area_por_tanque    = (capacidade_tanque / litros_por_hectare) if litros_por_hectare > 0 else 0
-        numero_tanques     = (area_aplicada / area_por_tanque) if area_por_tanque > 0 else 0
+        _pc1, _pc2, _pc3 = st.columns([3,2,2])
+        _cult_sel = _pc1.selectbox("🌱 Cultura", _CULTURAS_PLAN,
+            index=_CULTURAS_PLAN.index(st.session_state.aplic_cultura_ativa)
+                  if st.session_state.aplic_cultura_ativa in _CULTURAS_PLAN else 0,
+            key="sel_cult_aplic_ativa")
+        _ha_sel = _pc2.number_input("Total de hectares", min_value=0.0,
+            value=st.session_state.aplic_ha_ativo, step=0.5, key="num_ha_aplic_ativo")
 
-        col_t1, col_t2 = st.columns(2)
-        col_t1.metric("Área por tanque",            f"{area_por_tanque:.2f} ha")
-        col_t2.metric("Número estimado de tanques", f"{numero_tanques:.2f}")
+        if _pc3.button("✅ Confirmar Cultura", key="btn_confirmar_cultura_aplic",
+                       use_container_width=True, type="primary"):
+            st.session_state.aplic_cultura_ativa = _cult_sel
+            st.session_state.aplic_ha_ativo      = _ha_sel
+            salvar_dados_iaagro()
+            st.rerun()
 
-        # CORREÇÃO 6: campos do operador fora do loop de produtos
-        st.subheader("🧑‍🌾 Dados do Operador")
-        operador         = st.text_input("Operador da aplicação")
-        pulverizador     = st.text_input("Pulverizador / Máquina")
-        velocidade       = st.number_input("Velocidade de aplicação (km/h)", min_value=0.0, value=0.0)
-        pressao          = st.number_input("Pressão de trabalho (bar)", min_value=0.0, value=0.0)
-        clima_aplicacao  = st.selectbox("Condição climática", ["Adequada","Vento alto","Muito seco","Chuva próxima","Muito quente"])
+        if st.session_state.aplic_cultura_ativa:
+            _cult_ativa = st.session_state.aplic_cultura_ativa
+            _ha_ativo   = st.session_state.aplic_ha_ativo
+            # Contagem de aplicações desta cultura
+            _aplic_cultura = [a for a in st.session_state.aplicacoes
+                               if a.get("Cultura") == _cult_ativa]
+            _kc1, _kc2, _kc3 = st.columns(3)
+            _kc1.metric("🌾 Cultura ativa", _cult_ativa.split(" ",1)[-1] if " " in _cult_ativa else _cult_ativa)
+            _kc2.metric("📐 Hectares", f"{_ha_ativo:.1f} ha")
+            _kc3.metric("📋 Aplicações", len(_aplic_cultura))
 
-        quantidade_produtos = st.number_input("Quantidade de produtos usados", min_value=1, max_value=10, value=1)
-        produtos_usados = []
+            if _pc3.button("🔄 Nova Cultura", key="btn_nova_cultura_aplic",
+                           use_container_width=True):
+                st.session_state.aplic_cultura_ativa = None
+                st.session_state.aplic_ha_ativo      = 0.0
+                st.rerun()
 
-        for i in range(quantidade_produtos):
-            st.markdown(f"### Produto {i + 1}")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                produto = st.selectbox(f"Produto {i+1}", [item["Insumo"] for item in st.session_state.estoque], key=f"produto_aplicacao_{i}")
-            with col2:
-                dose_ha = st.number_input(f"Dose por hectare {i+1}", min_value=0.0, value=0.0, key=f"dose_ha_aplicacao_{i}")
-            with col3:
-                unidade = st.selectbox(f"Unidade {i+1}", ["litros/ha","ml/ha","kg/ha","g/ha"], key=f"unidade_aplicacao_{i}")
-            with col4:
-                obs_produto = st.text_input(f"Observação {i+1}", key=f"obs_produto_aplicacao_{i}")
-            produto_por_tanque = dose_ha * area_por_tanque
-            produto_total      = dose_ha * area_aplicada
-            info_box(f"{produto}: {produto_por_tanque:.2f} {unidade.replace('/ha','')} por tanque | Total na área: {produto_total:.2f} {unidade.replace('/ha','')}")
-            produtos_usados.append({
-                "Produto": produto, "Dose por ha": dose_ha, "Unidade": unidade,
-                "Produto por tanque": produto_por_tanque, "Total usado": produto_total, "Observação": obs_produto
+        st.divider()
+        st.subheader("➕ Nova Aplicação")
+        col_h1, col_h2, col_h3 = st.columns(3)
+        with col_h1:
+            estadio_sel = st.selectbox("📅 Estádio fenológico", ESTADIOS, key="sel_estadio_aplic")
+            if estadio_sel == "📋 Outro":
+                nome_aplic = st.text_input("Nome da aplicação", placeholder="Ex: Aplicação especial", key="txt_nome_aplic")
+            else:
+                nome_aplic = estadio_sel
+                st.info(f"📋 Nome: **{nome_aplic}**")
+        with col_h2:
+            data_aplic = st.date_input("Data", key="dat_data_aplic")
+            area_aplic = st.number_input("Área (ha)", min_value=0.0,
+                                          value=float(st.session_state.aplic_ha_ativo) if st.session_state.aplic_ha_ativo > 0 else float(st.session_state.dados.get("area", 0.0)),
+                                          key="num_area_aplic")
+        with col_h3:
+            _calda_opcao = st.selectbox("Volume calda (L/ha)",
+                ["— Não se aplica —","50","80","100","120","150","200","Outro"],
+                key="sel_calda_opcao")
+            if _calda_opcao == "— Não se aplica —":
+                calda_lha = 0.0
+            elif _calda_opcao == "Outro":
+                calda_lha = st.number_input("Volume calda personalizado (L/ha)", min_value=0.0, value=100.0, key="num_calda_custom")
+            else:
+                calda_lha = float(_calda_opcao)
+
+            _tanque_opcao = st.selectbox("Capacidade tanque (L)",
+                ["— Não se aplica —","1000","1500","2000","2500","3000","4000","Outro"],
+                key="sel_tanque_opcao",
+                help="💾 Selecione o volume do tanque do pulverizador")
+            if _tanque_opcao == "— Não se aplica —":
+                cap_tanque = 0.0
+            elif _tanque_opcao == "Outro":
+                _cap_salva = st.session_state.dados.get("cap_tanque_salva", 3000.0)
+                cap_tanque = st.number_input("Capacidade personalizada (L)", min_value=0.0,
+                                              value=float(_cap_salva), key="num_cap_tanque")
+                if cap_tanque != _cap_salva and cap_tanque > 0:
+                    st.session_state.dados["cap_tanque_salva"] = cap_tanque
+                    salvar_dados_iaagro()
+            else:
+                cap_tanque = float(_tanque_opcao)
+
+        if calda_lha > 0 and cap_tanque > 0:
+            area_por_tanque = round(cap_tanque / calda_lha, 2)
+            n_tanques       = round(area_aplic / area_por_tanque, 2) if area_por_tanque > 0 else 0
+            col_m1, col_m2 = st.columns(2)
+            col_m1.metric("📐 Área por tanque", f"{area_por_tanque} ha")
+            col_m2.metric("🪣 Nº de tanques",   f"{n_tanques}")
+        else:
+            area_por_tanque = 0.0
+            n_tanques       = 0.0
+
+        with st.expander("🧑‍🌾 Dados do operador", expanded=False):
+            col_o1, col_o2, col_o3 = st.columns(3)
+            operador     = col_o1.text_input("Operador", key="txt_operador_aplic")
+            pulverizador = col_o2.text_input("Pulverizador/Máquina", key="txt_pulv_aplic")
+            velocidade   = col_o1.number_input("Velocidade (km/h)", min_value=0.0, key="num_veloc_aplic")
+            pressao      = col_o2.number_input("Pressão (bar)", min_value=0.0, key="num_pressao_aplic")
+            clima_aplic  = col_o3.selectbox("Clima", ["Adequado","Vento alto","Muito seco","Chuva próxima","Muito quente"], key="sel_clima_aplic")
+
+        # ── CAMPOS ESPECIAIS PARA PLANTIO ─────────────────────────────────────
+        _is_plantio = estadio_sel == "🚜 Plantio"
+        if _is_plantio:
+            st.markdown("""
+            <div style='background:#14532d;border-radius:12px;padding:14px 18px;
+            border-left:4px solid #22c55e;margin:8px 0;'>
+            <b style='color:#6ee7b7;font-size:14px;'>🚜 Configuração de Plantio</b><br>
+            <span style='color:#94a3b8;font-size:12px;'>
+            Preencha os fertilizantes de base, KCl, ureia e inoculantes que serão aplicados no sulco.
+            </span></div>""", unsafe_allow_html=True)
+
+            st.markdown("#### 🌱 Sementes — Múltiplas Variedades")
+
+            # Init lista de variedades na sessão
+            if "pl_variedades" not in st.session_state:
+                st.session_state.pl_variedades = []
+
+            # Siglas/abreviações das principais empresas/obtentoras de sementes do
+            # mercado brasileiro. Cultivares comerciais quase sempre são nomeados
+            # como "SIGLA + código" (ex.: "BMX Desafio RR", "TMG 7062", "DKB 390"),
+            # então o nome do insumo no estoque nem sempre contém a palavra
+            # "semente/soja/milho" — precisamos reconhecer também a sigla da marca.
+            _SIGLAS_SEMENTES = [
+                "bmx",       # Brasmax
+                "tmg",       # TMG - Tropical Melhoramento e Genética
+                "ns",        # Nidera Semillas
+                "dm",        # Don Mario / GDM
+                "syn",       # Syngenta
+                "nk",        # NK - Syngenta (milho)
+                "cz",        # Coodetec
+                "brs",       # Embrapa
+                "fts",       # Fundação MT
+                "tec",       # TEC Sementes
+                "st",        # Stine
+                "dkb",       # Dekalb (milho) - Bayer
+                "ag",        # Agroceres (milho)
+                "gh",        # Golden Harvest
+                "fundacep",  # Fundacep
+                "gdm",       # GDM Seeds (Don Mario)
+                "aba",       # Aba Agro
+                "bs",        # Brasil Seed
+                "w",         # W - Sementes
+                "cd",        # Coodetec (registros antigos)
+                "bono",      # Bono Sementes
+                "sps",       # Sementes SPS
+            ]
+            # regex para achar a sigla como "palavra" (evita falso-positivo tipo
+            # "st" dentro de "Ativo"), aceitando também colada a número: "BMX8579"
+            _re_siglas = re.compile(
+                r"\b(" + "|".join(re.escape(s) for s in _SIGLAS_SEMENTES) + r")\d*\b",
+                re.IGNORECASE
+            )
+
+            # Selectbox com sementes do estoque + manual
+            _sem_est = ["— digitar manualmente —"] + [
+                i["Insumo"] for i in st.session_state.estoque
+                if any(p in i.get("Categoria","").lower() or p in i.get("Insumo","").lower()
+                       for p in ["semente","seed","milho","soja","trigo","aveia","feijão","canola","sorgo","arroz","híbrido","variedade","cultivar"])
+                or _re_siglas.search(i.get("Insumo",""))
+            ]
+            if len(_sem_est) <= 1:
+                _sem_est = ["— digitar manualmente —"] + [i["Insumo"] for i in st.session_state.estoque]
+
+            # Form para adicionar variedade
+            with st.form("form_add_variedade", clear_on_submit=True):
+                _sv_c1, _sv_c2, _sv_c3 = st.columns(3)
+                _sv_sel   = _sv_c1.selectbox("🔍 Variedade/Híbrido", _sem_est, key="sv_sel")
+                _sv_man   = _sv_c1.text_input("Ou digite", placeholder="Ex: Brasmax Bônus IPRO", key="sv_man") if _sv_sel == "— digitar manualmente —" else ""
+                _sv_nome  = _sv_man if _sv_sel == "— digitar manualmente —" else _sv_sel
+                _sv_ha    = _sv_c2.number_input("Hectares desta variedade", min_value=0.1, value=10.0, step=0.5, key="sv_ha")
+                _sv_dose  = _sv_c2.number_input("Dose (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="sv_dose")
+                _sv_pop   = _sv_c3.number_input("População (pl/ha)", min_value=0, value=240000, step=5000, key="sv_pop")
+                _sv_esp   = _sv_c3.number_input("Espaçamento (cm)", min_value=0.0, value=45.0, key="sv_esp")
+                _sv_add   = st.form_submit_button("➕ Adicionar Variedade", use_container_width=True)
+
+            if _sv_add and _sv_nome and _sv_nome != "— digitar manualmente —":
+                st.session_state.pl_variedades.append({
+                    "nome": _sv_nome, "ha": _sv_ha,
+                    "dose": _sv_dose, "pop": _sv_pop,
+                    "esp": _sv_esp,
+                    "total_kg": round(_sv_dose * _sv_ha, 1),
+                })
+                st.rerun()
+
+            # TSI compartilhado para todas as variedades
+            _pl_tsi = st.text_area("TSI - Tratamento de sementes (todas as variedades)",
+                placeholder="Ex: Maxim Advanced 200mL/sc + Fortenza 200mL/sc + Standak Top 200mL/sc",
+                key="pl_txt_tsi", height=68)
+
+            # Mostra variedades adicionadas
+            if st.session_state.pl_variedades:
+                st.markdown("**📋 Variedades adicionadas:**")
+                _tot_ha_sem  = sum(v["ha"] for v in st.session_state.pl_variedades)
+                _tot_kg_sem  = sum(v["total_kg"] for v in st.session_state.pl_variedades)
+                for _vi, _v in enumerate(st.session_state.pl_variedades):
+                    _vc1, _vc2 = st.columns([5,1])
+                    _vc1.markdown(f"""
+                    <div style='background:#14532d;border-radius:8px;padding:6px 12px;
+                    border-left:3px solid #22c55e;margin:2px 0;font-size:12px;'>
+                    <b style='color:#6ee7b7;'>{_v['nome']}</b>
+                    <span style='color:#f1f5f9;'> · {_v['ha']} ha · {_v['dose']} kg/ha
+                    → <b>{_v['total_kg']:,.0f} kg</b>
+                    · {_v['pop']:,} pl/ha · {_v['esp']} cm</span>
+                    </div>""", unsafe_allow_html=True)
+                    if _vc2.button("🗑️", key=f"del_var_{_vi}"):
+                        st.session_state.pl_variedades.pop(_vi)
+                        st.rerun()
+
+                st.markdown(f"""
+                <div style='background:#0f2d4a;border-radius:8px;padding:8px 14px;
+                border-left:3px solid #22c55e;margin:4px 0;'>
+                <b style='color:#22c55e;'>📊 Total sementes:</b>
+                <span style='color:#f1f5f9;'> {_tot_ha_sem:.1f} ha · {_tot_kg_sem:,.0f} kg total</span>
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.info("Adicione ao menos uma variedade acima.")
+
+            # Compat: variáveis usadas abaixo (usa primeira variedade ou vazio)
+            _pl_semente  = st.session_state.pl_variedades[0]["nome"] if st.session_state.pl_variedades else ""
+            _pl_dose_sem = st.session_state.pl_variedades[0]["dose"] if st.session_state.pl_variedades else 0.0
+            _pl_pop      = st.session_state.pl_variedades[0]["pop"]  if st.session_state.pl_variedades else 0
+            _pl_espacamento = st.session_state.pl_variedades[0]["esp"] if st.session_state.pl_variedades else 45.0
+
+            st.markdown("#### 🧪 Fertilizantes de Base (sulco e/ou lanço)")
+
+            # Lista do estoque + opção manual
+            _est_nomes = ["— digitar manualmente —"] + [i["Insumo"] for i in st.session_state.estoque]
+
+            _fl_c1, _fl_c2, _fl_c3 = st.columns(3)
+
+            # Adubo base
+            _pl_adubo_sel  = _fl_c1.selectbox("🔍 Adubo de base (estoque)", _est_nomes, key="pl_sel_adubo")
+            _pl_adubo_man  = _fl_c1.text_input("Ou digite o nome", placeholder="MAP, NPK 08-28-16...", key="pl_txt_adubo") if _pl_adubo_sel == "— digitar manualmente —" else ""
+            _pl_adubo_nome = _pl_adubo_man if _pl_adubo_sel == "— digitar manualmente —" else _pl_adubo_sel
+            _pl_adubo_kg   = _fl_c1.number_input("Dose adubo (kg/ha)", min_value=0.0, step=5.0, key="pl_num_adubo")
+
+            # KCl
+            _pl_kcl_sel   = _fl_c2.selectbox("🔍 KCl / Potássio (estoque)", _est_nomes, key="pl_sel_kcl")
+            _pl_kcl_man   = _fl_c2.text_input("Ou digite o nome", placeholder="KCl Mosaic, SulPoMag...", key="pl_txt_kcl") if _pl_kcl_sel == "— digitar manualmente —" else ""
+            _pl_kcl_nome  = _pl_kcl_man if _pl_kcl_sel == "— digitar manualmente —" else _pl_kcl_sel
+            _pl_kcl_kg    = _fl_c2.number_input("Dose KCl (kg/ha)", min_value=0.0, step=5.0, key="pl_num_kcl")
+
+            # Ureia
+            _pl_ureia_sel  = _fl_c3.selectbox("🔍 Ureia / N (estoque)", _est_nomes, key="pl_sel_ureia")
+            _pl_ureia_man  = _fl_c3.text_input("Ou digite o nome", placeholder="Ureia Yara, KAS...", key="pl_txt_ureia") if _pl_ureia_sel == "— digitar manualmente —" else ""
+            _pl_ureia_nome = _pl_ureia_man if _pl_ureia_sel == "— digitar manualmente —" else _pl_ureia_sel
+            _pl_ureia_kg   = _fl_c3.number_input("Dose N (kg/ha)", min_value=0.0, step=5.0, key="pl_num_ureia")
+
+            st.markdown("#### 🦠 Inoculantes no Sulco")
+            _in_c1, _in_c2, _in_c3 = st.columns(3)
+
+            _pl_inoc1_sel  = _in_c1.selectbox("🔍 Inoculante 1 (estoque)", _est_nomes, key="pl_sel_inoc1")
+            _pl_inoc1_man  = _in_c1.text_input("Ou digite", placeholder="Nitragin Gold...", key="pl_txt_inoc1") if _pl_inoc1_sel == "— digitar manualmente —" else ""
+            _pl_inoc1_nome = _pl_inoc1_man if _pl_inoc1_sel == "— digitar manualmente —" else _pl_inoc1_sel
+            _pl_inoc1_dose = _in_c1.number_input("Dose inoc 1 (mL/ha)", min_value=0.0, key="pl_num_inoc1")
+
+            _pl_inoc2_sel  = _in_c2.selectbox("🔍 Co-inoculante (estoque)", _est_nomes, key="pl_sel_inoc2")
+            _pl_inoc2_man  = _in_c2.text_input("Ou digite", placeholder="Azospirillum...", key="pl_txt_inoc2") if _pl_inoc2_sel == "— digitar manualmente —" else ""
+            _pl_inoc2_nome = _pl_inoc2_man if _pl_inoc2_sel == "— digitar manualmente —" else _pl_inoc2_sel
+            _pl_inoc2_dose = _in_c2.number_input("Dose co-inoc (mL/ha)", min_value=0.0, key="pl_num_inoc2")
+
+            _pl_inoc3_sel  = _in_c3.selectbox("🔍 Inoc. semente (estoque)", _est_nomes, key="pl_sel_inoc3")
+            _pl_inoc3_man  = _in_c3.text_input("Ou digite", placeholder="Bradyrhizobium...", key="pl_txt_inoc3") if _pl_inoc3_sel == "— digitar manualmente —" else ""
+            _pl_inoc3_nome = _pl_inoc3_man if _pl_inoc3_sel == "— digitar manualmente —" else _pl_inoc3_sel
+            _pl_inoc3_dose = _in_c3.number_input("Dose inoc semente (mL/sc)", min_value=0.0, key="pl_num_inoc3")
+
+            st.markdown("#### 🌿 Micronutrientes e Outros no Sulco")
+            _mn_c1, _mn_c2 = st.columns(2)
+
+            _pl_micro1_sel  = _mn_c1.selectbox("🔍 Micronutriente 1 (estoque)", _est_nomes, key="pl_sel_micro1")
+            _pl_micro1_man  = _mn_c1.text_input("Ou digite", placeholder="Boro Quelatado, Zinco...", key="pl_txt_micro1") if _pl_micro1_sel == "— digitar manualmente —" else ""
+            _pl_micro1_nome = _pl_micro1_man if _pl_micro1_sel == "— digitar manualmente —" else _pl_micro1_sel
+            _pl_micro1_dose = _mn_c1.number_input("Dose micro 1 (kg/L ha)", min_value=0.0, step=0.1, key="pl_num_micro1")
+
+            _pl_micro2_sel  = _mn_c2.selectbox("🔍 Micronutriente 2 (estoque)", _est_nomes, key="pl_sel_micro2")
+            _pl_micro2_man  = _mn_c2.text_input("Ou digite", placeholder="MicroEssentials SZ...", key="pl_txt_micro2") if _pl_micro2_sel == "— digitar manualmente —" else ""
+            _pl_micro2_nome = _pl_micro2_man if _pl_micro2_sel == "— digitar manualmente —" else _pl_micro2_sel
+            _pl_micro2_dose = _mn_c2.number_input("Dose micro 2 (kg/L ha)", min_value=0.0, step=0.1, key="pl_num_micro2")
+
+            # Mostra totais por ha e área
+            if area_aplic > 0 and (_pl_adubo_kg + _pl_kcl_kg + _pl_ureia_kg) > 0:
+                st.markdown("---")
+                st.markdown("**📊 Totais para a área informada:**")
+                _t1, _t2, _t3, _t4 = st.columns(4)
+                if _pl_adubo_kg > 0:
+                    _t1.metric(f"🟡 {_pl_adubo_nome or 'Adubo'}",
+                               f"{_pl_adubo_kg * area_aplic:,.0f} kg",
+                               f"{_pl_adubo_kg} kg/ha")
+                if _pl_kcl_kg > 0:
+                    _t2.metric(f"🟣 {_pl_kcl_nome or 'KCl'}",
+                               f"{_pl_kcl_kg * area_aplic:,.0f} kg",
+                               f"{_pl_kcl_kg} kg/ha")
+                if _pl_ureia_kg > 0:
+                    _t3.metric(f"⬜ {_pl_ureia_nome or 'Ureia'}",
+                               f"{_pl_ureia_kg * area_aplic:,.0f} kg",
+                               f"{_pl_ureia_kg} kg/ha")
+                if _pl_dose_sem > 0:
+                    _t4.metric("🌱 Semente",
+                               f"{_pl_dose_sem * area_aplic:,.0f} kg",
+                               f"{_pl_dose_sem} kg/ha")
+
+            # ── BOTÃO SALVAR PLANTIO DIRETO ──────────────────────────────────
+            st.markdown("---")
+            if st.button("💾 Salvar Aplicação de Plantio no Cronograma",
+                         key="btn_salvar_plantio_direto",
+                         use_container_width=True, type="primary"):
+                _dp = {
+                    "semente": _pl_semente, "dose_sem_ha": _pl_dose_sem,
+                    "populacao": _pl_pop, "tsi": _pl_tsi,
+                    "espacamento": _pl_espacamento,
+                    "adubo_nome": _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
+                    "kcl_nome": _pl_kcl_nome, "kcl_kg_ha": _pl_kcl_kg,
+                    "ureia_nome": _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
+                    "inoc1_nome": _pl_inoc1_nome, "inoc1_dose": _pl_inoc1_dose,
+                    "inoc2_nome": _pl_inoc2_nome, "inoc2_dose": _pl_inoc2_dose,
+                    "inoc3_nome": _pl_inoc3_nome, "inoc3_dose": _pl_inoc3_dose,
+                    "micro1_nome": _pl_micro1_nome, "micro1_dose": _pl_micro1_dose,
+                    "micro2_nome": _pl_micro2_nome, "micro2_dose": _pl_micro2_dose,
+                    "adubo_total_kg": round(_pl_adubo_kg * area_aplic, 1),
+                    "kcl_total_kg": round(_pl_kcl_kg * area_aplic, 1),
+                    "ureia_total_kg": round(_pl_ureia_kg * area_aplic, 1),
+                    "semente_total_kg": round(_pl_dose_sem * area_aplic, 1),
+                }
+                st.session_state.aplicacoes.append({
+                    "ID Área":             st.session_state.dados.get("id_area",""),
+                    "Cultura":             st.session_state.get("aplic_cultura_ativa",""),
+                    "Hectares Cultura":    st.session_state.get("aplic_ha_ativo", area_aplic),
+                    "Estádio":             "🚜 Plantio",
+                    "Aplicação":           "🚜 Plantio",
+                    "Data":                str(data_aplic),
+                    "Área aplicada ha":    area_aplic,
+                    "Volume calda L/ha":   0,
+                    "Capacidade tanque L": 0,
+                    "Área por tanque ha":  0,
+                    "Número tanques":      0,
+                    "Operador":            "",
+                    "Pulverizador":        "",
+                    "Velocidade km/h":     0,
+                    "Pressão bar":         0,
+                    "Clima aplicação":     "",
+                    "Produtos":            [],
+                    "Dados Plantio":       _dp,
+                    "Status":              "pendente",
+                })
+                salvar_dados_iaagro()
+                st.session_state.pl_variedades = []
+                success_box(f"✅ Plantio salvo no cronograma da {st.session_state.get('aplic_cultura_ativa','cultura')}!")
+                st.rerun()
+
+        st.subheader("🧪 Produtos da Aplicação" if not _is_plantio else "🧪 Defensivos e Outros Produtos")
+        _nomes_estoque = [item["Insumo"] for item in st.session_state.estoque]
+        n_produtos = int(st.number_input("Quantidade de produtos", min_value=1, max_value=10, value=1, step=1, key="num_qtd_produtos_aplic"))
+
+        produtos_aplic = []
+        for i in range(n_produtos):
+            st.markdown(f"**Produto {i+1}**")
+            col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([3,2,1,1,2])
+            _prod  = col_p1.selectbox("Produto",   _nomes_estoque, key=f"sel_prod_aplic_{i}")
+            _tipo_p= col_p2.selectbox("Tipo",       TIPOS_PRODUTO,  key=f"sel_tipo_prod_{i}")
+            _dose  = col_p3.number_input("Dose/ha", min_value=0.0,  key=f"num_dose_aplic_{i}")
+            _unid  = col_p4.selectbox("Un.", ["L/ha","mL/ha","kg/ha","g/ha"], key=f"sel_unid_aplic_{i}")
+            _obs_p = col_p5.text_input("Obs.", key=f"txt_obs_prod_{i}")
+            _por_tanque = round(_dose * area_por_tanque, 3)
+            _total_prod = round(_dose * area_aplic, 3)
+            if _dose > 0:
+                st.caption(f"  → {_por_tanque} {_unid.replace('/ha','')} por tanque | Total: {_total_prod} {_unid.replace('/ha','')}")
+            produtos_aplic.append({
+                "Produto": _prod, "Tipo": _tipo_p, "Dose por ha": _dose, "Unidade": _unid,
+                "Produto por tanque": _por_tanque, "Total usado": _total_prod, "Observação": _obs_p
             })
 
-        if st.button("Salvar Aplicação", key="salvar_aplicacao_modelada"):
+        if st.button("💾 Salvar Aplicação", key="salvar_aplicacao_modelada", use_container_width=True):
             erro = False
-            if nome_aplicacao.strip() == "": error_box("Informe o nome da aplicação."); erro = True
-            if area_aplicada <= 0:           error_box("Informe a área aplicada."); erro = True
-            if litros_por_hectare <= 0:      error_box("Informe o volume de calda em L/ha."); erro = True
-            if capacidade_tanque <= 0:       error_box("Informe a capacidade do tanque."); erro = True
-            for p in produtos_usados:
-                if p["Dose por ha"] <= 0: error_box(f"Informe dose maior que zero para {p['Produto']}."); erro = True
+            if not nome_aplic.strip(): error_box("Informe o nome da aplicação."); erro = True
+            if area_aplic <= 0:        error_box("Informe a área aplicada."); erro = True
+            for p in produtos_aplic:
+                if p["Dose por ha"] <= 0: error_box(f"Dose zero: {p['Produto']}."); erro = True
             if not erro:
-                for p in produtos_usados:
-                    sucesso, mensagem = baixar_estoque(p["Produto"], p["Total usado"])
-                    if not sucesso: error_box(f"{p['Produto']}: {mensagem}"); erro = True
-            if not erro:
+                _dados_plantio = {}
+                if _is_plantio:
+                    _dados_plantio = {
+                        "semente":      _pl_semente,    "dose_sem_ha": _pl_dose_sem,
+                        "populacao":    _pl_pop,         "tsi":         _pl_tsi,
+                        "espacamento":  _pl_espacamento,
+                        "variedades":   st.session_state.get("pl_variedades", []),
+                        "adubo_nome":   _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
+                        "kcl_nome":     _pl_kcl_nome,   "kcl_kg_ha":   _pl_kcl_kg,
+                        "ureia_nome":   _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
+                        "inoc1_nome":   _pl_inoc1_nome, "inoc1_dose":  _pl_inoc1_dose,
+                        "inoc2_nome":   _pl_inoc2_nome, "inoc2_dose":  _pl_inoc2_dose,
+                        "inoc3_nome":   _pl_inoc3_nome, "inoc3_dose":  _pl_inoc3_dose,
+                        "micro1_nome":  _pl_micro1_nome,"micro1_dose": _pl_micro1_dose,
+                        "micro2_nome":  _pl_micro2_nome,"micro2_dose": _pl_micro2_dose,
+                        "adubo_total_kg":  round(_pl_adubo_kg * area_aplic, 1),
+                        "kcl_total_kg":    round(_pl_kcl_kg * area_aplic, 1),
+                        "ureia_total_kg":  round(_pl_ureia_kg * area_aplic, 1),
+                        "semente_total_kg":round(_pl_dose_sem * area_aplic, 1),
+                    }
                 st.session_state.aplicacoes.append({
-                    "ID Área":            st.session_state.dados.get("id_area",""),
-                    "Aplicação":          nome_aplicacao,
-                    "Data":               str(data_aplicacao),
-                    "Área aplicada ha":   area_aplicada,
-                    "Volume calda L/ha":  litros_por_hectare,
-                    "Capacidade tanque L": capacidade_tanque,
-                    "Área por tanque ha": area_por_tanque,
-                    "Número tanques":     numero_tanques,
-                    "Operador":           operador,
-                    "Pulverizador":       pulverizador,
-                    "Velocidade km/h":    velocidade,
-                    "Pressão bar":        pressao,
-                    "Clima aplicação":    clima_aplicacao,
-                    "Produtos":           produtos_usados
+                    "ID Área":             st.session_state.dados.get("id_area",""),
+                    "Cultura":             st.session_state.get("aplic_cultura_ativa",""),
+                    "Hectares Cultura":    st.session_state.get("aplic_ha_ativo",0),
+                    "Estádio":             estadio_sel,
+                    "Aplicação":           nome_aplic,
+                    "Data":                str(data_aplic),
+                    "Área aplicada ha":    area_aplic,
+                    "Volume calda L/ha":   calda_lha,
+                    "Capacidade tanque L": cap_tanque,
+                    "Área por tanque ha":  area_por_tanque,
+                    "Número tanques":      n_tanques,
+                    "Operador":            operador,
+                    "Pulverizador":        pulverizador,
+                    "Velocidade km/h":     velocidade,
+                    "Pressão bar":         pressao,
+                    "Clima aplicação":     clima_aplic,
+                    "Produtos":            produtos_aplic,
+                    "Dados Plantio":       _dados_plantio,
+                    "Status":              "pendente",
                 })
                 atualizar_area_atual()
                 salvar_dados_iaagro()
-                success_box(f"{nome_aplicacao} salva com sucesso.")
+                if _is_plantio:
+                    st.session_state.pl_variedades = []
+                success_box(f"✅ {nome_aplic} salva! {len(produtos_aplic)} produto(s).")
+                st.rerun()
 
-        # ── Histórico
+        # PDF
         st.divider()
         st.subheader("📋 Histórico de Aplicações")
+        if st.session_state.aplicacoes:
+            # Filtra por cultura ativa se houver
+            _cult_pdf = st.session_state.get("aplic_cultura_ativa","")
+            _aplic_pdf = [a for a in st.session_state.aplicacoes
+                          if a.get("Cultura","") == _cult_pdf] if _cult_pdf else st.session_state.aplicacoes
+
+            _pc_pdf1, _pc_pdf2 = st.columns(2)
+            if _pc_pdf1.button(
+                f"📄 Gerar PDF — {_cult_pdf.split(' ',1)[-1] if _cult_pdf else 'Todas as Culturas'}",
+                key="btn_gerar_pdf_aplic", use_container_width=True, type="primary"):
+                try:
+                    _d = st.session_state.dados
+                    _cult_nome = _cult_pdf.split(" ",1)[-1] if _cult_pdf else cultura_limpa(_d.get("cultura",""))
+                    _ha_pdf = st.session_state.get("aplic_ha_ativo", _d.get("area",0))
+                    _pdf_bytes = gerar_pdf_programacao_aplicacoes(
+                        aplicacoes = _aplic_pdf,
+                        fazenda    = _d.get("fazenda",""),
+                        talhao     = _d.get("talhao",""),
+                        cultura    = _cult_nome,
+                        area_ha    = _ha_pdf,
+                        operador   = _d.get("operador",""),
+                    )
+                    st.session_state["_pdf_aplic"] = _pdf_bytes
+                    st.success(f"✅ PDF gerado! {len(_aplic_pdf)} aplicação(ões).")
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
+
+            if _pc_pdf2.button("🔄 Nova Cultura / Limpar seleção",
+                               key="btn_pdf_nova_cultura", use_container_width=True):
+                st.session_state.aplic_cultura_ativa = None
+                st.session_state.aplic_ha_ativo      = 0.0
+                st.rerun()
+
+            if st.session_state.get("_pdf_aplic"):
+                _nome_pdf = (_cult_pdf.split(" ",1)[-1].replace(" ","_") if _cult_pdf else "todas")
+                st.download_button(
+                    label="⬇️ Baixar PDF",
+                    data=st.session_state["_pdf_aplic"],
+                    file_name=f"programacao_{_nome_pdf}_{datetime.now().strftime('%d%m%Y')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="btn_download_pdf_aplic"
+                )
+
         if len(st.session_state.aplicacoes) == 0:
             info_box("Nenhuma aplicação registrada ainda.")
         else:
-            ordem = {"Pré-plantio":1,"Pós-plantio":2,"V0":3,"Herbicida seletivo":4,
-                     "1ª Fungicida":5,"2ª Fungicida":6,"3ª Fungicida":7,"4ª Fungicida":8,"5ª Fungicida":9,"6ª Fungicida":10}
-            aplicacoes_ordenadas = sorted(st.session_state.aplicacoes, key=lambda x: ordem.get(x.get("Aplicação",""), 99))
+            _ordem = {"🚜 Plantio":0,"🌱 Pré-plantio":1,"🌿 Pós-plantio / V0":2,"🌾 V1 – V3":3,
+                      "🌾 V4 – V6":4,"🌾 V7 – VT":5,"🌸 R1 – R2 (Floração)":6,
+                      "🫘 R3 – R4 (Granação)":7,"🫘 R5 – R6":8,"🌾 Pré-colheita":9}
 
-            for aplicacao in aplicacoes_ordenadas:
-                with st.expander(f"{aplicacao.get('Aplicação','Sem nome')} - {aplicacao.get('Data','Sem data')}"):
-                    st.write(f"Área aplicada: {aplicacao.get('Área aplicada ha', 0)} ha")
-                    st.write(f"Volume de calda: {aplicacao.get('Volume calda L/ha', 0)} L/ha")
-                    st.write(f"Capacidade do tanque: {aplicacao.get('Capacidade tanque L', 0)} L")
-                    st.write(f"Área por tanque: {aplicacao.get('Área por tanque ha', 0):.2f} ha")
-                    st.write(f"Número estimado de tanques: {aplicacao.get('Número tanques', 0):.2f}")
-                    tabela_ap = pd.DataFrame(aplicacao.get("Produtos", []))
-                    st.dataframe(tabela_ap, use_container_width=True)
+            # Filtro por cultura no histórico
+            _culturas_hist = list(dict.fromkeys(
+                a.get("Cultura","Sem cultura") for a in st.session_state.aplicacoes))
+            _fil_cult_hist = st.selectbox("🔍 Filtrar por cultura",
+                ["Todas"] + _culturas_hist, key="sel_fil_cult_hist")
 
-            st.divider()
-            st.subheader("🗑️ Gerenciar Aplicações")
-            for i, app in enumerate(st.session_state.aplicacoes):
-                col1, col2 = st.columns([5, 1])
-                with col1:
-                    st.write(f"{app.get('Aplicação','Sem nome')} | {app.get('Data','Sem data')} | {app.get('Área aplicada ha', 0)} ha")
-                with col2:
-                    if st.button("Apagar", key=f"apagar_app_{i}"):
-                        st.session_state.aplicacoes.pop(i)
+            _aplic_filtradas = st.session_state.aplicacoes if _fil_cult_hist == "Todas" else [
+                a for a in st.session_state.aplicacoes
+                if a.get("Cultura","Sem cultura") == _fil_cult_hist]
+
+            aplicacoes_ordenadas = sorted(_aplic_filtradas,
+                key=lambda x: _ordem.get(x.get("Estádio", x.get("Aplicação","")), 99))
+
+            for idx_a, aplic in enumerate(aplicacoes_ordenadas):
+                _status   = aplic.get("Status", "pendente")
+                _badge    = "✅ Aplicado" if _status == "aplicado" else "⏳ Pendente"
+                with st.expander(f"{aplic.get('Estádio','') or aplic.get('Aplicação','')} — {aplic.get('Data','')} | {_badge}"):
+                    col_i1, col_i2 = st.columns(2)
+                    col_i1.markdown(f"**Área:** {aplic.get('Área aplicada ha',0)} ha")
+                    col_i1.markdown(f"**Calda:** {aplic.get('Volume calda L/ha',0)} L/ha")
+                    col_i1.markdown(f"**Tanques:** {aplic.get('Número tanques',0):.1f}")
+                    col_i2.markdown(f"**Operador:** {aplic.get('Operador','—')}")
+                    col_i2.markdown(f"**Pulverizador:** {aplic.get('Pulverizador','—')}")
+                    col_i2.markdown(f"**Clima:** {aplic.get('Clima aplicação','—')}")
+
+                    # ── DADOS DE PLANTIO ─────────────────────────────────────
+                    _dp_view = aplic.get("Dados Plantio", {})
+                    if _dp_view:
+                        st.markdown("---")
+                        st.markdown("**🚜 Dados de Plantio:**")
+                        _dv1, _dv2, _dv3 = st.columns(3)
+
+                        # Semente
+                        # Múltiplas variedades
+                        _vars_view = _dp_view.get("variedades", [])
+                        if _vars_view:
+                            _tot_ha_v = sum(v["ha"] for v in _vars_view)
+                            _tot_kg_v = sum(v["total_kg"] for v in _vars_view)
+                            _linhas_v = "".join([
+                                f"<span style='color:#f1f5f9;font-size:11px;'>"
+                                f"<b style='color:#6ee7b7;'>{v['nome']}</b> · "
+                                f"{v['ha']} ha · {v['dose']} kg/ha → {v['total_kg']:,.0f} kg</span><br>"
+                                for v in _vars_view
+                            ])
+                            _tsi_v = f"<br><span style='color:#fbbf24;font-size:11px;'>TSI: {_dp_view.get('tsi','')}</span>" if _dp_view.get('tsi') else ""
+                            _dv1.markdown(f"""
+                            <div style='background:#14532d;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#6ee7b7;font-size:12px;'>🌱 SEMENTES ({len(_vars_view)} variedades)</b><br>
+                            {_linhas_v}
+                            <span style='color:#22c55e;font-size:11px;font-weight:700;'>
+                            Total: {_tot_ha_v:.1f} ha · {_tot_kg_v:,.0f} kg</span>
+                            {_tsi_v}
+                            </div>""", unsafe_allow_html=True)
+                        elif _dp_view.get("semente") or _dp_view.get("dose_sem_ha",0) > 0:
+                            _dv1.markdown(f"""
+                            <div style='background:#14532d;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#6ee7b7;font-size:12px;'>🌱 SEMENTE</b><br>
+                            <span style='color:#f1f5f9;font-size:13px;'>{_dp_view.get('semente','—')}</span><br>
+                            <span style='color:#94a3b8;font-size:11px;'>
+                            {_dp_view.get('dose_sem_ha',0)} kg/ha · Total: {_dp_view.get('semente_total_kg',0):,.0f} kg<br>
+                            Pop: {_dp_view.get('populacao',0):,} pl/ha · Esp: {_dp_view.get('espacamento',0)} cm
+                            </span>
+                            {f"<br><span style='color:#fbbf24;font-size:11px;'>TSI: {_dp_view.get('tsi','')}</span>" if _dp_view.get('tsi') else ""}
+                            </div>""", unsafe_allow_html=True)
+
+                        # Fertilizantes
+                        _ferts = []
+                        if _dp_view.get("adubo_nome") and _dp_view.get("adubo_kg_ha",0) > 0:
+                            _ferts.append(f"🟡 **{_dp_view['adubo_nome']}** — {_dp_view['adubo_kg_ha']} kg/ha (Total: {_dp_view.get('adubo_total_kg',0):,.0f} kg)")
+                        if _dp_view.get("kcl_nome") and _dp_view.get("kcl_kg_ha",0) > 0:
+                            _ferts.append(f"🟣 **{_dp_view['kcl_nome']}** — {_dp_view['kcl_kg_ha']} kg/ha (Total: {_dp_view.get('kcl_total_kg',0):,.0f} kg)")
+                        if _dp_view.get("ureia_nome") and _dp_view.get("ureia_kg_ha",0) > 0:
+                            _ferts.append(f"⬜ **{_dp_view['ureia_nome']}** — {_dp_view['ureia_kg_ha']} kg/ha (Total: {_dp_view.get('ureia_total_kg',0):,.0f} kg)")
+                        if _ferts:
+                            _dv2.markdown(f"""
+                            <div style='background:#1e3a5f;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#38bdf8;font-size:12px;'>🧪 FERTILIZANTES</b><br>
+                            {"<br>".join([f"<span style='color:#f1f5f9;font-size:11px;'>{f}</span>" for f in _ferts])}
+                            </div>""", unsafe_allow_html=True)
+
+                        # Inoculantes e micros
+                        _inocs = []
+                        if _dp_view.get("inoc1_nome") and _dp_view.get("inoc1_dose",0) > 0:
+                            _inocs.append(f"🦠 {_dp_view['inoc1_nome']} — {_dp_view['inoc1_dose']} mL/ha")
+                        if _dp_view.get("inoc2_nome") and _dp_view.get("inoc2_dose",0) > 0:
+                            _inocs.append(f"🦠 {_dp_view['inoc2_nome']} — {_dp_view['inoc2_dose']} mL/ha")
+                        if _dp_view.get("inoc3_nome") and _dp_view.get("inoc3_dose",0) > 0:
+                            _inocs.append(f"💉 {_dp_view['inoc3_nome']} — {_dp_view['inoc3_dose']} mL/sc")
+                        if _dp_view.get("micro1_nome") and _dp_view.get("micro1_dose",0) > 0:
+                            _inocs.append(f"🌿 {_dp_view['micro1_nome']} — {_dp_view['micro1_dose']} kg/ha")
+                        if _dp_view.get("micro2_nome") and _dp_view.get("micro2_dose",0) > 0:
+                            _inocs.append(f"🌿 {_dp_view['micro2_nome']} — {_dp_view['micro2_dose']} kg/ha")
+                        if _inocs:
+                            _dv3.markdown(f"""
+                            <div style='background:#064e3b;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#34d399;font-size:12px;'>🦠 INOCULANTES / MICROS</b><br>
+                            {"<br>".join([f"<span style='color:#f1f5f9;font-size:11px;'>{i}</span>" for i in _inocs])}
+                            </div>""", unsafe_allow_html=True)
+
+                    st.markdown("**🧪 Produtos:**")
+                    for p in aplic.get("Produtos",[]):
+                        unid = p.get("Unidade","").replace("/ha","")
+                        st.markdown(f"- **{p.get('Produto','')}** ({p.get('Tipo','')}) — "
+                                    f"{p.get('Dose por ha',0)} {p.get('Unidade','')} | "
+                                    f"Total: {p.get('Total usado',0)} {unid}")
+                    if not aplic.get("Produtos") and not _dp_view:
+                        st.info("Nenhum produto registrado.")
+                    col_b1, col_b2, col_b3 = st.columns(3)
+                    if _status != "aplicado":
+                        if col_b1.button("✅ Marcar como Aplicado", key=f"btn_confirmar_aplic_{idx_a}",
+                                         use_container_width=True, type="primary"):
+                            _erros_baixa = []
+                            for p in aplic.get("Produtos",[]):
+                                ok_b, msg_b = baixar_estoque(p["Produto"], p.get("Total usado",0), p.get("Unidade","L/ha"))
+                                if not ok_b:
+                                    _erros_baixa.append(f"{p.get('Produto','')}: {msg_b}")
+                            _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
+                                             if a.get("Data") == aplic.get("Data") and
+                                             a.get("Aplicação") == aplic.get("Aplicação")), None)
+                            if _idx_orig is not None:
+                                st.session_state.aplicacoes[_idx_orig]["Status"] = "aplicado"
+                                st.session_state.aplicacoes[_idx_orig]["Data Confirmacao"] = \
+                                    datetime.now().strftime("%d/%m/%Y %H:%M")
+                            salvar_dados_iaagro()
+                            if _erros_baixa:
+                                warning_box("Aplicado! Aviso estoque: " + " | ".join(_erros_baixa))
+                            else:
+                                success_box("✅ Marcado como aplicado! Baixa dada no estoque.")
+                            st.rerun()
+                    else:
+                        col_b1.success(f"✅ Aplicado em {aplic.get('Data Confirmacao', aplic.get('Data',''))}")
+                    # Exportar para imprimir
+                    _linhas_exp = [
+                        f"Aplicação: {aplic.get('Estádio', aplic.get('Aplicação',''))}",
+                        f"Data: {aplic.get('Data','')}",
+                        f"Área: {aplic.get('Área aplicada ha',0)} ha",
+                        f"Calda: {aplic.get('Volume calda L/ha',0)} L/ha",
+                        f"Tanques: {aplic.get('Número tanques',0):.1f}",
+                        f"Operador: {aplic.get('Operador','—')}",
+                        f"Status: {_badge}", "", "PRODUTOS:",
+                    ]
+                    for _pp in aplic.get("Produtos",[]):
+                        _linhas_exp.append(
+                            f"  {_pp.get('Produto','')} | {_pp.get('Dose por ha',0)} "
+                            f"{_pp.get('Unidade','')} | Total: {_pp.get('Total usado',0)}")
+                    _txt_exp = "\n".join(_linhas_exp)
+                    col_b2.download_button(
+                        "📥 Exportar",
+                        data=_txt_exp.encode("utf-8"),
+                        file_name=f"aplicacao_{idx_a+1}_{aplic.get('Data','sem_data')}.txt",
+                        mime="text/plain",
+                        key=f"btn_exp_aplic_{idx_a}",
+                        use_container_width=True
+                    )
+                    if col_b3.button("🗑️ Excluir", key=f"apagar_app_{idx_a}", use_container_width=True):
+                        _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
+                                         if a.get("Data") == aplic.get("Data") and
+                                         a.get("Aplicação") == aplic.get("Aplicação")), None)
+                        if _idx_orig is not None:
+                            st.session_state.aplicacoes.pop(_idx_orig)
                         salvar_dados_iaagro()
-                        success_box("Aplicação removida com sucesso!")
                         st.rerun()
 
-            # ── Folha técnica
-            st.divider()
-            st.subheader("🖨️ Folha Técnica de Aplicação")
-            for aplicacao in aplicacoes_ordenadas:
-                with st.container():
-                    st.markdown(f"""
-                    ### 🚜 {aplicacao.get('Aplicação','Sem nome')}
-                    📅 **Data:** {aplicacao.get('Data','Sem data')}
-                    👨‍🌾 **Operador:** {aplicacao.get('Operador','Não informado')}
-                    🚜 **Pulverizador:** {aplicacao.get('Pulverizador','Não informado')}
-                    ⚙️ **Velocidade:** {aplicacao.get('Velocidade km/h', 0)} km/h
-                    🧭 **Pressão:** {aplicacao.get('Pressão bar', 0)} bar
-                    🌦️ **Condição Climática:** {aplicacao.get('Clima aplicação','Não informado')}
-                    📍 **Área Aplicada:** {aplicacao.get('Área aplicada ha', 0)} ha
-                    💧 **Volume de Calda:** {aplicacao.get('Volume calda L/ha', 0)} L/ha
-                    🚛 **Capacidade do Tanque:** {aplicacao.get('Capacidade tanque L', 0)} L
-                    🌱 **Área por Tanque:** {aplicacao.get('Área por tanque ha', 0):.2f} ha
-                    🔄 **Número de Tanques:** {aplicacao.get('Número tanques', 0):.2f}
-                    """)
-                    produtos = aplicacao.get("Produtos", [])
-                    if produtos:
-                        tab = pd.DataFrame(produtos).rename(columns={
-                            "Dose por ha":"Dose/ha","Produto por tanque":"Por tanque","Total usado":"Total"
-                        })
-                        st.dataframe(tab, use_container_width=True, hide_index=True)
-                    st.markdown("---")
-
-            # ── Montagem Automática (Relatório Final chama isso também)
-            st.divider()
-            st.subheader("🚜 Montagem Automática da Aplicação")
-
-            if len(st.session_state.estoque) > 0:
-                cultura_aplicacao = st.selectbox("Cultura da aplicação", ["Soja","Milho"])
-                produtos_filtrados = [
-                    item for item in st.session_state.estoque
-                    if item["Cultura"] == cultura_aplicacao or item["Cultura"] == "Ambos"
-                ]
-                area_aplicacao = st.number_input("Área da aplicação (ha)", min_value=0.1, value=10.0, key="area_aplicacao_tanque")
-
-                st.write("Produtos disponíveis para aplicação:")
-
-                for produto in produtos_filtrados:
-                    st.markdown(
-                        f'<div style="background:#14532d;color:#fff;padding:10px 16px;'
-                        f'border-radius:10px;border-left:5px solid #22c55e;'
-                        f'font-weight:600;margin:4px 0;">'
-                        f'✅ {produto["Insumo"]} | Dose: {produto["Dose ha"]} ha | Tanque: {produto["Tanque litros"]}L'
-                        f'</div>', unsafe_allow_html=True
-                    )
-
-                st.subheader("🧪 Cálculo Automático por Tanque")
-                for produto in produtos_filtrados:
-                    dose             = produto["Dose ha"]
-                    litros_ha_p      = produto["Litros ha"]
-                    tanque           = produto["Tanque litros"]
-                    hectares_por_tanque    = tanque / litros_ha_p if litros_ha_p > 0 else 0
-                    quantidade_produto_tanque = dose * hectares_por_tanque
-                    total_necessario   = dose * area_aplicacao
-                    st.markdown(f'''<div style="background:#1e3a5f;color:#fff;padding:14px 18px;
-                    border-radius:12px;border-left:5px solid #3b82f6;
-                    font-size:14px;font-weight:600;line-height:2.0;margin:6px 0;">
-                    🌱 <b>Produto:</b> {produto['Insumo']}<br>
-                    🚜 <b>Dose/ha:</b> {dose}<br>
-                    💧 <b>Litros/ha:</b> {litros_ha_p}<br>
-                    🛢️ <b>Tanque:</b> {tanque} L<br>
-                    📐 <b>Ha por tanque:</b> {hectares_por_tanque:.2f}<br>
-                    🧪 <b>Produto por tanque:</b> {quantidade_produto_tanque:.2f}<br>
-                    📦 <b>Total para {area_aplicacao:.1f} ha:</b> {total_necessario:.2f}
-                    </div>''', unsafe_allow_html=True)
-
-                # CORREÇÃO 4: key única por produto para evitar DuplicateWidgetID
-                if st.button("Salvar Aplicação Automática", key="salvar_aplicacao_auto_geral"):
-                    nova_aplicacao = {
-                        "Data":            str(date.today()),
-                        "ID Área":         st.session_state.get("dados", {}).get("id_area",""),
-                        "Talhão":          st.session_state.get("dados", {}).get("talhao",""),
-                        "Cultura":         cultura_aplicacao,
-                        "Aplicação":       "Aplicação Automática",
-                        "Tipo":            "Aplicação Automática",
-                        "Operador":        "",
-                        "Pulverizador":    "",
-                        "Velocidade km/h": 0,
-                        "Pressão bar":     0,
-                        "Clima aplicação": "Não informado",
-                        "Área ha":         area_aplicacao,
-                        "Produtos":        produtos_filtrados
-                    }
-                    for produto_aplicado in produtos_filtrados:
-                        nome_produto    = produto_aplicado["Insumo"]
-                        quantidade_usada = produto_aplicado["Dose ha"] * area_aplicacao
-                        for item_estoque in st.session_state.estoque:
-                            if item_estoque["Insumo"] == nome_produto:
-                                item_estoque["Quantidade"] = max(0, item_estoque["Quantidade"] - quantidade_usada)
-                    st.session_state.aplicacoes.append(nova_aplicacao)
-                    salvar_dados_iaagro()
-                    success_box("Aplicação automática salva com sucesso!")
-
-                    if len(produtos_filtrados) > 0:
-                        ficha_linhas = []
-                        for produto in produtos_filtrados:
-                            d_p  = produto["Dose ha"]
-                            l_ha = produto["Litros ha"]
-                            tnq  = produto["Tanque litros"]
-                            v_u  = produto.get("Valor Unitário R$", 0)
-                            hpt  = tnq / l_ha if l_ha > 0 else 0
-                            ficha_linhas.append({
-                                "Produto": produto["Insumo"],
-                                "Dose/ha": d_p, "Litros/ha": l_ha, "Tanque L": tnq,
-                                "Ha por tanque": round(hpt, 2),
-                                "Produto por tanque": round(d_p * hpt, 2),
-                                "Total na área": round(d_p * area_aplicacao, 2)
-                            })
-                        df_ficha = pd.DataFrame(ficha_linhas)
-                        st.dataframe(df_ficha, use_container_width=True)
-                        st.download_button(
-                            "📥 Baixar ficha CSV",
-                            data=df_ficha.to_csv(index=False).encode("utf-8"),
-                            file_name=f"ficha_aplicacao_{cultura_aplicacao}.csv",
-                            mime="text/csv"
-                        )
-
-        # ── Histórico completo de aplicações (tabela)
-        st.divider()
-        st.subheader("Aplicações Registradas")
-        if len(st.session_state.aplicacoes) == 0:
-            info_box("Nenhuma aplicação registrada.")
-        else:
-            historico_linhas = []
-            for aplicacao in st.session_state.aplicacoes:
-                for prod in aplicacao.get("Produtos", []):
-                    historico_linhas.append({
-                        "Data":             aplicacao.get("Data",""),
-                        "ID Área":          aplicacao.get("ID Área",""),
-                        "Talhão":           aplicacao.get("Talhão",""),
-                        "Tipo":             aplicacao.get("Tipo",""),
-                        "Produto":          prod.get("Insumo", prod.get("Produto","")),
-                        "Dose/ha":          prod.get("Dose por ha", prod.get("Dose ha","")),
-                        "Quantidade usada": prod.get("Total usado", prod.get("Quantidade usada","")),
-                        "Unidade":          prod.get("Unidade",""),
-                        "Custo/ha":         prod.get("Custo_ha", 0),
-                        "Custo Total":      prod.get("Custo Total", 0),
-                    })
-            st.dataframe(pd.DataFrame(historico_linhas), use_container_width=True)
-
 # ─────────────────────────────────────────────
-# MENU: RELATÓRIO FINAL
+# MENU: CARÊNCIA
 # ─────────────────────────────────────────────
-elif menu == "Relatório Final":
-    st.header("Relatório Final IAAgro")
-
-    def gerar_pdf_relatorio(dados):
-        buffer = BytesIO()
-        doc    = SimpleDocTemplate(buffer, pagesize=A4,
-                                   rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
-        styles    = getSampleStyleSheet()
-        elementos = []
-
-        # Logo (com fallback se arquivo não existir)
-        if os.path.exists("IAAgrologo.jpeg"):
-            logo = Image("IAAgrologo.jpeg", width=140, height=70)
-            elementos.append(logo)
-        elementos.append(Spacer(1, 20))
-
-        elementos.append(Paragraph(
-            f"<b>Relatório Técnico IAAgro</b><br/>Data: {date.today()}<br/>Sistema Inteligente de Agricultura de Precisão",
-            styles['BodyText']
-        ))
-        elementos.append(Spacer(1, 15))
-        elementos.append(Paragraph("<b>IAAgro Pro V9 - Relatório Técnico</b>", styles['Title']))
-
-        dados_tabela = [["Campo","Valor"]]
-        for chave, valor in dados.items():
-            dados_tabela.append([str(chave), str(valor)])
-
-        tabela = Table(dados_tabela, colWidths=[180, 280])
-        tabela.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.darkgreen),
-            ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
-            ('GRID',       (0,0), (-1,-1), 1, colors.black),
-            ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTNAME',   (0,1), (-1,-1), 'Helvetica'),
-            ('FONTSIZE',   (0,0), (-1,-1), 10),
-            ('BOTTOMPADDING', (0,0), (-1,0), 12),
-            ('BACKGROUND', (0,1), (-1,-1), colors.beige),
-        ]))
-        elementos.append(tabela)
-        elementos.append(Spacer(1, 20))
-
-        if   dados.get("ph",0) >= 5.5 and dados.get("materia_organica",0) >= 2:
-            classificacao     = "ALTO POTENCIAL PRODUTIVO"
-            cor_classificacao = colors.green
-        elif dados.get("ph",0) >= 5.0:
-            classificacao     = "POTENCIAL MÉDIO"
-            cor_classificacao = colors.orange
-        else:
-            classificacao     = "SOLO COM LIMITAÇÕES"
-            cor_classificacao = colors.red
-
-        class_box = Table([["Classificação IAAgro", classificacao]], colWidths=[220, 240])
-        class_box.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (0,0), colors.darkgreen),
-            ('BACKGROUND', (1,0), (1,0), cor_classificacao),
-            ('TEXTCOLOR',  (0,0), (-1,-1), colors.white),
-            ('FONTNAME',   (0,0), (-1,-1), 'Helvetica-Bold'),
-            ('FONTSIZE',   (0,0), (-1,-1), 12),
-            ('GRID',       (0,0), (-1,-1), 1, colors.black),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-        ]))
-        elementos.append(class_box)
-        elementos.append(Spacer(1, 20))
-        elementos.append(Paragraph(
-            """<b>Recomendação Inteligente IAAgro:</b><br/><br/>
-            • Solo com potencial produtivo médio/alto.<br/>
-            • Recomendado monitoramento de fósforo e matéria orgânica.<br/>
-            • Ajustar manejo conforme produtividade esperada.<br/>
-            • Realizar acompanhamento de micronutrientes durante o ciclo.<br/>
-            • Sistema gerado automaticamente pela IA do IAAgro.""",
-            styles['BodyText']
-        ))
-        elementos.append(PageBreak())
-        elementos.append(Paragraph("<b>Mapa GPS do Talhão</b>", styles['Title']))
-        elementos.append(Spacer(1, 20))
-        elementos.append(Paragraph("Imagem do mapa GPS do talhão será inserida aqui.", styles["BodyText"]))
-        doc.build(elementos)
-        pdf = buffer.getvalue()
-        buffer.close()
-        return pdf
-
-    d = st.session_state.dados
-
-    if "ph" not in d or "fazenda" not in d:
-        warning_box("Preencha os dados antes de gerar relatório.")
-    else:
-        nota             = calcular_nota(d)
-        prioridade_final = prioridade(nota)
-        dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"])
-        precisa_gesso, dose_gesso, total_gesso, motivos_gesso = calcular_gesso(d)
-        producao_estimada = estimar_producao(d["produtividade"], nota)
-
-        # IA de previsão
-        indice_produtivo = 0
-        score_rel        = 75
-        indice_produtivo += score_rel * 0.45
-        if 5.8 <= d["ph"] <= 6.5:               indice_produtivo += 15
-        if d["fosforo"] >= 12:                   indice_produtivo += 10
-        if d["potassio"] >= 0.35:                indice_produtivo += 10
-        if d["materia_organica"] >= 3:           indice_produtivo += 10
-        if d.get("argila", 0) >= 35:             indice_produtivo += 5
-        indice_produtivo = min(indice_produtivo, 100)
-        produtividade_ia = d["produtividade"] * (indice_produtivo / 100)
-
-        if   produtividade_ia >= d["produtividade"] * 0.9: status_ia = "🟢 Alto Potencial"
-        elif produtividade_ia >= d["produtividade"] * 0.7: status_ia = "🟡 Médio Potencial"
-        else:                                               status_ia = "🔴 Baixo Potencial"
-
-        n, p2o5, k2o = recomendacao_npk(
-            d["cultura"], d["produtividade"], d["fosforo"], d["potassio"], d["materia_organica"]
-        )
-
-        st.subheader("Resumo da Área")
-        st.write(f"ID da área: {d.get('id_area','')}")
-        st.write(f"Fazenda: {d['fazenda']}")
-        st.write(f"Talhão: {d['talhao']}")
-        st.write(f"Cidade/Estado: {d['cidade']}")
-        st.write(f"Área: {d['area']} hectares")
-        st.write(f"Cultura: {d['cultura']}")
-        st.write(f"Meta de produtividade: {d['produtividade']} sacas/ha")
-
-        st.subheader("Resultado Geral")
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Nota",              f"{nota}/100")
-        col2.metric("Prioridade",        prioridade_final)
-        col3.metric("Produção Estimada", f"{producao_estimada:.1f} sc/ha")
-        col4.metric("Calcário",          f"{dose_calcario} t/ha")
-        col5.metric("Gesso",             f"{dose_gesso} t/ha")
-        col6.metric("IA Produtividade",  f"{produtividade_ia:.1f} sc/ha")
-
-        st.subheader("Correção")
-        st.write(f"Dose estimada de calcário: {dose_calcario} t/ha")
-        st.write(f"Total estimado de calcário: {total_calcario:.1f} toneladas")
-        st.write(f"Dose estimada de gesso: {dose_gesso} t/ha")
-        st.write(f"Total estimado de gesso: {total_gesso:.1f} toneladas")
-
-        st.subheader("Adubação NPK")
-        tabela_npk = pd.DataFrame({
-            "Nutriente":          ["N","P2O5","K2O"],
-            "Dose kg/ha":         [n, p2o5, k2o],
-            "Total no talhão kg": [n * d["area"], p2o5 * d["area"], k2o * d["area"]]
-        })
-        st.dataframe(tabela_npk, use_container_width=True)
-
-        st.subheader("Estoque Atual")
-        if len(st.session_state.estoque) == 0:
-            info_box("Nenhum produto cadastrado.")
-        else:
-            st.dataframe(pd.DataFrame(st.session_state.estoque), use_container_width=True)
-
-        st.subheader("Aplicações Registradas")
-        if len(st.session_state.aplicacoes) == 0:
-            info_box("Nenhuma aplicação registrada.")
-        else:
-            historico_linhas = []
-            for aplicacao in st.session_state.aplicacoes:
-                for prod in aplicacao.get("Produtos", []):
-                    historico_linhas.append({
-                        "Data":    aplicacao.get("Data",""),
-                        "ID Área": aplicacao.get("ID Área",""),
-                        "Talhão":  aplicacao.get("Talhão",""),
-                        "Tipo":    aplicacao.get("Tipo",""),
-                        "Produto": prod.get("Insumo", prod.get("Produto","")),
-                        "Dose/ha": prod.get("Dose por ha", prod.get("Dose ha","")),
-                        "Quantidade usada": prod.get("Total usado", prod.get("Quantidade usada","")),
-                        "Unidade": prod.get("Unidade",""),
-                    })
-            st.dataframe(pd.DataFrame(historico_linhas), use_container_width=True)
-
-        st.subheader("Parecer IAAgro")
-        st.markdown(f'''<div style="background:#1e3a5f;color:#fff;padding:15px 18px;
-        border-radius:12px;border-left:5px solid #3b82f6;
-        font-size:15px;font-weight:600;line-height:2.0;margin:8px 0;">
-        📋 A área <b>{d.get('id_area','')}</b> apresenta prioridade de correção <b>{prioridade_final}</b>.<br>
-        📈 Produtividade estimada: <b>{producao_estimada:.1f} sacas/ha</b><br>
-        🧪 O sistema avaliou calcário, gesso, adubação, estoque e aplicações.<br>
-        🗂️ Cada área possui ID próprio e pode ser carregada pela aba Áreas Cadastradas.
-        </div>''', unsafe_allow_html=True)
-        st.divider()
-
-        pdf_relatorio = gerar_pdf_relatorio(d)
-        st.download_button(
-            label="📄 Baixar Relatório PDF",
-            data=pdf_relatorio,
-            file_name="relatorio_iaagro.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-
-# ─────────────────────────────────────────────
-# MENU: CLIMA & ALERTAS
-# ─────────────────────────────────────────────
-elif menu == "🌤️ Clima & Alertas":
-    st.header("🌤️ Clima em Tempo Real & Alertas de Aplicação")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 12px 0;font-size:13px;">
-    📡 Dados via <b>Open-Meteo API</b> (gratuita, sem chave) · Atualização automática ao abrir · Clique em
-    Atualizar para forçar nova busca
-    </div>''', unsafe_allow_html=True)
-
-    # ── Geolocalização ──────────────────────────────────────────────────
-    # Usa coordenadas salvas por padrão — GPS só quando o usuário pede
-    lat = st.session_state.dados.get("latitude",  -26.88)
-    lon = st.session_state.dados.get("longitude", -52.40)
-    fonte_loc = "📌 Coordenadas da área cadastrada"
-
-    # Verificar se já buscou GPS nesta sessão
-    if st.session_state.get("_gps_clima_lat"):
-        lat = st.session_state["_gps_clima_lat"]
-        lon = st.session_state["_gps_clima_lon"]
-        fonte_loc = "📍 GPS do navegador"
-
-    # Painel de localização
-    col_loc1, col_loc2, col_loc3 = st.columns([2, 2, 1])
-    with col_loc1:
-        lat = st.number_input("Latitude",  value=float(lat),
-                               format="%.4f", key="lat_clima")
-    with col_loc2:
-        lon = st.number_input("Longitude", value=float(lon),
-                               format="%.4f", key="lon_clima")
-    with col_loc3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("📡 GPS", key="btn_gps_clima", use_container_width=True,
-                     help="Usar localização atual do celular"):
-            try:
-                geo = get_geolocation()
-                if geo and geo.get("coords"):
-                    st.session_state["_gps_clima_lat"] = geo["coords"]["latitude"]
-                    st.session_state["_gps_clima_lon"] = geo["coords"]["longitude"]
-                    st.session_state.clima_data = None  # Força rebuscar com nova localização
-                    st.rerun()
-            except Exception:
-                warning_box("GPS indisponível. Use as coordenadas manuais.")
-
-    st.markdown(
-        f'<div style="background:#0f3460;color:#6ee7b7;padding:7px 14px;border-radius:8px;'
-        f'font-size:12px;font-weight:700;margin:4px 0 8px 0;">'
-        f'{fonte_loc} &nbsp;|&nbsp; {lat:.4f}, {lon:.4f}</div>',
-        unsafe_allow_html=True
-    )
-
-    # Permitir ajuste manual via expander (compatibilidade com versão anterior)
-    # Removido — agora os campos ficam visíveis direto acima
-
-    # ── Botão atualizar + info ──────────────────────────────────────────
-    col_cb1, col_cb2 = st.columns([1, 3])
-    with col_cb1:
-        if st.button("🔄 Atualizar Clima", key="btn_clima", use_container_width=True):
-            with st.spinner("🌐 Buscando dados climáticos..."):
-                st.session_state.clima_data = buscar_clima(lat, lon)
-            if st.session_state.clima_data:
-                success_box("✅ Clima atualizado!")
-            else:
-                error_box("Não foi possível buscar dados. Verifique a conexão.")
-    with col_cb2:
-        ult_at = st.session_state.get("clima_data", {})
-        if ult_at and isinstance(ult_at, dict):
-            horario = ult_at.get("_atualizado_em", "")
-            st.markdown(
-                f'<div style="background:#0f3460;color:#6ee7b7;padding:8px 14px;border-radius:8px;'
-                f'font-size:12px;font-weight:700;margin-top:4px;">'
-                f'🕐 Última atualização: {horario or "agora"} &nbsp;|&nbsp; {fonte_loc} &nbsp;|&nbsp; '
-                f'{lat:.4f}, {lon:.4f}</div>',
-                unsafe_allow_html=True
-            )
-
-    # Buscar dados se não tiver ou se mudou localização
-    if not st.session_state.get("clima_data"):
-        with st.spinner("🌐 Carregando dados climáticos..."):
-            st.session_state.clima_data = buscar_clima(lat, lon)
-
-    dados_clima = st.session_state.get("clima_data")
-
-    if dados_clima and "current" in dados_clima:
-        current = dados_clima.get("current", {})
-        daily   = dados_clima.get("daily", {})
-        hourly  = dados_clima.get("hourly", {})
-
-        # Extrair dados atuais
-        temp        = current.get("temperature_2m", 0)
-        temp_sens   = current.get("apparent_temperature", 0)
-        umidade     = current.get("relative_humidity_2m", 0)
-        chuva       = current.get("precipitation", 0)
-        vento       = current.get("windspeed_10m", 0)
-        vento_dir   = current.get("winddirection_10m", 0)
-        pressao     = current.get("surface_pressure", 0)
-        visib       = current.get("visibility", 0)
-        uv          = current.get("uv_index", 0)
-        wcode       = current.get("weathercode", 0)
-        emoji_c, desc_c = codigo_clima_emoji(wcode)
-
-        # Direção do vento
-        dirs = ["N","NE","L","SE","S","SO","O","NO"]
-        dir_vento = dirs[int((vento_dir + 22.5) / 45) % 8]
-
-        # ── PAINEL PRINCIPAL ─────────────────────────────────────────────
-        st.markdown(f'''
-        <div style="background:linear-gradient(135deg,#0f2744,#1a3a5c);border-radius:16px;
-        padding:20px 24px;margin:10px 0;border:1px solid #22c55e33;">
-          <div style="font-size:48px;text-align:center;">{emoji_c}</div>
-          <div style="text-align:center;color:#6ee7b7;font-size:22px;font-weight:900;
-          margin:4px 0;">{temp:.1f}°C</div>
-          <div style="text-align:center;color:#93c5fd;font-size:14px;font-weight:600;">
-          {desc_c} &nbsp;·&nbsp; Sensação {temp_sens:.1f}°C</div>
-        </div>''', unsafe_allow_html=True)
-
-        # Cards detalhados
-        cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
-        cc1.metric("💧 Umidade",    f"{umidade:.0f}%")
-        cc2.metric("🌧️ Precipit.", f"{chuva:.1f} mm")
-        cc3.metric("💨 Vento",      f"{vento:.1f} km/h", dir_vento)
-        cc4.metric("🔵 Pressão",   f"{pressao:.0f} hPa")
-        cc5.metric("👁️ Visib.",    f"{visib/1000:.1f} km" if visib > 0 else "—")
-        cc6.metric("☀️ UV",        f"{uv:.1f}", "🟢 Baixo" if uv < 3 else ("🟡 Mod" if uv < 6 else "🔴 Alto"))
-
-        # ── ALERTA DE APLICAÇÃO ──────────────────────────────────────────
-        st.divider()
-        st.subheader("🚜 Janela de Aplicação de Defensivos — Agora")
-
-        alertas_ap = alerta_clima_aplicacao(wcode, vento, chuva)
-
-        # Verificações detalhadas
-        ok_temp   = 10 <= temp <= 30
-        ok_vento  = vento <= 10
-        ok_chuva  = chuva == 0
-        ok_umid   = 40 <= umidade <= 90
-        ok_uv     = uv < 10
-        n_ok = sum([ok_temp, ok_vento, ok_chuva, ok_umid, ok_uv])
-        score_aplic = int(n_ok / 5 * 100)
-
-        # Barra de score
-        cor_score = "#22c55e" if score_aplic >= 80 else ("#f59e0b" if score_aplic >= 50 else "#ef4444")
-        label_score = "✅ IDEAL PARA APLICAÇÃO" if score_aplic >= 80 else ("⚠️ ATENÇÃO — Verifique condições" if score_aplic >= 50 else "❌ NÃO RECOMENDADO AGORA")
-        st.markdown(f'''
-        <div style="background:#0f2744;border-radius:12px;padding:16px 20px;margin:8px 0;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <span style="color:#fff;font-weight:800;font-size:15px;">{label_score}</span>
-            <span style="color:{cor_score};font-weight:900;font-size:20px;">{score_aplic}%</span>
-          </div>
-          <div style="background:#1e3a5f;border-radius:8px;height:12px;overflow:hidden;">
-            <div style="background:{cor_score};width:{score_aplic}%;height:12px;border-radius:8px;
-            transition:width 0.3s;"></div>
-          </div>
-        </div>''', unsafe_allow_html=True)
-
-        # Detalhes por parâmetro
-        params = [
-            ("🌡️ Temperatura", f"{temp:.1f}°C", ok_temp, "Ideal: 10–30°C"),
-            ("💨 Vento",        f"{vento:.1f} km/h ({dir_vento})", ok_vento, "Ideal: ≤ 10 km/h"),
-            ("🌧️ Chuva",       f"{chuva:.1f} mm", ok_chuva, "Ideal: 0 mm"),
-            ("💧 Umidade",      f"{umidade:.0f}%", ok_umid, "Ideal: 40–90%"),
-            ("☀️ Índice UV",    f"{uv:.1f}", ok_uv, "Ideal: < 10"),
-        ]
-        p_cols = st.columns(5)
-        for idx, (label, valor, ok, ideal) in enumerate(params):
-            bg  = "#14532d" if ok else "#7f1d1d"
-            ico = "✅" if ok else "❌"
-            p_cols[idx].markdown(
-                f'<div style="background:{bg};border-radius:10px;padding:10px 8px;'
-                f'text-align:center;color:#fff;font-size:12px;">'
-                f'<div style="font-size:16px;">{label}</div>'
-                f'<div style="font-size:18px;font-weight:900;margin:4px 0;">{valor}</div>'
-                f'<div style="font-size:10px;opacity:0.8;">{ideal}</div>'
-                f'<div style="font-size:14px;margin-top:4px;">{ico}</div>'
-                f'</div>', unsafe_allow_html=True
-            )
-
-        if alertas_ap:
-            st.markdown("<br>", unsafe_allow_html=True)
-            for a in alertas_ap:
-                st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:11px 16px;
-                border-radius:10px;border-left:5px solid #ef4444;font-weight:700;margin:4px 0;">
-                {a}</div>''', unsafe_allow_html=True)
-
-        # ── ETo EVAPOTRANSPIRAÇÃO ────────────────────────────────────────
-        st.divider()
-        st.subheader("🌱 Evapotranspiração & Balanço Hídrico")
-        eto_hoje = daily.get("et0_fao_evapotranspiration", [0])[0] if daily.get("et0_fao_evapotranspiration") else 0
-        chuva_hoje = daily.get("precipitation_sum", [0])[0] if daily.get("precipitation_sum") else 0
-        balanco = chuva_hoje - eto_hoje
-
-        be1, be2, be3 = st.columns(3)
-        be1.metric("💧 ETo hoje (FAO-56)", f"{eto_hoje:.1f} mm/dia",
-                   help="Evapotranspiração de referência — quanto a cultura consome de água")
-        be2.metric("🌧️ Chuva hoje",       f"{chuva_hoje:.1f} mm")
-        be3.metric("⚖️ Balanço Hídrico",  f"{balanco:+.1f} mm",
-                   "✅ Superávit" if balanco >= 0 else "⚠️ Déficit hídrico")
-
-        if balanco < -3:
-            warning_box(f"⚠️ Déficit hídrico de {abs(balanco):.1f} mm — considere irrigação suplementar.")
-        elif balanco > 5:
-            info_box(f"💧 Superávit de {balanco:.1f} mm — solo úmido, aguarde antes de aplicar.")
-
-        # ── PREVISÃO 7 DIAS ──────────────────────────────────────────────
-        st.divider()
-        st.subheader("📅 Previsão para os Próximos 7 Dias")
-
-        if daily and "temperature_2m_max" in daily:
-            datas       = daily.get("time", [])
-            temp_max    = daily.get("temperature_2m_max", [])
-            temp_min    = daily.get("temperature_2m_min", [])
-            chuva_d     = daily.get("precipitation_sum", [])
-            prob_chuva  = daily.get("precipitation_probability_max", [])
-            vento_d     = daily.get("windspeed_10m_max", [])
-            wcode_d     = daily.get("weathercode", [])
-            uv_d        = daily.get("uv_index_max", [])
-            eto_d       = daily.get("et0_fao_evapotranspiration", [])
-            sunrise_d   = daily.get("sunrise", [])
-            sunset_d    = daily.get("sunset", [])
-
-            # Cards diários
-            n_dias = min(7, len(datas))
-            cols_dias = st.columns(n_dias)
-            for i in range(n_dias):
-                try:
-                    from datetime import date as _date
-                    dt = _date.fromisoformat(datas[i])
-                    dia_semana = ["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"][dt.weekday()]
-                    dia_label  = f"{dia_semana} {dt.day:02d}/{dt.month:02d}"
-                except Exception:
-                    dia_label = datas[i]
-
-                em, _ = codigo_clima_emoji(wcode_d[i] if i < len(wcode_d) else 0)
-                tmax  = temp_max[i] if i < len(temp_max) else 0
-                tmin  = temp_min[i] if i < len(temp_min) else 0
-                ch    = chuva_d[i] if i < len(chuva_d) else 0
-                prob  = prob_chuva[i] if i < len(prob_chuva) else 0
-                vd    = vento_d[i] if i < len(vento_d) else 0
-                et    = eto_d[i] if i < len(eto_d) else 0
-                ok_dia = (ch == 0 and vd <= 10)
-                bg_dia = "#14532d" if ok_dia else ("#78350f" if ch > 0 else "#1e3a5f")
-                borda  = "#22c55e" if ok_dia else ("#f59e0b" if ch > 0 else "#3b82f6")
-
-                with cols_dias[i]:
-                    st.markdown(
-                        f'<div style="background:{bg_dia};border:2px solid {borda};border-radius:12px;'
-                        f'padding:10px 6px;text-align:center;color:#fff;font-size:11px;">'
-                        f'<div style="font-weight:800;font-size:12px;margin-bottom:4px;">{dia_label}</div>'
-                        f'<div style="font-size:26px;">{em}</div>'
-                        f'<div style="font-weight:700;margin:4px 0;">{tmax:.0f}° / {tmin:.0f}°</div>'
-                        f'<div style="color:#93c5fd;">🌧️ {ch:.1f}mm</div>'
-                        f'<div style="color:#67e8f9;">☔ {prob:.0f}%</div>'
-                        f'<div style="color:#fcd34d;">💨 {vd:.0f}km/h</div>'
-                        f'<div style="color:#86efac;font-size:10px;">ETo {et:.1f}mm</div>'
-                        f'<div style="margin-top:6px;font-size:13px;">{"✅" if ok_dia else "❌"}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
-
-            # Tabela detalhada
-            st.markdown("<br>", unsafe_allow_html=True)
-            df_prev = pd.DataFrame({
-                "Data":          datas[:n_dias],
-                "Cond.":         [codigo_clima_emoji(wcode_d[i] if i < len(wcode_d) else 0)[0] for i in range(n_dias)],
-                "Máx °C":        [round(temp_max[i], 1) if i < len(temp_max) else 0 for i in range(n_dias)],
-                "Mín °C":        [round(temp_min[i], 1) if i < len(temp_min) else 0 for i in range(n_dias)],
-                "Chuva mm":      [round(chuva_d[i], 1) if i < len(chuva_d) else 0 for i in range(n_dias)],
-                "Prob. Chuva %": [round(prob_chuva[i]) if i < len(prob_chuva) else 0 for i in range(n_dias)],
-                "Vento km/h":    [round(vento_d[i], 1) if i < len(vento_d) else 0 for i in range(n_dias)],
-                "UV máx":        [round(uv_d[i], 1) if i < len(uv_d) else 0 for i in range(n_dias)],
-                "ETo mm":        [round(eto_d[i], 1) if i < len(eto_d) else 0 for i in range(n_dias)],
-                "Aplicar?":      ["✅ Sim" if (
-                                    (chuva_d[i] if i < len(chuva_d) else 1) == 0 and
-                                    (vento_d[i] if i < len(vento_d) else 99) <= 10
-                                  ) else "❌ Não" for i in range(n_dias)],
-            })
-            st.dataframe(df_prev, use_container_width=True, hide_index=True)
-
-            # Gráfico temperatura + chuva
-            try:
-                import plotly.graph_objects as go
-                from plotly.subplots import make_subplots
-                fig_clima = make_subplots(specs=[[{"secondary_y": True}]])
-                fig_clima.add_trace(go.Scatter(
-                    x=df_prev["Data"], y=df_prev["Máx °C"],
-                    name="Temp. Máx", line=dict(color="#f59e0b", width=2),
-                    mode="lines+markers"
-                ), secondary_y=False)
-                fig_clima.add_trace(go.Scatter(
-                    x=df_prev["Data"], y=df_prev["Mín °C"],
-                    name="Temp. Mín", line=dict(color="#93c5fd", width=2, dash="dot"),
-                    mode="lines+markers"
-                ), secondary_y=False)
-                fig_clima.add_trace(go.Bar(
-                    x=df_prev["Data"], y=df_prev["Chuva mm"],
-                    name="Chuva mm", marker_color="#3b82f6", opacity=0.6
-                ), secondary_y=True)
-                fig_clima.add_trace(go.Scatter(
-                    x=df_prev["Data"], y=df_prev["Prob. Chuva %"],
-                    name="Prob. Chuva %", line=dict(color="#67e8f9", width=1.5, dash="dash"),
-                    mode="lines"
-                ), secondary_y=True)
-                fig_clima.update_layout(
-                    title="Temperatura (°C) x Chuva (mm) x Probabilidade (%)",
-                    paper_bgcolor="#0f3460",
-                    plot_bgcolor="#0d2137",
-                    font_color="#f1f5f9",
-                    height=350,
-                    legend=dict(bgcolor="#0f3460", bordercolor="#22c55e33"),
-                )
-                # update_xaxes e update_yaxes são o jeito correto para subplots
-                fig_clima.update_xaxes(gridcolor="#1e3a5f")
-                fig_clima.update_yaxes(
-                    title_text="Temperatura °C",
-                    secondary_y=False,
-                    gridcolor="#1e3a5f"
-                )
-                fig_clima.update_yaxes(
-                    title_text="Chuva mm / Prob %",
-                    secondary_y=True
-                )
-                st.plotly_chart(fig_clima, use_container_width=True)
-            except Exception:
-                # Fallback sem plotly
-                st.line_chart(df_prev.set_index("Data")[["Máx °C", "Mín °C", "Chuva mm"]])
-
-            # Melhores dias para aplicação
-            dias_bons = [datas[i] for i in range(n_dias)
-                         if (chuva_d[i] if i < len(chuva_d) else 1) == 0
-                         and (vento_d[i] if i < len(vento_d) else 99) <= 10]
-            if dias_bons:
-                st.markdown(f'''<div style="background:#14532d;color:#fff;padding:13px 18px;
-                border-radius:10px;border-left:5px solid #22c55e;font-weight:700;margin:8px 0;">
-                ✅ Melhores dias para aplicação: {" &nbsp;·&nbsp; ".join(dias_bons)}
-                </div>''', unsafe_allow_html=True)
-            else:
-                warning_box("⚠️ Nenhum dia ideal para aplicação nos próximos 7 dias. Monitore a previsão.")
-
-            # Nascer/pôr do sol
-            if sunrise_d and sunset_d:
-                st.divider()
-                st.subheader("🌅 Nascer e Pôr do Sol")
-                sol_cols = st.columns(min(7, len(sunrise_d)))
-                for i, col in enumerate(sol_cols):
-                    if i < len(sunrise_d):
-                        sr = sunrise_d[i][-5:] if len(sunrise_d[i]) >= 5 else sunrise_d[i]
-                        ss = sunset_d[i][-5:]  if len(sunset_d[i]) >= 5  else sunset_d[i]
-                        col.markdown(
-                            f'<div style="background:#1e3a5f;border-radius:10px;padding:8px 6px;'
-                            f'text-align:center;color:#fff;font-size:11px;">'
-                            f'<div style="color:#fde68a;font-weight:700;">{datas[i][5:]}</div>'
-                            f'<div>🌅 {sr}</div><div>🌇 {ss}</div>'
-                            f'</div>', unsafe_allow_html=True
-                        )
-
-    else:
-        st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">
-        ⚠️ Não foi possível buscar dados climáticos. Verifique sua conexão com a internet.
-        </div>''', unsafe_allow_html=True)
-
-        # Modo offline — entrada manual
-        st.subheader("✍️ Inserir Condições Manualmente")
-        col1, col2, col3 = st.columns(3)
-        with col1: temp_m   = st.number_input("Temperatura °C",   0.0, 50.0, 25.0, key="temp_m_cli")
-        with col2: vento_m  = st.number_input("Vento km/h",       0.0, 100.0, 8.0, key="vento_m_cli")
-        with col3: chuva_m  = st.number_input("Precipitação mm",  0.0, 200.0, 0.0, key="chuva_m_cli")
-        col4, col5 = st.columns(2)
-        with col4: umid_m   = st.number_input("Umidade %",        0.0, 100.0, 65.0, key="umid_m_cli")
-        with col5: uv_m     = st.number_input("Índice UV",        0.0, 15.0, 4.0,  key="uv_m_cli")
-
-        alertas_m = alerta_clima_aplicacao(0, vento_m, chuva_m)
-        ok_m = (10 <= temp_m <= 30 and vento_m <= 10 and chuva_m == 0
-                and 40 <= umid_m <= 90 and uv_m < 10)
-        if alertas_m:
-            for a in alertas_m:
-                st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:12px 18px;
-                border-radius:10px;border-left:5px solid #ef4444;font-weight:700;">{a}</div>''',
-                unsafe_allow_html=True)
-        elif ok_m:
-            st.markdown('''<div style="background:#14532d;color:#fff;padding:12px 18px;
-            border-radius:10px;border-left:5px solid #22c55e;font-weight:700;">
-            ✅ Condições adequadas para aplicação!</div>''', unsafe_allow_html=True)
-        else:
-            warning_box("⚠️ Verifique as condições antes de aplicar.")
-
-
-# ─────────────────────────────────────────────
-# MENU: PREÇOS DE MERCADO
-# ─────────────────────────────────────────────
-elif menu == "💰 Preços de Mercado":
-    st.header("💰 Preços de Commodities em Tempo Real")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:11px 16px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:6px 0 12px 0;font-size:13px;">
-    💡 Dólar via <b>AwesomeAPI</b> (tempo real) · Grãos via <b>IA + CEPEA/ESALQ</b> (busca na web agora)
-    </div>''', unsafe_allow_html=True)
-
-    col_btn1, col_btn2 = st.columns([1, 3])
-    with col_btn1:
-        atualizar = st.button("🔄 Atualizar Preços", key="btn_precos", use_container_width=True)
-    with col_btn2:
-        if st.session_state.get("precos_data"):
-            fonte_exib = st.session_state.precos_data.get("soja_sc", {}).get("fonte", "")
-            horario_dolar = st.session_state.precos_data.get("dolar", {}).get("horario", "")
-            st.markdown(f'<div style="background:#0f3460;color:#6ee7b7;padding:8px 14px;border-radius:8px;'
-                        f'font-size:12px;font-weight:700;">✅ Última atualização: {fonte_exib}'
-                        f'{" | Dólar: " + horario_dolar if horario_dolar else ""}</div>',
-                        unsafe_allow_html=True)
-
-    if atualizar:
-        with st.spinner("🌐 Buscando cotações em tempo real (BrapiDev/Yahoo + AwesomeAPI)..."):
-            st.session_state.precos_data = buscar_precos_commodities()
-        success_box("✅ Preços atualizados!")
-
-    precos = st.session_state.get("precos_data") or buscar_precos_commodities()
-    if not st.session_state.get("precos_data"):
-        st.session_state.precos_data = precos
-
-    # Detectar se veio de API real ou fallback
-    fonte_soja  = precos.get("soja_sc", {}).get("fonte", "")
-    ult_at_preco = precos.get("_atualizado_em", "")
-    is_realtime = "CBOT" in fonte_soja or "ICE" in fonte_soja or "BrapiDev" in fonte_soja
-
-    col_st1, col_st2 = st.columns(2)
-    with col_st1:
-        cor_st = "#14532d" if is_realtime else "#78350f"
-        icone_st = "🟢" if is_realtime else "🟡"
-        st.markdown(
-            f'<div style="background:{cor_st};color:#fff;padding:8px 14px;border-radius:8px;'
-            f'font-size:12px;font-weight:700;">'
-            f'{icone_st} {"Cotações em tempo real — CBOT/ICE convertido para R$" if is_realtime else "⚠️ Usando referências offline — clique em Atualizar"}'
-            f'</div>', unsafe_allow_html=True
-        )
-    with col_st2:
-        dolar_fonte = precos.get("dolar", {}).get("fonte", "")
-        dolar_hor   = precos.get("dolar", {}).get("horario", "")
-        cor_d = "#14532d" if "tempo real" in dolar_fonte.lower() or "VatComply" in dolar_fonte else "#78350f"
-        st.markdown(
-            f'<div style="background:{cor_d};color:#fff;padding:8px 14px;border-radius:8px;'
-            f'font-size:12px;font-weight:700;">'
-            f'💵 Dólar: {dolar_fonte}{" — " + dolar_hor[:16] if dolar_hor else ""}'
-            f'{"  |  🕐 " + ult_at_preco if ult_at_preco else ""}'
-            f'</div>', unsafe_allow_html=True
-        )
-
-    # ── Extrai todos os valores ──────────────────────────────────────
-    soja_p     = precos.get("soja_sc",    {}).get("preco", 142.0)
-    milho_p    = precos.get("milho_sc",   {}).get("preco",  74.0)
-    trigo_p    = precos.get("trigo_sc",   {}).get("preco",  98.0)
-    cafe_p     = precos.get("cafe_sc",    {}).get("preco", 2100.0)
-    algodao_p  = precos.get("algodao_at", {}).get("preco", 118.0)
-    boi_p      = precos.get("boi_at",     {}).get("preco", 310.0)
-    arroz_p    = precos.get("arroz_sc",   {}).get("preco",  72.0)
-    dolar_p    = precos.get("dolar",      {}).get("preco",   5.80)
-    fonte_dolar= precos.get("dolar",      {}).get("fonte", "")
-    fonte_graos= precos.get("soja_sc",    {}).get("fonte", "")
-
-    # ── Painel de cotações ───────────────────────────────────────────
-    st.subheader("📊 Cotações Atuais")
-
-    # Linha 1 — Grãos
-    st.markdown("**🌾 Grãos (R$/saca 60kg)**")
-    cg1, cg2, cg3, cg4 = st.columns(4)
-    cg1.metric("🌱 Soja",   f"R$ {soja_p:.2f}",
-               precos.get("soja_sc",{}).get("praca","PR"))
-    cg2.metric("🌽 Milho",  f"R$ {milho_p:.2f}",
-               precos.get("milho_sc",{}).get("praca","PR"))
-    cg3.metric("🌾 Trigo",  f"R$ {trigo_p:.2f}",
-               precos.get("trigo_sc",{}).get("praca","PR"))
-    cg4.metric("🍚 Arroz",  f"R$ {arroz_p:.2f}",
-               precos.get("arroz_sc",{}).get("praca","RS") + " sc 50kg")
-
-    st.markdown("**🐄 Pecuária & Fibra**")
-    cp1, cp2, cp3, cp4 = st.columns(4)
-    cp1.metric("☕ Café",      f"R$ {cafe_p:.2f}",
-               precos.get("cafe_sc",{}).get("praca","SP") + " sc 60kg")
-    cp2.metric("🏭 Algodão",  f"R$ {algodao_p:.2f}",
-               precos.get("algodao_at",{}).get("praca","MT") + " @")
-    cp3.metric("🐂 Boi Gordo",f"R$ {boi_p:.2f}",
-               precos.get("boi_at",{}).get("praca","SP") + " @")
-    fonte_dolar_label = "Tempo real" if "AwesomeAPI" in fonte_dolar else "Offline"
-    cp4.metric("💵 Dólar",    f"R$ {dolar_p:.4f}", fonte_dolar_label)
-
-    # Indicadores de fonte
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        cor_f = "#14532d" if "IA" in fonte_graos or "CEPEA" in fonte_graos and "offline" not in fonte_graos.lower() else "#78350f"
-        icone_f = "🟢" if cor_f == "#14532d" else "🟡"
-        st.markdown(f'<div style="background:{cor_f};color:#fff;padding:7px 13px;border-radius:8px;'
-                    f'font-size:12px;font-weight:700;">{icone_f} Grãos: {fonte_graos or "Aguardando atualização"}</div>',
-                    unsafe_allow_html=True)
-    with col_f2:
-        cor_d = "#14532d" if "AwesomeAPI" in fonte_dolar else "#78350f"
-        icone_d = "🟢" if cor_d == "#14532d" else "🟡"
-        st.markdown(f'<div style="background:{cor_d};color:#fff;padding:7px 13px;border-radius:8px;'
-                    f'font-size:12px;font-weight:700;">{icone_d} Dólar: {fonte_dolar or "Aguardando"}</div>',
-                    unsafe_allow_html=True)
-
-    st.divider()
-
-    # ── Simulador de rentabilidade ───────────────────────────────────
-    st.subheader("🧮 Simulador de Rentabilidade por Talhão")
-    d = st.session_state.dados
-
-    if not d.get("area"):
-        info_box("Cadastre uma área primeiro para usar o simulador.")
-    else:
-        cultura_sim = d.get("cultura", "Soja")
-        area_sim    = float(d.get("area", 10))
-        produt_sim  = float(d.get("produtividade", 60))
-
-        preco_map = {
-            "Soja": soja_p, "Milho": milho_p, "Trigo": trigo_p,
-            "Arroz": arroz_p, "Café": cafe_p
-        }
-        preco_sim = preco_map.get(cultura_sim, soja_p)
-
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            cult_sim_sel  = st.selectbox("Cultura", list(preco_map.keys()),
-                                          index=list(preco_map.keys()).index(cultura_sim)
-                                          if cultura_sim in preco_map else 0,
-                                          key="sim_cult")
-            produt_real   = st.number_input("Produtividade esperada (sc/ha)", 0.0, 500.0, produt_sim, key="sim_prod")
-            preco_custom  = st.number_input("Preço da saca (R$)", 0.0, 10000.0,
-                                             preco_map.get(cult_sim_sel, soja_p), key="sim_preco")
-        with col_s2:
-            custo_ha   = st.number_input("Custo total por hectare (R$)", 0.0, 50000.0, 3200.0, key="sim_custo")
-            area_calc  = st.number_input("Área (ha)", 0.1, 100000.0, area_sim, key="sim_area")
-
-        receita     = produt_real * preco_custom * area_calc
-        custo_total = custo_ha * area_calc
-        lucro       = receita - custo_total
-        margem      = (lucro / receita * 100) if receita > 0 else 0
-        breakeven   = custo_ha / preco_custom if preco_custom > 0 else 0
-        preco_min   = custo_ha / produt_real  if produt_real  > 0 else 0
-
-        st.divider()
-        col_r1, col_r2, col_r3 = st.columns(3)
-        col_r1.metric("💰 Receita Total", f"R$ {receita:,.0f}")
-        col_r2.metric("💸 Custo Total",   f"R$ {custo_total:,.0f}")
-        col_r3.metric("💵 Lucro Líquido", f"R$ {lucro:,.0f}")
-
-        col_r4, col_r5, col_r6 = st.columns(3)
-        col_r4.metric("📊 Margem",           f"{margem:.1f}%")
-        col_r5.metric("⚖️ Break-even sc/ha", f"{breakeven:.1f} sc")
-        col_r6.metric("💲 Preço mín R$/sc",  f"R$ {preco_min:.2f}")
-
-        if lucro > 0:
-            st.markdown(f'''<div style="background:#14532d;color:#fff;padding:13px 18px;
-            border-radius:10px;border-left:5px solid #22c55e;font-weight:700;font-size:15px;margin:10px 0;">
-            ✅ Operação LUCRATIVA — Lucro de R$ {lucro:,.2f} com margem de {margem:.1f}%
-            </div>''', unsafe_allow_html=True)
-        else:
-            st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:13px 18px;
-            border-radius:10px;border-left:5px solid #ef4444;font-weight:700;font-size:15px;margin:10px 0;">
-            ❌ Operação no PREJUÍZO — Revise custos ou produtividade esperada.
-            </div>''', unsafe_allow_html=True)
-
-        # ── Análise de sensibilidade ─────────────────────────────────
-        st.divider()
-        st.subheader("📈 Análise de Sensibilidade — Variação de Preço")
-        precos_range = [preco_custom * f for f in [0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30]]
-        lucros_range = [(p * produt_real * area_calc - custo_total) for p in precos_range]
-        df_sens = pd.DataFrame({
-            "Cenário":     [f"-30%","-20%","-10%","Atual","+10%","+20%","+30%"],
-            "Preço R$/sc": [f"R$ {p:.2f}" for p in precos_range],
-            "Lucro R$":    [f"R$ {l:,.0f}" for l in lucros_range],
-            "Status":      ["✅" if l > 0 else "❌" for l in lucros_range],
-        })
-        st.dataframe(df_sens, use_container_width=True, hide_index=True)
-
-        # ── Comparativo entre todas as commodities ───────────────────
-        st.divider()
-        st.subheader("🔄 Comparativo Entre Culturas com Preços Atuais")
-        benchmarks = {
-            "Soja":    (65,  soja_p,    "sc 60kg"),
-            "Milho":   (180, milho_p,   "sc 60kg"),
-            "Trigo":   (55,  trigo_p,   "sc 60kg"),
-            "Arroz":   (160, arroz_p,   "sc 50kg"),
-            "Café":    (30,  cafe_p,    "sc 60kg"),
-        }
-        comp_data = []
-        for cult, (prod_ref, preco_c, unid_c) in benchmarks.items():
-            rec_c  = prod_ref * preco_c * area_calc
-            luc_c  = rec_c - custo_total
-            marg_c = (luc_c / rec_c * 100) if rec_c > 0 else 0
-            comp_data.append({
-                "Cultura":           cult,
-                "Prod. ref (sc/ha)": prod_ref,
-                f"Preço ({unid_c})":  f"R$ {preco_c:.2f}",
-                "Receita R$":        f"R$ {rec_c:,.0f}",
-                "Lucro R$":          f"R$ {luc_c:,.0f}",
-                "Margem %":          f"{marg_c:.1f}%",
-                "Status":            "✅" if luc_c > 0 else "❌",
-            })
-        st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
-
-
-# ─────────────────────────────────────────────
-# MENU: OCR LAUDO DE SOLO
-# ─────────────────────────────────────────────
-elif menu == "📄 OCR Laudo de Solo":
-    st.header("📄 Leitura Automática de Laudo de Solo")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-    ℹ️ Faça upload do seu laudo de solo (PDF ou imagem JPG/PNG) e o sistema tentará
-    extrair os valores automaticamente usando OCR e preenchê-los na análise de solo.
-    </div>''', unsafe_allow_html=True)
-
-    tipo_arquivo = st.radio("Tipo de arquivo", ["📄 PDF", "🖼️ Imagem (JPG/PNG)"],
-                            horizontal=True, key="ocr_tipo")
-
-    st.markdown("""
-    <style>
-    [data-testid="stFileUploaderDropzone"],
-    [data-testid="stFileUploaderDropzone"] > div {
-        background-color: #0f3460 !important;
-        border: 2px solid #22c55e !important;
-        border-radius: 12px !important;
-    }
-    [data-testid="stFileUploaderDropzone"] button {
-        background-color: #16a34a !important;
-        color: #ffffff !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 700 !important;
-    }
-    [data-testid="stFileUploaderDropzone"] span,
-    [data-testid="stFileUploaderDropzone"] p,
-    [data-testid="stFileUploaderDropzone"] div,
-    [data-testid="stFileUploaderDropzone"] button span {
-        color: #ffffff !important; opacity: 1 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    texto_ocr    = ""
-    campos_ocr   = {}
-
-    if tipo_arquivo == "📄 PDF":
-        arquivo_laudo = st.file_uploader("Upload do laudo PDF", type=["pdf"], key="ocr_pdf")
-        if arquivo_laudo:
-            with st.spinner("🔍 Lendo PDF..."):
-                texto_ocr = extrair_texto_pdf(arquivo_laudo)
-    else:
-        arquivo_laudo = st.file_uploader("Upload da imagem do laudo", type=["jpg","jpeg","png"], key="ocr_img")
-        if arquivo_laudo:
-            img_pil = PILImage.open(arquivo_laudo)
-            st.image(img_pil, caption="Laudo enviado", use_container_width=True)
-            with st.spinner("🔍 Aplicando OCR..."):
-                texto_ocr = extrair_texto_imagem(arquivo_laudo)
-
-    if texto_ocr:
-        with st.expander("📝 Texto extraído (clique para ver)"):
-            st.text(texto_ocr[:3000])
-
-        campos_ocr = parsear_laudo_ocr(texto_ocr)
-
-        if campos_ocr:
-            st.subheader("✅ Valores detectados automaticamente")
-            df_ocr = pd.DataFrame([{
-                "Campo": k.replace("_"," ").title(),
-                "Valor detectado": v
-            } for k, v in campos_ocr.items()])
-            st.dataframe(df_ocr, use_container_width=True)
-
-            st.subheader("✏️ Confirme ou ajuste os valores")
-            cols_ocr = st.columns(3)
-            campos_editados = {}
-            campos_lista = list(campos_ocr.items())
-            for i, (campo, val) in enumerate(campos_lista):
-                with cols_ocr[i % 3]:
-                    campos_editados[campo] = st.number_input(
-                        campo.replace("_"," ").title(),
-                        value=float(val),
-                        key=f"ocr_{campo}"
-                    )
-
-            if st.button("📥 Importar valores para Análise de Solo", key="btn_importar_ocr"):
-                if not st.session_state.area_selecionada:
-                    st.markdown('''<div style="background:#7f1d1d;color:#fff;padding:12px 18px;
-                    border-radius:10px;border-left:5px solid #ef4444;font-weight:700;">
-                    ❌ Carregue uma área primeiro em "Áreas Cadastradas".</div>''',
-                    unsafe_allow_html=True)
-                else:
-                    st.session_state.dados.update(campos_editados)
-                    atualizar_area_atual()
-                    salvar_dados_iaagro()
-                    st.markdown(f'''<div style="background:#14532d;color:#fff;padding:13px 18px;
-                    border-radius:10px;border-left:5px solid #22c55e;font-weight:700;">
-                    ✅ {len(campos_editados)} campos importados para a área ativa!
-                    Acesse "Análise de Solo" para conferir.</div>''', unsafe_allow_html=True)
-        else:
-            st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
-            border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;margin:8px 0;">
-            ⚠️ Não foi possível detectar valores automaticamente. Verifique se o laudo
-            está legível e tente novamente. Você também pode inserir os dados manualmente
-            na aba "Análise de Solo".</div>''', unsafe_allow_html=True)
-
-            with st.expander("💡 Dicas para melhor resultado"):
-                st.markdown("""
-                - Use laudos com texto digital (não escaneados em baixa resolução)
-                - Laudos da EMBRAPA, IAC e laboratórios com formato padrão funcionam melhor
-                - Para imagens, tire a foto com boa iluminação e sem sombras
-                - O OCR reconhece nomes como: pH, Fósforo, Potássio, Cálcio, Magnésio, Alumínio, Argila, CTC, MO
-                """)
-
-# ─────────────────────────────────────────────
-# MENU: PRAZO DE CARÊNCIA
-# ─────────────────────────────────────────────
-elif menu == "⏱️ Prazo de Carência":
+if menu == "📦 Operacional":
+  with _sub_op[2]:
     st.header("⏱️ Controle de Prazo de Carência e Reentrada")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-    ℹ️ Registre os defensivos aplicados e acompanhe automaticamente os prazos de
-    carência (colheita) e reentrada (entrada segura na lavoura).
-    </div>''', unsafe_allow_html=True)
-
-    # Init storage
     if "carencia_registros" not in st.session_state:
         st.session_state.carencia_registros = []
-
-    # ── Cadastrar nova aplicação com carência ──
     st.subheader("➕ Registrar Aplicação com Carência")
     col1, col2, col3 = st.columns(3)
     with col1:
         car_produto    = st.text_input("Nome do produto/defensivo", key="car_produto")
-        car_cultura    = st.selectbox("Cultura", ["Soja","Milho","Trigo","Feijão","Outra"], key="car_cultura")
+        car_cultura    = st.selectbox("Cultura", get_culturas() + ["Outra"], key="car_cultura")
         car_data_aplic = st.date_input("Data da aplicação", key="car_data")
     with col2:
-        car_carencia   = st.number_input("Prazo de carência (dias)", min_value=0, value=14, key="car_carencia",
-                                          help="Dias após aplicação até a colheita segura")
-        car_reentrada  = st.number_input("Prazo de reentrada (horas)", min_value=0, value=48, key="car_reentrada",
-                                          help="Horas após aplicação para entrar na lavoura com segurança")
+        car_carencia   = st.number_input("Prazo de carência (dias)", min_value=0, value=14, key="car_carencia")
+        car_reentrada  = st.number_input("Prazo de reentrada (horas)", min_value=0, value=48, key="car_reentrada")
         car_dose       = st.text_input("Dose aplicada", placeholder="Ex: 0.5 L/ha", key="car_dose")
     with col3:
         car_talhao     = st.text_input("Talhão/Área", key="car_talhao")
@@ -5420,7 +7836,6 @@ elif menu == "⏱️ Prazo de Carência":
                                          ["Máscara","Luvas","Óculos","Macacão","Botas","Protetor Auricular"],
                                          key="car_epi")
         car_obs        = st.text_area("Observações", key="car_obs", height=80)
-
     if st.button("💾 Salvar Registro de Carência", key="btn_salvar_carencia"):
         if not car_produto.strip():
             error_box("Digite o nome do produto.")
@@ -5429,1947 +7844,1435 @@ elif menu == "⏱️ Prazo de Carência":
             data_colheita_seg = car_data_aplic + timedelta(days=int(car_carencia))
             data_reentrada    = datetime.combine(car_data_aplic, datetime.min.time()) + timedelta(hours=int(car_reentrada))
             st.session_state.carencia_registros.append({
-                "Produto":          car_produto,
-                "Cultura":          car_cultura,
-                "Talhão":           car_talhao,
-                "Data Aplicação":   str(car_data_aplic),
-                "Carência dias":    car_carencia,
-                "Data Colheita Segura": str(data_colheita_seg),
-                "Reentrada horas":  car_reentrada,
-                "Data Reentrada":   str(data_reentrada.date()),
-                "Dose":             car_dose,
-                "EPI":              ", ".join(car_epi),
-                "Observações":      car_obs,
+                "Produto": car_produto, "Cultura": car_cultura, "Talhão": car_talhao,
+                "Data Aplicação": str(car_data_aplic), "Carência dias": car_carencia,
+                "Data Colheita Segura": str(data_colheita_seg), "Reentrada horas": car_reentrada,
+                "Data Reentrada": str(data_reentrada.date()), "Dose": car_dose,
+                "EPI": ", ".join(car_epi), "Observações": car_obs,
             })
             salvar_dados_iaagro()
-            success_box(f"Registro de {car_produto} salvo! Carência até: {data_colheita_seg} | Reentrada: {data_reentrada.strftime('%d/%m/%Y %H:%M')}")
-
-    # ── Painel de situação ──
+            success_box(f"Registro de {car_produto} salvo! Carência até: {data_colheita_seg}")
     if st.session_state.carencia_registros:
-        st.divider()
-        st.subheader("📊 Situação dos Prazos")
-
-        hoje = date.today()
-        registros_status = []
-        for r in st.session_state.carencia_registros:
-            data_colh  = date.fromisoformat(r["Data Colheita Segura"])
-            data_reent = date.fromisoformat(r["Data Reentrada"])
-            dias_colh  = (data_colh - hoje).days
-            dias_reent = (data_reent - hoje).days
-
-            if dias_colh < 0:
-                status_colh = "✅ Liberado para colheita"
-            elif dias_colh == 0:
-                status_colh = "⚠️ Liberado hoje"
-            else:
-                status_colh = f"🔴 {dias_colh} dias para colheita segura"
-
-            if dias_reent < 0:
-                status_reent = "✅ Reentrada liberada"
-            elif dias_reent == 0:
-                status_reent = "⚠️ Reentrada liberada hoje"
-            else:
-                status_reent = f"🔴 Aguardar {dias_reent} dia(s) para reentrada"
-
-            registros_status.append({
-                "Produto":         r["Produto"],
-                "Cultura":         r["Cultura"],
-                "Talhão":          r["Talhão"],
-                "Aplicação":       r["Data Aplicação"],
-                "Colheita Segura": r["Data Colheita Segura"],
-                "Status Colheita": status_colh,
-                "Status Reentrada":status_reent,
-                "EPI":             r["EPI"],
-            })
-
-        df_car = pd.DataFrame(registros_status)
+        import pandas as pd
+        df_car = pd.DataFrame(st.session_state.carencia_registros)
         st.dataframe(df_car, use_container_width=True)
-
-        # Alertas visuais
-        st.divider()
-        st.subheader("🚨 Alertas Ativos")
-        alertas_ativos = False
-        for r in registros_status:
-            if "🔴" in r["Status Colheita"]:
-                st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:12px 18px;
-                border-radius:10px;border-left:5px solid #ef4444;font-weight:700;margin:4px 0;">
-                🌾 {r["Produto"]} — {r["Talhão"]}: {r["Status Colheita"]}</div>''',
-                unsafe_allow_html=True)
-                alertas_ativos = True
-            if "🔴" in r["Status Reentrada"]:
-                st.markdown(f'''<div style="background:#78350f;color:#fff;padding:12px 18px;
-                border-radius:10px;border-left:5px solid #f59e0b;font-weight:700;margin:4px 0;">
-                ⛔ {r["Produto"]} — {r["Talhão"]}: {r["Status Reentrada"]} | EPI: {r["EPI"]}</div>''',
-                unsafe_allow_html=True)
-                alertas_ativos = True
-        if not alertas_ativos:
-            success_box("Nenhum prazo de carência ou reentrada pendente no momento!")
-
-        # Excluir registro
-        st.divider()
-        opcoes_del = [f"{r['Produto']} — {r['Talhão']} ({r['Data Aplicação']})"
-                      for r in st.session_state.carencia_registros]
-        del_choice = st.selectbox("Excluir registro", opcoes_del, key="del_carencia")
-        if st.button("🗑️ Excluir", key="btn_del_carencia"):
-            idx = opcoes_del.index(del_choice)
-            st.session_state.carencia_registros.pop(idx)
-            salvar_dados_iaagro()
-            success_box("Registro removido.")
-            st.rerun()
-
+        with st.expander("🗑️ Excluir"):
+            opcoes_del = [f"{r.get('Produto','')} — {r.get('Data Aplicação','')}"
+                          for r in st.session_state.carencia_registros]
+            del_choice = st.selectbox("Excluir registro", opcoes_del, key="del_carencia")
+            if st.button("🗑️ Excluir", key="btn_del_carencia"):
+                idx = opcoes_del.index(del_choice)
+                st.session_state.carencia_registros.pop(idx)
+                salvar_dados_iaagro()
+                success_box("Registro removido.")
+                st.rerun()
 
 # ─────────────────────────────────────────────
 # MENU: ORDEM DE SERVIÇO
 # ─────────────────────────────────────────────
-elif menu == "📋 Ordem de Serviço":
+if menu == "📦 Operacional":
+  with _sub_op[3]:
     st.header("📋 Ordem de Serviço")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-    ℹ️ Gere uma Ordem de Serviço completa para o operador ir ao campo. Pode ser impressa ou salva em PDF.
-    </div>''', unsafe_allow_html=True)
-
+    info_box("Gere uma Ordem de Serviço completa para o operador ir ao campo.")
     col1, col2 = st.columns(2)
     with col1:
-        os_numero     = st.text_input("Número da OS", value=f"OS-{datetime.now().strftime('%Y%m%d%H%M')}")
-        os_data       = st.date_input("Data da OS", value=date.today())
-        os_fazenda    = st.text_input("Fazenda", value=st.session_state.dados.get("fazenda",""))
-        os_talhao     = st.text_input("Talhão", value=st.session_state.dados.get("talhao",""))
-        os_area       = st.number_input("Área (ha)", value=float(st.session_state.dados.get("area",0)))
-        os_cultura    = st.text_input("Cultura", value=st.session_state.dados.get("cultura",""))
+        os_numero     = st.text_input("Número da OS", value=f"OS-{datetime.now().strftime('%Y%m%d%H%M')}", key="txt_n_mero_da_os_6029")
+        os_data       = st.date_input("Data da OS", value=date.today(), key="dat_data_da_os_6030")
+        os_fazenda    = st.text_input("Fazenda", value=st.session_state.dados.get("fazenda",""), key="txt_fazenda_6031")
+        os_talhao     = st.text_input("Talhão", value=st.session_state.dados.get("talhao",""), key="txt_talh_o_6032")
+        os_area       = st.number_input("Área (ha)", value=float(st.session_state.dados.get("area",0)), key="num__rea__ha__6033")
+        os_cultura    = st.text_input("Cultura", value=st.session_state.dados.get("cultura",""), key="txt_cultura_6034")
     with col2:
-        os_operador   = st.text_input("Operador responsável")
-        os_maquina    = st.text_input("Máquina / Pulverizador")
-        os_velocidade = st.number_input("Velocidade (km/h)", value=6.0)
-        os_pressao    = st.number_input("Pressão de trabalho (bar)", value=2.5)
-        os_volume     = st.number_input("Volume de calda (L/ha)", value=100.0)
-        os_inicio     = st.text_input("Horário previsto de início", placeholder="Ex: 06:30")
-
+        os_operador   = st.text_input("Operador responsável", key="txt_operador_respon_6036")
+        os_maquina    = st.text_input("Máquina / Pulverizador", key="txt_m_quina___pulve_6037")
+        os_velocidade = st.number_input("Velocidade (km/h)", value=6.0, key="num_velocidade__km__6038")
+        os_pressao    = st.number_input("Pressão de trabalho (bar)", value=2.5, key="num_press_o_de_trab_6039")
+        os_volume     = st.number_input("Volume de calda (L/ha)", value=100.0, key="num_volume_de_calda_6040")
+        os_inicio     = st.text_input("Horário previsto de início", placeholder="Ex: 06:30", key="txt_hor_rio_previst_6041")
     st.subheader("🧪 Produtos da OS")
     os_qtd_produtos = st.number_input("Quantidade de produtos", min_value=1, max_value=10, value=1, key="os_qtd")
     os_produtos = []
     for i in range(int(os_qtd_produtos)):
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: p_nome  = st.text_input(f"Produto {i+1}", key=f"os_prod_{i}")
-        with c2: p_dose  = st.text_input(f"Dose/ha {i+1}", key=f"os_dose_{i}")
-        with c3: p_total = st.text_input(f"Total {i+1}", key=f"os_total_{i}")
-        with c4: p_obs   = st.text_input(f"Obs {i+1}", key=f"os_obs_{i}")
-        if p_nome:
-            os_produtos.append({"Produto": p_nome, "Dose/ha": p_dose,
-                                 "Total": p_total, "Obs": p_obs})
-
-    os_epi     = st.multiselect("EPI obrigatório",
-                                 ["Máscara com filtro","Luvas nitrílicas","Óculos de proteção",
-                                  "Macacão impermeável","Botas de borracha","Protetor auricular","Avental"],
-                                 key="os_epi")
+        col_p1, col_p2, col_p3 = st.columns(3)
+        _p = col_p1.text_input(f"Produto {i+1}", key=f"os_prod_{i}")
+        _d = col_p2.number_input(f"Dose/ha {i+1}", min_value=0.0, key=f"os_dose_{i}")
+        _u = col_p3.selectbox(f"Un. {i+1}", ["L/ha","mL/ha","kg/ha","g/ha"], key=f"os_unid_{i}")
+        os_produtos.append({"Produto":_p,"Dose":_d,"Unidade":_u})
+    os_epi = st.multiselect("EPI obrigatório",
+                             ["Máscara com filtro","Luvas nitrílicas","Óculos de proteção",
+                              "Macacão impermeável","Botas de borracha","Protetor auricular","Avental"],
+                             key="os_epi")
     os_obs_geral = st.text_area("Observações gerais", key="os_obs_geral")
-
     if st.button("📄 Gerar Ordem de Serviço (PDF)", key="btn_gerar_os"):
         from reportlab.lib.units import cm
         buf = BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4,
-                                rightMargin=1.5*cm, leftMargin=1.5*cm,
+        doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm,
                                 topMargin=1.5*cm, bottomMargin=1.5*cm)
         styles = getSampleStyleSheet()
         el = []
-
-        # Cabeçalho
         if os.path.exists("IAAgrologo.jpeg"):
             el.append(Image("IAAgrologo.jpeg", width=3*cm, height=1.5*cm))
-        el.append(Spacer(1, 6))
-
-        # Título
-        titulo_style = styles["Title"]
-        el.append(Paragraph(f"<b>ORDEM DE SERVIÇO — {os_numero}</b>", titulo_style))
+        el.append(Spacer(1,6))
+        el.append(Paragraph(f"ORDEM DE SERVIÇO — {os_numero}", styles["Title"]))
         el.append(Paragraph(f"Data: {os_data} | Fazenda: {os_fazenda} | Talhão: {os_talhao}", styles["Normal"]))
-        el.append(Spacer(1, 12))
-
-        # Dados gerais
-        dados_os = [
-            ["Campo","Informação","Campo","Informação"],
-            ["Fazenda", os_fazenda, "Operador", os_operador],
-            ["Talhão",  os_talhao,  "Máquina",  os_maquina],
-            ["Área",    f"{os_area} ha", "Cultura", os_cultura],
-            ["Volume calda", f"{os_volume} L/ha", "Velocidade", f"{os_velocidade} km/h"],
-            ["Pressão", f"{os_pressao} bar", "Início previsto", os_inicio],
-        ]
-        t_dados = Table(dados_os, colWidths=[3.5*cm,6*cm,3.5*cm,5.5*cm])
-        t_dados.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,0), colors.HexColor("#1e3a5f")),
-            ("TEXTCOLOR", (0,0),(-1,0), colors.white),
-            ("BACKGROUND",(0,1),(0,-1), colors.HexColor("#e8f5e9")),
-            ("BACKGROUND",(2,1),(2,-1), colors.HexColor("#e8f5e9")),
-            ("FONTNAME",  (0,0),(-1,0), "Helvetica-Bold"),
-            ("FONTNAME",  (0,1),(-1,-1),"Helvetica"),
-            ("FONTSIZE",  (0,0),(-1,-1), 9),
-            ("GRID",      (0,0),(-1,-1), 0.5, colors.grey),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white, colors.HexColor("#f0f9ff")]),
-        ]))
-        el.append(t_dados)
-        el.append(Spacer(1, 12))
-
-        # Produtos
-        el.append(Paragraph("<b>PRODUTOS A APLICAR</b>", styles["Heading2"]))
-        if os_produtos:
-            prod_data = [["Produto","Dose/ha","Total","Observação"]] +                         [[p["Produto"],p["Dose/ha"],p["Total"],p["Obs"]] for p in os_produtos]
-            t_prod = Table(prod_data, colWidths=[5.5*cm,3*cm,3*cm,7*cm])
-            t_prod.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,0), colors.HexColor("#14532d")),
-                ("TEXTCOLOR", (0,0),(-1,0), colors.white),
-                ("FONTNAME",  (0,0),(-1,0), "Helvetica-Bold"),
-                ("FONTSIZE",  (0,0),(-1,-1), 9),
-                ("GRID",      (0,0),(-1,-1), 0.5, colors.grey),
-                ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white, colors.HexColor("#f0fdf4")]),
-            ]))
-            el.append(t_prod)
-        el.append(Spacer(1, 12))
-
-        # EPI
-        if os_epi:
-            el.append(Paragraph("<b>EPI OBRIGATÓRIO:</b> " + " | ".join(os_epi), styles["Normal"]))
-            el.append(Spacer(1, 8))
-
-        # Observações
-        if os_obs_geral:
-            el.append(Paragraph(f"<b>Observações:</b> {os_obs_geral}", styles["Normal"]))
-            el.append(Spacer(1, 16))
-
-        # Assinaturas
-        assin = Table([
-            ["_"*35, " ", "_"*35],
-            ["Operador / Data", " ", "Responsável Técnico / Data"],
-        ], colWidths=[7*cm, 4*cm, 7*cm])
-        assin.setStyle(TableStyle([
-            ("ALIGN",(0,0),(-1,-1),"CENTER"),
-            ("FONTSIZE",(0,0),(-1,-1),9),
-        ]))
-        el.append(assin)
-
+        el.append(Paragraph(f"Operador: {os_operador} | Máquina: {os_maquina}", styles["Normal"]))
+        el.append(Paragraph(f"Velocidade: {os_velocidade} km/h | Pressão: {os_pressao} bar | Volume: {os_volume} L/ha", styles["Normal"]))
+        el.append(Spacer(1,12))
+        el.append(Paragraph("PRODUTOS:", styles["Heading2"]))
+        for p in os_produtos:
+            el.append(Paragraph(f"• {p['Produto']}: {p['Dose']} {p['Unidade']}", styles["Normal"]))
+        el.append(Spacer(1,12))
+        el.append(Paragraph(f"EPI obrigatório: {', '.join(os_epi)}", styles["Normal"]))
+        el.append(Paragraph(f"Observações: {os_obs_geral}", styles["Normal"]))
+        el.append(Spacer(1,24))
+        el.append(Paragraph("Assinatura do operador: ___________________________", styles["Normal"]))
         doc.build(el)
-        pdf_os = buf.getvalue()
-        buf.close()
-
-        st.download_button(
-            "📥 Baixar Ordem de Serviço PDF",
-            data=pdf_os,
-            file_name=f"OS_{os_numero}_{os_data}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-        success_box(f"OS {os_numero} gerada com sucesso!")
-
+        buf.seek(0)
+        st.session_state["_os_pdf"] = buf.read()
+        st.success("✅ OS gerada!")
+    if st.session_state.get("_os_pdf"):
+        st.download_button("⬇️ Baixar OS PDF", data=st.session_state["_os_pdf"],
+                           file_name=f"OS_{os_numero}.pdf", mime="application/pdf",
+                           use_container_width=True, key="btn_dl_os")
 
 # ─────────────────────────────────────────────
-# MENU: DASHBOARD FINANCEIRO
+# MENU: RECEITUÁRIO
 # ─────────────────────────────────────────────
-elif menu == "💹 Dashboard Financeiro":
-    st.header("💹 Dashboard Financeiro — DRE por Safra")
+if menu == "📦 Operacional":
+  with _sub_op[4]:
+    st.header("📜 Receituário Agronômico")
+    if "receituarios" not in st.session_state:
+        st.session_state.receituarios = []
+    col1, col2 = st.columns(2)
+    with col1:
+        rec_numero    = st.text_input("Número do receituário", key="rec_numero")
+        rec_produto   = st.text_input("Produto/defensivo", key="rec_produto")
+        rec_cultura   = st.selectbox("Cultura", get_culturas(), key="rec_cultura")
+        rec_praga     = st.text_input("Praga/doença/planta daninha", key="rec_praga")
+        rec_dose      = st.text_input("Dose recomendada", placeholder="Ex: 0.5 L/ha", key="rec_dose")
+        rec_epoca     = st.text_input("Época de aplicação", placeholder="Ex: Estádio R1", key="rec_epoca")
+    with col2:
+        rec_responsavel = st.text_input("Responsável técnico", key="rec_responsavel")
+        rec_crea        = st.text_input("CREA/CRB", key="rec_crea")
+        rec_produtor    = st.text_input("Produtor", key="rec_produtor")
+        rec_propriedade = st.text_input("Propriedade", key="rec_propriedade")
+        rec_area        = st.number_input("Área (ha)", min_value=0.0, key="rec_area")
+        rec_data        = st.date_input("Data", key="rec_data")
+    rec_obs = st.text_area("Observações técnicas", key="rec_obs")
+    if st.button("💾 Salvar Receituário", key="btn_salvar_rec"):
+        st.session_state.receituarios.append({
+            "Número": rec_numero, "Produto": rec_produto, "Cultura": rec_cultura,
+            "Praga/Doença": rec_praga, "Dose": rec_dose, "Época": rec_epoca,
+            "Responsável": rec_responsavel, "CREA": rec_crea, "Produtor": rec_produtor,
+            "Propriedade": rec_propriedade, "Área ha": rec_area,
+            "Data": str(rec_data), "Obs": rec_obs,
+        })
+        salvar_dados_iaagro()
+        success_box("Receituário salvo!")
+    if st.session_state.receituarios:
+        import pandas as pd
+        st.dataframe(pd.DataFrame(st.session_state.receituarios), use_container_width=True)
 
-    if "dre_registros" not in st.session_state:
-        st.session_state.dre_registros = []
+# ─────────────────────────────────────────────
+# MENU: RELATÓRIO FINAL
+# ─────────────────────────────────────────────
+elif menu == "📄 Relatório Final":
+    st.header("📄 Relatório Final da Propriedade")
+    if not st.session_state.areas:
+        warning_box("Cadastre pelo menos uma área para gerar o relatório.")
+    else:
+        _areas_rel = [f"{a['ID']} — {a.get('Talhão','?')} ({a.get('Cultura','?')})"
+                      for a in st.session_state.areas]
+        _sel_rel  = st.selectbox("📍 Área para o relatório", _areas_rel, key="sel_area_relatorio")
+        _id_rel   = _sel_rel.split(" — ")[0]
+        _area_rel = next((a for a in st.session_state.areas if a.get("ID") == _id_rel), {})
+        _dados_rel = _area_rel.get("Dados", _area_rel.get("dados", {})) or {}
+        col_r1, col_r2 = st.columns(2)
+        nome_produtor = col_r1.text_input("Nome do produtor", value=st.session_state.get("usuario_atual",""), key="rel_produtor")
+        municipio     = col_r2.text_input("Município/UF", value=_dados_rel.get("cidade",""), key="rel_municipio")
+        if st.button("📄 Gerar Relatório Final (PDF)", key="btn_gerar_relatorio", use_container_width=True):
+            try:
+                from reportlab.lib.pagesizes import A4 as A4_
+                from reportlab.lib import colors as rl_c
+                from reportlab.lib.units import cm as cm_
+                from reportlab.platypus import SimpleDocTemplate as SDT, Paragraph as Par, Spacer as Sp, Table as Tbl, TableStyle as TS, HRFlowable as HR
+                from reportlab.lib.styles import ParagraphStyle as PS
+                from reportlab.lib.enums import TA_CENTER as TAC, TA_LEFT as TAL
+                buf_r = BytesIO()
+                doc_r = SDT(buf_r, pagesize=A4_, rightMargin=2*cm_, leftMargin=2*cm_, topMargin=2*cm_, bottomMargin=2*cm_)
+                el_r  = []
+                def Pr_(t, sz=9, b=False, c=None, al=TAL):
+                    fn = "Helvetica-Bold" if b else "Helvetica"
+                    return Par(t, PS("p", fontName=fn, fontSize=sz, textColor=c or rl_c.HexColor("#0f172a"), alignment=al, leading=sz+3))
+                COR_V_ = rl_c.HexColor("#16a34a"); COR_E_ = rl_c.HexColor("#14532d")
+                COR_C_ = rl_c.HexColor("#f1f5f9"); COR_B_ = rl_c.HexColor("#e2e8f0")
+                if os.path.exists("IAAgrologo.jpeg"):
+                    el_r.append(Image("IAAgrologo.jpeg", width=3*cm_, height=1.5*cm_))
+                el_r.append(Pr_("RELATÓRIO AGRONÔMICO — IAAgro", 15, True, COR_E_, TAC))
+                el_r.append(Pr_(f"Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 8, False, rl_c.HexColor("#64748b"), TAC))
+                el_r.append(Sp(1, 0.3*cm_)); el_r.append(HR(width="100%", thickness=2, color=COR_V_)); el_r.append(Sp(1, 0.3*cm_))
+                t_inf = Tbl([[Pr_(f"<b>Produtor:</b> {nome_produtor or '—'}"), Pr_(f"<b>Município:</b> {municipio or '—'}"),
+                               Pr_(f"<b>Talhão:</b> {_area_rel.get('Talhão','—')}"), Pr_(f"<b>Área:</b> {_area_rel.get('Hectares',0)} ha")]],
+                             colWidths=[4*cm_,3.5*cm_,4*cm_,4*cm_])
+                t_inf.setStyle(TS([("BACKGROUND",(0,0),(-1,-1),COR_C_),("GRID",(0,0),(-1,-1),0.4,COR_B_),
+                    ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),6)]))
+                el_r.append(t_inf); el_r.append(Sp(1,0.4*cm_))
+                if "ph" in _dados_rel:
+                    el_r.append(Pr_("ANÁLISE DE SOLO", 11, True, COR_E_))
+                    el_r.append(HR(width="100%", thickness=1, color=COR_V_)); el_r.append(Sp(1,0.2*cm_))
+                    rows_s = [[Pr_("<b>Parâmetro</b>",9,True,rl_c.white),Pr_("<b>Valor</b>",9,True,rl_c.white),
+                               Pr_("<b>Unidade</b>",9,True,rl_c.white),Pr_("<b>Ref.</b>",9,True,rl_c.white)],
+                              [Pr_("pH"),Pr_(str(_dados_rel.get("ph","—"))),Pr_("adimensional"),Pr_("5.5–6.5")],
+                              [Pr_("Fósforo"),Pr_(str(_dados_rel.get("fosforo","—"))),Pr_("mg/dm3"),Pr_(">12")],
+                              [Pr_("Potássio"),Pr_(str(_dados_rel.get("potassio","—"))),Pr_("mg/dm3"),Pr_(">80")],
+                              [Pr_("Cálcio"),Pr_(str(_dados_rel.get("calcio","—"))),Pr_("cmolc/dm3"),Pr_(">2.0")],
+                              [Pr_("Magnésio"),Pr_(str(_dados_rel.get("magnesio","—"))),Pr_("cmolc/dm3"),Pr_(">0.5")],
+                              [Pr_("M.O."),Pr_(str(_dados_rel.get("materia_organica","—"))),Pr_("g/dm3"),Pr_(">25")],
+                              [Pr_("V%"),Pr_(str(_dados_rel.get("v_percent","—"))),Pr_("%"),Pr_(">60%")]]
+                    ts_ = Tbl(rows_s, colWidths=[4*cm_,3*cm_,3.5*cm_,5*cm_])
+                    ts_.setStyle(TS([("BACKGROUND",(0,0),(-1,0),COR_E_),("TEXTCOLOR",(0,0),(-1,0),rl_c.white),
+                        ("ROWBACKGROUNDS",(0,1),(-1,-1),[COR_C_,rl_c.white]),("GRID",(0,0),(-1,-1),0.4,COR_B_),
+                        ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),("LEFTPADDING",(0,0),(-1,-1),6)]))
+                    el_r.append(ts_); el_r.append(Sp(1,0.4*cm_))
+                _hist = [h for h in st.session_state.historico_produtividade if h.get("Área","").startswith(_id_rel)]
+                if _hist:
+                    el_r.append(Pr_("HISTÓRICO DE PRODUTIVIDADE", 11, True, COR_E_))
+                    el_r.append(HR(width="100%", thickness=1, color=COR_V_)); el_r.append(Sp(1,0.2*cm_))
+                    rows_h = [[Pr_("<b>Safra</b>",9,True,rl_c.white),Pr_("<b>Cultura</b>",9,True,rl_c.white),
+                               Pr_("<b>Produtividade</b>",9,True,rl_c.white),Pr_("<b>Custo R$/ha</b>",9,True,rl_c.white)]]
+                    for h in _hist:
+                        rows_h.append([Pr_(h.get("Safra","—"),9),Pr_(cultura_limpa(h.get("Cultura","—")),9),
+                                       Pr_(f"{h.get('Produtividade',0):.1f} sc/ha",9),Pr_(f"R$ {h.get('Custo',0):.2f}",9)])
+                    th_ = Tbl(rows_h, colWidths=[3*cm_,4*cm_,4*cm_,4.5*cm_])
+                    th_.setStyle(TS([("BACKGROUND",(0,0),(-1,0),COR_E_),("TEXTCOLOR",(0,0),(-1,0),rl_c.white),
+                        ("ROWBACKGROUNDS",(0,1),(-1,-1),[COR_C_,rl_c.white]),("GRID",(0,0),(-1,-1),0.4,COR_B_),
+                        ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),("LEFTPADDING",(0,0),(-1,-1),6)]))
+                    el_r.append(th_)
+                el_r.append(HR(width="100%", thickness=1, color=COR_V_))
+                el_r.append(Pr_(f"IAAgro — {datetime.now().strftime('%d/%m/%Y %H:%M')}",7,False,rl_c.HexColor("#64748b"),TAC))
+                doc_r.build(el_r)
+                buf_r.seek(0)
+                st.session_state["_pdf_relatorio"] = buf_r.read()
+                st.success("✅ Relatório gerado!")
+            except Exception as e:
+                st.error(f"Erro: {e}")
+        if st.session_state.get("_pdf_relatorio"):
+            st.download_button("⬇️ Baixar Relatório PDF", data=st.session_state["_pdf_relatorio"],
+                               file_name=f"relatorio_iaagro_{datetime.now().strftime('%d%m%Y')}.pdf",
+                               mime="application/pdf", use_container_width=True, key="btn_download_relatorio")
 
-    tab_dre, tab_novo, tab_grafico = st.tabs([
-        "📊 DRE & Resultados",
-        "➕ Lançar Receita/Custo",
-        "📈 Evolução por Safra"
-    ])
+# ─────────────────────────────────────────────
+# MENU: INTELIGÊNCIA
+# ─────────────────────────────────────────────
+elif menu == "🌍 Inteligência":
+    _sub_int = st.tabs(["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","📅 Calendário Agrícola","🤖 Assistente IA"])
 
-    with tab_novo:
-        st.subheader("➕ Novo Lançamento Financeiro")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            dre_safra    = st.text_input("Safra", placeholder="2024/2025", key="dre_safra")
-            dre_tipo     = st.selectbox("Tipo", ["Receita","Custo Variável","Custo Fixo"], key="dre_tipo")
-            dre_categ    = st.selectbox("Categoria", [
-                "Venda de grãos","Venda de outros","Semente","Fertilizante",
-                "Defensivo","Diesel e lubrificantes","Mão de obra","Aluguel de máquinas",
-                "Arrendamento","Seguro","Transporte","Armazenagem","Outros"
-            ], key="dre_categ")
-        with col2:
-            dre_descricao = st.text_input("Descrição", key="dre_desc")
-            dre_valor     = st.number_input("Valor R$", min_value=0.0, key="dre_valor")
-            dre_area_ha   = st.number_input("Área referente (ha)", min_value=0.0,
-                                             value=float(st.session_state.dados.get("area",0)),
-                                             key="dre_area")
-        with col3:
-            dre_data_lanc = st.date_input("Data", key="dre_data")
-            dre_talhao    = st.text_input("Talhão/Área", key="dre_talhao")
-            dre_cultura   = st.text_input("Cultura", value=st.session_state.dados.get("cultura",""), key="dre_cultura")
+if menu == "🌍 Inteligência":
+  with _sub_int[0]:
+    # Header profissional
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🌤️ Clima & Alertas Agrícolas</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Condições meteorológicas em tempo real e janela de aplicação de defensivos
+    </p></div>
+    """, unsafe_allow_html=True)
 
-        if st.button("💾 Salvar Lançamento", key="btn_salvar_dre"):
-            if not dre_safra.strip():
-                error_box("Informe a safra.")
-            elif dre_valor <= 0:
-                error_box("Informe um valor maior que zero.")
+    d = st.session_state.dados
+    cidade = d.get("cidade","")
+    if not cidade:
+        st.markdown("""
+        <div style='background:#1e3a5f;border-radius:12px;padding:20px;text-align:center;
+        border:2px dashed #3b82f6;'>
+        <div style='font-size:40px;'>🏙️</div>
+        <div style='color:#94a3b8;margin-top:8px;'>
+        Preencha a <b style='color:#6ee7b7;'>cidade</b> no Cadastro da Área para ver o clima em tempo real.
+        </div></div>""", unsafe_allow_html=True)
+    else:
+        try:
+            import requests as rq_
+            _r = rq_.get(f"https://wttr.in/{cidade}?format=j1", timeout=10)
+            if _r.status_code == 200:
+                _w   = _r.json()
+                _cur = _w["current_condition"][0]
+                _temp_c    = int(_cur.get("temp_C", 0))
+                _feels     = int(_cur.get("FeelsLikeC", 0))
+                _umid      = int(_cur.get("humidity", 0))
+                _vento_kmh = int(_cur.get("windspeedKmph", 0))
+                _dir_vento = _cur.get("winddir16Point","—")
+                _cond_desc = _cur.get("weatherDesc",[{}])[0].get("value","—")
+                _chuva_cur = float(_cur.get("precipMM","0") or 0)
+                _uv        = int(_cur.get("uvIndex","0") or 0)
+                _visib     = _cur.get("visibility","—")
+
+                # Emoji condição
+                _cond_lower = _cond_desc.lower()
+                if "thunder" in _cond_lower:       _cond_emoji = "⛈️"
+                elif "heavy rain" in _cond_lower:  _cond_emoji = "🌧️"
+                elif "rain" in _cond_lower or "drizzle" in _cond_lower: _cond_emoji = "🌦️"
+                elif "cloud" in _cond_lower or "overcast" in _cond_lower: _cond_emoji = "☁️"
+                elif "fog" in _cond_lower or "mist" in _cond_lower: _cond_emoji = "🌫️"
+                elif "snow" in _cond_lower:        _cond_emoji = "❄️"
+                elif "sunny" in _cond_lower or "clear" in _cond_lower: _cond_emoji = "☀️"
+                else:                              _cond_emoji = "🌤️"
+
+                # Traduz condição
+                _trad = {
+                    "sunny":"Ensolarado","clear":"Céu limpo","partly cloudy":"Parcialmente nublado",
+                    "cloudy":"Nublado","overcast":"Encoberto","light rain":"Chuva fraca",
+                    "moderate rain":"Chuva moderada","heavy rain":"Chuva forte",
+                    "light drizzle":"Garoa","drizzle":"Garoa","light rain shower":"Pancada fraca",
+                    "patchy rain possible":"Chuva possível","thundery outbreaks":"Trovoadas",
+                    "blizzard":"Nevasca","fog":"Neblina","mist":"Névoa",
+                }
+                _cond_pt = next((v for k,v in _trad.items() if k in _cond_lower), _cond_desc)
+
+                # ── Cards clima atual ──────────────────────────────────────────
+                _cc1, _cc2, _cc3, _cc4, _cc5 = st.columns(5)
+                def _clima_card(col, ico, label, valor, sub="", cor="#22c55e"):
+                    col.markdown(f"""
+                    <div style='background:#0f3460;border-radius:14px;padding:14px 12px;
+                    text-align:center;border:1px solid #1e4976;height:110px;'>
+                    <div style='color:#94a3b8;font-size:11px;font-weight:700;letter-spacing:1px;'>{ico} {label}</div>
+                    <div style='color:{cor};font-size:26px;font-weight:800;margin:4px 0;'>{valor}</div>
+                    <div style='color:#64748b;font-size:11px;'>{sub}</div>
+                    </div>""", unsafe_allow_html=True)
+
+                _clima_card(_cc1,"🌡️","TEMPERATURA",f"{_temp_c}°C",f"Sens. {_feels}°C","#f59e0b")
+                _clima_card(_cc2,"💧","UMIDADE",f"{_umid}%","","#38bdf8")
+                _clima_card(_cc3,"💨","VENTO",f"{_vento_kmh}km/h",f"Dir: {_dir_vento}",
+                            "#22c55e" if _vento_kmh<=15 else "#ef4444")
+                _clima_card(_cc4,"🌧️","CHUVA",f"{_chuva_cur}mm","Agora","#818cf8")
+                _clima_card(_cc5,_cond_emoji,"CONDIÇÃO",_cond_pt,"","#6ee7b7")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── Janela de aplicação — card grande ─────────────────────────
+                _ok_vento = _vento_kmh <= 15
+                _ok_umid  = 40 <= _umid <= 85
+                _ok_temp  = _temp_c <= 30
+                _ok_chuva = _chuva_cur == 0
+                _score    = sum([_ok_vento, _ok_umid, _ok_temp, _ok_chuva])
+
+                if _score == 4:
+                    _jan_cor = "#14532d"; _jan_borda = "#22c55e"
+                    _jan_ico = "🟢"; _jan_msg = "JANELA ABERTA"
+                    _jan_sub = "Condições ideais para aplicação de defensivos agora!"
+                elif _score >= 2:
+                    _jan_cor = "#78350f"; _jan_borda = "#f59e0b"
+                    _jan_ico = "🟡"; _jan_msg = "JANELA PARCIAL"
+                    _jan_sub = "Monitore as condições antes de iniciar a aplicação."
+                else:
+                    _jan_cor = "#7f1d1d"; _jan_borda = "#ef4444"
+                    _jan_ico = "🔴"; _jan_msg = "JANELA FECHADA"
+                    _jan_sub = "Condições desfavoráveis — evite aplicações agora."
+
+                st.markdown(f"""
+                <div style='background:{_jan_cor};border-radius:16px;padding:18px 24px;
+                border:2px solid {_jan_borda};margin:8px 0 16px;'>
+                <div style='display:flex;align-items:center;gap:12px;'>
+                <div style='font-size:36px;'>{_jan_ico}</div>
+                <div>
+                <div style='color:#fff;font-size:18px;font-weight:800;letter-spacing:1px;'>
+                🚜 JANELA DE APLICAÇÃO — {_jan_msg}</div>
+                <div style='color:#fde68a;font-size:13px;margin-top:2px;'>{_jan_sub}</div>
+                </div></div>
+                <div style='display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;'>
+                {"".join([
+                    f"<span style='background:rgba(0,0,0,0.3);border-radius:8px;padding:4px 12px;"
+                    f"color:{'#6ee7b7' if ok else '#fca5a5'};font-size:12px;font-weight:700;'>"
+                    f"{'✅' if ok else '❌'} {lbl}</span>"
+                    for ok, lbl in [
+                        (_ok_vento, f"Vento {_vento_kmh}km/h ≤15"),
+                        (_ok_umid,  f"Umidade {_umid}% 40-85%"),
+                        (_ok_temp,  f"Temp {_temp_c}°C ≤30°C"),
+                        (_ok_chuva, "Sem chuva agora"),
+                    ]
+                ])}
+                </div></div>
+                """, unsafe_allow_html=True)
+
+                # ── Previsão 7 dias — cards por dia ───────────────────────────
+                st.markdown("### 📅 Previsão dos próximos dias")
+                _weather_days = _w.get("weather", [])
+
+                # Dias da semana em PT
+                from datetime import datetime as _dt_c, timedelta as _td
+                _dias_pt = ["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"]
+
+                _cols_prev = st.columns(min(len(_weather_days), 7))
+                for _di, day in enumerate(_weather_days):
+                    _d_max  = int(day.get("maxtempC",0))
+                    _d_min  = int(day.get("mintempC",0))
+                    _d_data = day.get("date","")
+                    try:
+                        _dt_obj  = _dt_c.strptime(_d_data, "%Y-%m-%d")
+                        _dia_sem = _dias_pt[_dt_obj.weekday()]
+                        _d_fmt   = f"{_dt_obj.day:02d}/{_dt_obj.month:02d}"
+                    except Exception:
+                        _dia_sem = ""; _d_fmt = _d_data
+
+                    # Chuva acumulada do dia
+                    _d_chuva = sum(
+                        float(h.get("precipMM","0") or 0)
+                        for h in day.get("hourly",[])
+                    )
+                    _d_umid  = int(day.get("hourly",[{}])[3].get("humidity","0") or 0)
+                    _d_cond  = day.get("hourly",[{}])[3].get("weatherDesc",[{}])[0].get("value","—")
+                    _d_cond_l = _d_cond.lower()
+
+                    # Define cor do card por chuva
+                    if _d_chuva > 15 or "thunder" in _d_cond_l:
+                        _d_bg = "#1e1b4b"; _d_borda = "#818cf8"; _d_alerta = "⛈️ Chuva forte"
+                        _d_cor_txt = "#a5b4fc"
+                    elif _d_chuva > 5 or "heavy rain" in _d_cond_l:
+                        _d_bg = "#1e3a5f"; _d_borda = "#3b82f6"; _d_alerta = "🌧️ Chuva"
+                        _d_cor_txt = "#93c5fd"
+                    elif _d_chuva > 0.5 or "rain" in _d_cond_l or "drizzle" in _d_cond_l:
+                        _d_bg = "#0f2d4a"; _d_borda = "#0ea5e9"; _d_alerta = "🌦️ Chuva fraca"
+                        _d_cor_txt = "#7dd3fc"
+                    elif "cloud" in _d_cond_l or "overcast" in _d_cond_l:
+                        _d_bg = "#1e293b"; _d_borda = "#475569"; _d_alerta = "☁️ Nublado"
+                        _d_cor_txt = "#94a3b8"
+                    else:
+                        _d_bg = "#14532d"; _d_borda = "#22c55e"; _d_alerta = "☀️ Bom dia"
+                        _d_cor_txt = "#6ee7b7"
+
+                    with _cols_prev[_di]:
+                        st.markdown(f"""
+                        <div style='background:{_d_bg};border-radius:14px;padding:14px 10px;
+                        text-align:center;border:2px solid {_d_borda};margin:2px;'>
+                        <div style='color:{_d_cor_txt};font-size:12px;font-weight:800;
+                        letter-spacing:1px;'>{_dia_sem}</div>
+                        <div style='color:#94a3b8;font-size:11px;'>{_d_fmt}</div>
+                        <div style='font-size:22px;margin:6px 0;'>
+                        {"⛈️" if "thunder" in _d_cond_l else "🌧️" if _d_chuva>5 else "🌦️" if _d_chuva>0.5 else "☁️" if "cloud" in _d_cond_l else "☀️"}
+                        </div>
+                        <div style='color:#f1f5f9;font-size:15px;font-weight:800;'>{_d_max}°</div>
+                        <div style='color:#64748b;font-size:12px;'>{_d_min}°</div>
+                        <div style='color:{_d_cor_txt};font-size:11px;font-weight:700;
+                        margin-top:6px;'>{_d_alerta}</div>
+                        <div style='color:#94a3b8;font-size:11px;margin-top:2px;'>
+                        💧{_d_chuva:.1f}mm</div>
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Alertas automáticos para os próximos dias ─────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                _alertas_clima = []
+                for _di, day in enumerate(_weather_days):
+                    _d_chuva_t = sum(float(h.get("precipMM","0") or 0) for h in day.get("hourly",[]))
+                    _d_cond_t  = day.get("hourly",[{}])[3].get("weatherDesc",[{}])[0].get("value","").lower()
+                    _d_data_t  = day.get("date","")
+                    try:
+                        _dt_t = _dt_c.strptime(_d_data_t,"%Y-%m-%d")
+                        _d_str = f"{_dt_t.day:02d}/{_dt_t.month:02d}"
+                    except: _d_str = _d_data_t
+                    if "thunder" in _d_cond_t:
+                        _alertas_clima.append(("🔴","#7f1d1d","#ef4444",f"{_d_str} — Risco de trovoadas! Não aplique defensivos."))
+                    elif _d_chuva_t > 10:
+                        _alertas_clima.append(("🟠","#78350f","#f97316",f"{_d_str} — Chuva prevista {_d_chuva_t:.0f}mm. Aguarde janela seca."))
+                    elif _d_chuva_t > 2:
+                        _alertas_clima.append(("🟡","#713f12","#fbbf24",f"{_d_str} — Chuva leve {_d_chuva_t:.1f}mm. Monitore antes de aplicar."))
+
+                if _alertas_clima:
+                    st.markdown("#### 🔔 Alertas Agrícolas")
+                    for _ico_a, _bg_a, _bd_a, _msg_a in _alertas_clima:
+                        st.markdown(f"""
+                        <div style='background:{_bg_a};border-radius:10px;padding:10px 16px;
+                        border-left:4px solid {_bd_a};margin:4px 0;'>
+                        <span style='color:#fff;font-weight:600;font-size:13px;'>
+                        {_ico_a} {_msg_a}</span></div>""", unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style='background:#14532d;border-radius:10px;padding:10px 16px;
+                    border-left:4px solid #22c55e;margin:4px 0;'>
+                    <span style='color:#fff;font-weight:600;font-size:13px;'>
+                    ✅ Sem alertas para os próximos dias — clima favorável para operações agrícolas!
+                    </span></div>""", unsafe_allow_html=True)
+
             else:
-                st.session_state.dre_registros.append({
-                    "Safra":      dre_safra,
-                    "Tipo":       dre_tipo,
-                    "Categoria":  dre_categ,
-                    "Descrição":  dre_descricao,
-                    "Valor R$":   dre_valor,
-                    "Área ha":    dre_area_ha,
-                    "Valor/ha":   round(dre_valor / dre_area_ha, 2) if dre_area_ha > 0 else 0,
-                    "Data":       str(dre_data_lanc),
-                    "Talhão":     dre_talhao,
-                    "Cultura":    dre_cultura,
-                })
-                salvar_dados_iaagro()
-                success_box(f"Lançamento salvo! R$ {dre_valor:,.2f} — {dre_categ}")
+                st.info(f"Clima para '{cidade}' indisponível no momento.")
+        except Exception as e:
+            st.info(f"Serviço de clima temporariamente indisponível. ({e})")
 
-    with tab_dre:
-        if not st.session_state.dre_registros:
-            info_box("Nenhum lançamento financeiro ainda. Use a aba 'Lançar Receita/Custo'.")
+if menu == "🌍 Inteligência":
+  with _sub_int[1]:
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>💰 Preços de Mercado</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Cotações CEPEA/ESALQ em tempo real — mercado físico brasileiro
+    </p></div>
+    """, unsafe_allow_html=True)
+
+    # ── Busca dólar (robusto) ─────────────────────────────────────────────────
+    _dolar_val  = 0.0
+    _dolar_fonte = "—"
+    try:
+        _d_res = buscar_dolar_awesomeapi()
+        if isinstance(_d_res, dict):
+            _dolar_val  = float(_d_res.get("preco", 0) or 0)
+            _dolar_fonte = _d_res.get("fonte", "—")
+        elif isinstance(_d_res, (int, float)):
+            _dolar_val = float(_d_res)
+    except Exception:
+        pass
+    if _dolar_val <= 0:
+        _dolar_val = 5.80
+        _dolar_fonte = "Offline"
+
+    # ── Card do dólar sempre visível ──────────────────────────────────────────
+    _dol_c1, _dol_c2, _dol_c3 = st.columns([1.5, 1.5, 3])
+    _dol_c1.markdown(f"""
+    <div style='background:linear-gradient(135deg,#1e3a5f,#0f2d4a);border-radius:14px;
+    padding:16px 18px;border:2px solid #3b82f6;text-align:center;'>
+    <div style='color:#93c5fd;font-size:11px;font-weight:800;letter-spacing:2px;'>💵 DÓLAR USD/BRL</div>
+    <div style='color:#fff;font-size:28px;font-weight:900;margin:6px 0;'>
+    R$ {_dolar_val:.4f}</div>
+    <div style='color:#64748b;font-size:10px;'>{_dolar_fonte}</div>
+    </div>""", unsafe_allow_html=True)
+    _dol_c2.markdown(f"""
+    <div style='background:linear-gradient(135deg,#1e1b4b,#0f172a);border-radius:14px;
+    padding:16px 18px;border:2px solid #818cf8;text-align:center;'>
+    <div style='color:#a5b4fc;font-size:11px;font-weight:800;letter-spacing:2px;'>📅 ATUALIZAÇÃO</div>
+    <div style='color:#fff;font-size:16px;font-weight:700;margin:6px 0;'>
+    {datetime.now().strftime("%d/%m/%Y")}</div>
+    <div style='color:#64748b;font-size:10px;'>{datetime.now().strftime("%H:%M")}</div>
+    </div>""", unsafe_allow_html=True)
+
+    # Botão atualizar na terceira coluna
+    with _dol_c3:
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Atualizar Cotações CEPEA", key="btn_buscar_precos",
+                     use_container_width=True, type="primary"):
+            # Verifica cache — bloqueia se atualizou há menos de 5 minutos
+            _ts_ultimo = st.session_state.get("_precos_ts_unix", 0)
+            _seg_desde = datetime.now().timestamp() - _ts_ultimo
+            if _ts_ultimo > 0 and _seg_desde < 300:
+                _resta = int(300 - _seg_desde)
+                st.warning(f"⏳ Aguarde {_resta}s para atualizar novamente (limite de requisições).")
+            else:
+                with st.spinner("🌐 Buscando cotações CEPEA via IA..."):
+                    try:
+                        _precos_novos = buscar_precos_cepea_ia()
+                        if isinstance(_precos_novos, dict) and _precos_novos:
+                            st.session_state["_precos_mercado"]  = _precos_novos
+                            st.session_state["_precos_ts"]       = datetime.now().strftime("%H:%M:%S")
+                            st.session_state["_precos_ts_unix"]  = datetime.now().timestamp()
+                            st.session_state["_cepea_erro"]      = ""
+                            st.rerun()
+                        else:
+                            _err = st.session_state.get("_cepea_erro","Sem resposta")
+                            if "429" in str(_err) or "rate_limit" in str(_err).lower():
+                                st.error("⏱️ Muitas requisições — aguarde alguns minutos e tente novamente.")
+                            elif "API key" in str(_err):
+                                st.error("🔑 API Key não configurada. Verifique os Secrets do Streamlit Cloud.")
+                            else:
+                                st.warning(f"⚠️ Não foi possível buscar preços: {_err}")
+                    except Exception as _ex:
+                        st.error(f"Erro: {_ex}")
+        if st.session_state.get("_precos_ts"):
+            st.caption(f"⏱️ Última atualização: {st.session_state['_precos_ts']}")
+        _err_show = st.session_state.get("_cepea_erro","")
+        if _err_show:
+            if "429" in str(_err_show) or "rate_limit" in str(_err_show).lower():
+                st.caption("⏱️ Rate limit atingido — aguarde alguns minutos")
+            elif "API key" in str(_err_show):
+                st.caption("🔑 Verifique a ANTHROPIC_API_KEY nos Secrets")
+            elif _err_show:
+                st.caption(f"ℹ️ {str(_err_show)[:80]}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Cards das commodities ─────────────────────────────────────────────────
+    _precos_cache = st.session_state.get("_precos_mercado") or {}
+
+    COMM_DEF = [
+        {"key":"soja",    "nome":"Soja",     "emoji":"🌱", "unid":"R$/sc 60kg", "cor":"#14532d", "borda":"#22c55e"},
+        {"key":"milho",   "nome":"Milho",    "emoji":"🌽", "unid":"R$/sc 60kg", "cor":"#713f12", "borda":"#f59e0b"},
+        {"key":"trigo",   "nome":"Trigo",    "emoji":"🌾", "unid":"R$/sc 60kg", "cor":"#1e3a5f", "borda":"#38bdf8"},
+        {"key":"cafe",    "nome":"Café",     "emoji":"☕", "unid":"R$/sc 60kg", "cor":"#3b1f0a", "borda":"#d97706"},
+        {"key":"algodao", "nome":"Algodão",  "emoji":"🏷️", "unid":"R$/@",       "cor":"#1e1b4b", "borda":"#818cf8"},
+        {"key":"boi",     "nome":"Boi Gordo","emoji":"🐄", "unid":"R$/@",       "cor":"#3b0f0f", "borda":"#f87171"},
+        {"key":"arroz",   "nome":"Arroz",    "emoji":"🍚", "unid":"R$/sc 50kg", "cor":"#0f3460", "borda":"#60a5fa"},
+    ]
+
+    if isinstance(_precos_cache, dict) and len(_precos_cache) >= 3:
+        _cols_comm = st.columns(4)
+        _comm_count = 0
+        for comm in COMM_DEF:
+            _val_raw = _precos_cache.get(comm["key"])
+            if _val_raw is None:
+                continue
+            try:
+                _val_f = float(_val_raw)
+                if _val_f <= 0:
+                    continue
+            except Exception:
+                continue
+
+            with _cols_comm[_comm_count % 4]:
+                st.markdown(f"""
+                <div style='background:linear-gradient(135deg,{comm["cor"]},{comm["cor"]}cc);
+                border-radius:14px;padding:16px 14px;border:2px solid {comm["borda"]};
+                margin-bottom:10px;text-align:center;'>
+                <div style='font-size:24px;margin-bottom:4px;'>{comm["emoji"]}</div>
+                <div style='color:#94a3b8;font-size:11px;font-weight:800;letter-spacing:1px;'>
+                {comm["nome"].upper()}</div>
+                <div style='color:#fff;font-size:22px;font-weight:900;margin:6px 0;'>
+                R$ {_val_f:,.2f}</div>
+                <div style='background:rgba(0,0,0,0.3);color:{comm["borda"]};font-size:10px;
+                font-weight:700;padding:2px 8px;border-radius:20px;display:inline-block;'>
+                {comm["unid"]}</div>
+                </div>""", unsafe_allow_html=True)
+            _comm_count += 1
+
+        _fonte_p = _precos_cache.get("fonte","CEPEA")
+        _data_p  = _precos_cache.get("data","")
+        _mercado = _precos_cache.get("mercado","")
+        _is_fisico = "fisico" in str(_mercado).lower() or "cepea" in str(_fonte_p).lower()
+
+        if _is_fisico:
+            st.markdown(f"""
+            <div style='background:#14532d;border-radius:8px;padding:8px 14px;
+            border-left:4px solid #22c55e;margin:6px 0;'>
+            <span style='color:#6ee7b7;font-size:12px;font-weight:700;'>
+            ✅ Mercado Físico Brasileiro — {_fonte_p}{f' — {_data_p}' if _data_p else ''}
+            </span></div>""", unsafe_allow_html=True)
         else:
-            df_dre = pd.DataFrame(st.session_state.dre_registros)
-            safras_disp = sorted(df_dre["Safra"].unique().tolist(), reverse=True)
-            safra_sel   = st.selectbox("Selecione a safra", safras_disp, key="dre_sel_safra")
-            df_safra    = df_dre[df_dre["Safra"] == safra_sel]
+            st.markdown(f"""
+            <div style='background:#78350f;border-radius:8px;padding:8px 14px;
+            border-left:4px solid #f59e0b;margin:6px 0;'>
+            <span style='color:#fde68a;font-size:12px;font-weight:700;'>
+            ⚠️ Atenção: preços podem ser referência CBOT/Bolsa convertidos para R$ — não representa o mercado físico local.
+            Fonte: {_fonte_p}{f' — {_data_p}' if _data_p else ''}
+            </span></div>""", unsafe_allow_html=True)
 
-            receita      = df_safra[df_safra["Tipo"]=="Receita"]["Valor R$"].sum()
-            custo_var    = df_safra[df_safra["Tipo"]=="Custo Variável"]["Valor R$"].sum()
-            custo_fix    = df_safra[df_safra["Tipo"]=="Custo Fixo"]["Valor R$"].sum()
-            custo_total  = custo_var + custo_fix
-            lucro_bruto  = receita - custo_var
-            lucro_liq    = receita - custo_total
-            margem       = (lucro_liq / receita * 100) if receita > 0 else 0
-            area_safra   = df_safra["Área ha"].max() if not df_safra.empty else 1
-            receita_ha   = receita / area_safra if area_safra > 0 else 0
-            custo_ha     = custo_total / area_safra if area_safra > 0 else 0
-            lucro_ha     = lucro_liq / area_safra if area_safra > 0 else 0
-            breakeven    = custo_total / area_safra if area_safra > 0 else 0
+    else:
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:12px;padding:24px;text-align:center;
+        border:2px dashed #1e4976;margin:10px 0;'>
+        <div style='font-size:40px;'>📊</div>
+        <div style='color:#94a3b8;font-size:15px;margin-top:8px;'>
+        Clique em <b style='color:#22c55e;'>🔄 Atualizar Cotações CEPEA</b> para carregar os preços.
+        </div>
+        <div style='color:#64748b;font-size:12px;margin-top:6px;'>
+        Dados via IA com web search — CEPEA/ESALQ mercado físico
+        </div></div>""", unsafe_allow_html=True)
 
-            st.subheader(f"📊 DRE — Safra {safra_sel}")
-            col1,col2,col3,col4 = st.columns(4)
-            col1.metric("💰 Receita Total",   f"R$ {receita:,.0f}")
-            col2.metric("💸 Custo Total",     f"R$ {custo_total:,.0f}")
-            col3.metric("💵 Lucro Líquido",   f"R$ {lucro_liq:,.0f}")
-            col4.metric("📊 Margem",          f"{margem:.1f}%")
-
-            col5,col6,col7,col8 = st.columns(4)
-            col5.metric("💰 Receita/ha",  f"R$ {receita_ha:,.0f}")
-            col6.metric("💸 Custo/ha",    f"R$ {custo_ha:,.0f}")
-            col7.metric("💵 Lucro/ha",    f"R$ {lucro_ha:,.0f}")
-            col8.metric("⚖️ Break-even",  f"R$ {breakeven:,.0f}/ha")
-
-            # DRE formatado
-            st.divider()
-            st.subheader("📋 Demonstrativo de Resultado (DRE)")
-            dre_lines = [
-                {"Item": "RECEITA BRUTA",            "Valor R$": receita,      "Tipo": ""},
-                {"Item": "(-) Custos Variáveis",     "Valor R$": -custo_var,   "Tipo": ""},
-                {"Item": "= LUCRO BRUTO",             "Valor R$": lucro_bruto,  "Tipo": ""},
-                {"Item": "(-) Custos Fixos",          "Valor R$": -custo_fix,   "Tipo": ""},
-                {"Item": "= LUCRO LÍQUIDO",           "Valor R$": lucro_liq,    "Tipo": ""},
-                {"Item": f"  Margem Líquida",         "Valor R$": margem,       "Tipo": "%"},
-            ]
-            df_dre_fmt = pd.DataFrame(dre_lines)
-            st.dataframe(df_dre_fmt, use_container_width=True, hide_index=True)
-
-            # Lançamentos detalhados
-            st.divider()
-            st.subheader("📝 Lançamentos Detalhados")
-            st.dataframe(df_safra[["Data","Tipo","Categoria","Descrição","Valor R$","Valor/ha","Talhão"]],
-                         use_container_width=True, hide_index=True)
-
-            # Composição de custos
-            st.divider()
-            st.subheader("🥧 Composição de Custos")
-            df_custos = df_safra[df_safra["Tipo"].isin(["Custo Variável","Custo Fixo"])]
-            if not df_custos.empty:
-                df_comp = df_custos.groupby("Categoria")["Valor R$"].sum().reset_index()
-                st.bar_chart(df_comp.set_index("Categoria")["Valor R$"])
-
-            # Exportar DRE
-            st.divider()
-            xlsx_dre = exportar_excel({
-                f"DRE {safra_sel}": dre_lines,
-                "Lançamentos":      st.session_state.dre_registros
+    # ── Acompanhamento manual ─────────────────────────────────────────────────
+    st.divider()
+    with st.expander("📈 Registrar cotação manual para histórico"):
+        col_gr1, col_gr2, col_gr3 = st.columns(3)
+        _p_soja  = col_gr1.number_input("Soja R$/sc",  min_value=0.0, key="num_p_soja_graf")
+        _p_milho = col_gr2.number_input("Milho R$/sc", min_value=0.0, key="num_p_milho_graf")
+        _p_trigo = col_gr3.number_input("Trigo R$/sc", min_value=0.0, key="num_p_trigo_graf")
+        if st.button("📊 Registrar cotação", key="btn_reg_cotacao"):
+            if "historico_cotacoes" not in st.session_state:
+                st.session_state["historico_cotacoes"] = []
+            st.session_state["historico_cotacoes"].append({
+                "data":  datetime.now().strftime("%d/%m %H:%M"),
+                "Soja":  _p_soja, "Milho": _p_milho, "Trigo": _p_trigo,
             })
-            if xlsx_dre:
-                st.download_button(
-                    "📥 Exportar DRE Excel",
-                    data=xlsx_dre,
-                    file_name=f"DRE_{safra_sel.replace('/','_')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+            st.rerun()
+        if st.session_state.get("historico_cotacoes"):
+            import pandas as _pd_cot
+            df_cot = _pd_cot.DataFrame(st.session_state["historico_cotacoes"]).set_index("data")
+            st.line_chart(df_cot)
 
-    with tab_grafico:
-        if len(st.session_state.dre_registros) < 2:
-            info_box("Lançe dados de pelo menos 2 safras para ver a evolução.")
+    st.markdown("""
+    <div style='background:#1e3a5f;border-radius:8px;padding:10px 14px;
+    border-left:4px solid #eab308;margin-top:8px;'>
+    <b style='color:#eab308;'>⚠️ Aviso</b>
+    <span style='color:#f1f5f9;font-size:12px;'>
+    Preços CEPEA/ESALQ são referências do mercado físico brasileiro.
+    O preço real de venda depende da praça, base e câmbio do dia.
+    Consulte seu corretor antes de fechar negócio.
+    </span></div>
+    """, unsafe_allow_html=True)
+
+if menu == "🌍 Inteligência":
+  with _sub_int[2]:
+    st.header("🗺️ Mapa de Colheita IA")
+    st.markdown("""
+    <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
+    border-left:5px solid #22c55e;margin-bottom:12px;'>
+    <b style='color:#22c55e;'>🛰️ Análise de Mapa de Colheita</b><br>
+    <span style='color:#f1f5f9;font-size:13px;'>
+    Faça upload do mapa de colheita (imagem ou PDF) e a IA irá identificar
+    zonas de produtividade, variabilidade e recomendar manejo por zonas.
+    </span></div>
+    """, unsafe_allow_html=True)
+
+    _arquivo_mapa = st.file_uploader(
+        "📂 Upload do mapa de colheita (JPG, PNG, PDF)",
+        type=["jpg","jpeg","png","pdf"],
+        key="upload_mapa_colheita"
+    )
+
+    if _arquivo_mapa:
+        if _arquivo_mapa.type.startswith("image"):
+            st.image(_arquivo_mapa, caption="Mapa carregado", use_column_width=True)
         else:
-            df_all  = pd.DataFrame(st.session_state.dre_registros)
-            df_evo  = df_all.groupby(["Safra","Tipo"])["Valor R$"].sum().unstack(fill_value=0).reset_index()
-            st.subheader("📈 Evolução Financeira por Safra")
-            st.dataframe(df_evo, use_container_width=True)
-            st.line_chart(df_evo.set_index("Safra"))
+            st.info(f"Arquivo PDF carregado: {_arquivo_mapa.name}")
 
-            # Lucratividade por safra
-            df_lucro = df_all.groupby("Safra").apply(
-                lambda x: pd.Series({
-                    "Receita":     x[x["Tipo"]=="Receita"]["Valor R$"].sum(),
-                    "Custo Total": x[x["Tipo"].isin(["Custo Variável","Custo Fixo"])]["Valor R$"].sum(),
-                })
-            ).reset_index()
-            df_lucro["Lucro"] = df_lucro["Receita"] - df_lucro["Custo Total"]
-            df_lucro["Margem %"] = (df_lucro["Lucro"] / df_lucro["Receita"] * 100).round(1)
-            st.subheader("💰 Lucratividade por Safra")
-            st.dataframe(df_lucro, use_container_width=True)
-            st.bar_chart(df_lucro.set_index("Safra")["Lucro"])
+        col_mc1, col_mc2 = st.columns(2)
+        _area_mc    = col_mc1.number_input("Área do mapa (ha)", min_value=0.0,
+                                             value=float(st.session_state.dados.get("area",0)),
+                                             key="num_area_mapa_colheita")
+        _cultura_mc = col_mc2.selectbox("Cultura", get_culturas(), key="sel_cult_mapa_colheita")
+        _obs_mc     = st.text_area("Observações sobre o mapa", key="txt_obs_mapa_colheita",
+                                    placeholder="Ex: Mapa 2024/25, produtividade média esperada 60 sc/ha")
 
+        if st.button("🤖 Analisar Mapa com IA", key="btn_analisar_mapa", use_container_width=True):
+            with st.spinner("Analisando mapa com IA..."):
+                try:
+                    import requests as _rq_mapa, base64 as _b64_mapa
+                    _api_key_mapa = st.secrets.get("ANTHROPIC_API_KEY","")
 
-# ─────────────────────────────────────────────
-# MENU: CALENDÁRIO AGRÍCOLA
-# ─────────────────────────────────────────────
-elif menu == "📅 Calendário Agrícola":
-    st.header("📅 Calendário Agrícola")
+                    _txt_mapa = (f"Analise este mapa de colheita agrícola. "
+                                 f"Cultura: {cultura_limpa(_cultura_mc)}, Área: {_area_mc} ha. "
+                                 f"Obs: {_obs_mc}. "
+                                 "Identifique: 1) Zonas de alta e baixa produtividade, "
+                                 "2) Variabilidade espacial, "
+                                 "3) Possíveis causas das variações, "
+                                 "4) Recomendações de manejo por zonas. "
+                                 "Responda em português, de forma prática para o produtor.")
+
+                    _content_mapa = []
+                    # Adiciona imagem se for imagem
+                    if _arquivo_mapa.type.startswith("image"):
+                        _img_b64 = _b64_mapa.b64encode(_arquivo_mapa.read()).decode()
+                        _ext = "jpeg" if "jpg" in _arquivo_mapa.type else "png"
+                        _content_mapa.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": f"image/{_ext}", "data": _img_b64}
+                        })
+                    _content_mapa.append({"type": "text", "text": _txt_mapa})
+
+                    _resp_mapa = _rq_mapa.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": _api_key_mapa,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": "claude-sonnet-4-6",
+                            "max_tokens": 1500,
+                            "messages": [{"role":"user","content":_content_mapa}],
+                        },
+                        timeout=60
+                    )
+                    _analise = _resp_mapa.json().get("content",[{}])[0].get("text","Sem resposta.")
+                    st.session_state["_analise_mapa"] = _analise
+                except Exception as e:
+                    st.error(f"Erro na análise: {e}")
+
+    if st.session_state.get("_analise_mapa"):
+        st.divider()
+        st.subheader("🤖 Análise da IA")
+        st.markdown(st.session_state["_analise_mapa"])
+    elif not _arquivo_mapa:
+        st.info("Faça o upload do mapa de colheita para análise.")
+
+if menu == "🌍 Inteligência":
+  with _sub_int[3]:
+
+    # ── Header ───────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>📅 Planejamento & Calendário Agrícola</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Rotação inverno/verão, janelas de plantio e eventos da propriedade
+    </p></div>""", unsafe_allow_html=True)
 
     if "calendario_eventos" not in st.session_state:
         st.session_state.calendario_eventos = []
+    if "planejamento_safras" not in st.session_state:
+        st.session_state.planejamento_safras = []
 
-    tab_cal, tab_novo_ev, tab_plantio = st.tabs([
-        "📅 Calendário do Mês",
-        "➕ Novo Evento",
-        "🌱 Cronograma de Plantio"
+    # ── ABAS DO MÓDULO ────────────────────────────────────────────────────────
+    _tab_cal, _tab_plan, _tab_rot = st.tabs([
+        "📅 Eventos", "🌾 Planejamento de Safras", "🔄 Rotação de Culturas"
     ])
 
-    with tab_novo_ev:
-        st.subheader("➕ Cadastrar Evento Agrícola")
-        col1, col2 = st.columns(2)
-        with col1:
-            ev_tipo   = st.selectbox("Tipo de evento", [
-                "🌱 Plantio","🌿 Emergência","🚜 Aplicação","✂️ Poda/Desbaste",
-                "💧 Irrigação","🌾 Colheita","🧪 Análise de Solo","📦 Recebimento de insumos",
-                "🔧 Manutenção de equipamentos","📋 Vistoria","🌦️ Evento climático","📝 Outro"
-            ], key="ev_tipo")
-            ev_data   = st.date_input("Data do evento", key="ev_data")
-            ev_talhao = st.text_input("Talhão/Área", key="ev_talhao")
-        with col2:
-            ev_cultura = st.text_input("Cultura", value=st.session_state.dados.get("cultura",""), key="ev_cultura")
-            ev_resp    = st.text_input("Responsável", key="ev_resp")
-            ev_status  = st.selectbox("Status", ["⏳ Planejado","✅ Realizado","⚠️ Atrasado","❌ Cancelado"], key="ev_status")
-        ev_descricao = st.text_area("Descrição / Observações", key="ev_desc")
+    # ════════════════════════════════════════════════════════════════════════
+    # ABA 1 — EVENTOS
+    # ════════════════════════════════════════════════════════════════════════
+    with _tab_cal:
+        st.markdown("#### ➕ Novo Evento Agrícola")
 
-        if st.button("💾 Salvar Evento", key="btn_salvar_ev"):
-            if not ev_tipo:
-                error_box("Selecione o tipo de evento.")
-            else:
-                st.session_state.calendario_eventos.append({
-                    "Tipo":        ev_tipo,
-                    "Data":        str(ev_data),
-                    "Talhão":      ev_talhao,
-                    "Cultura":     ev_cultura,
-                    "Responsável": ev_resp,
-                    "Status":      ev_status,
-                    "Descrição":   ev_descricao,
-                })
-                salvar_dados_iaagro()
-                success_box(f"Evento '{ev_tipo}' em {ev_data} salvo!")
-
-    with tab_cal:
-        if not st.session_state.calendario_eventos:
-            info_box("Nenhum evento cadastrado. Use a aba 'Novo Evento'.")
-        else:
-            df_ev = pd.DataFrame(st.session_state.calendario_eventos)
-            df_ev["Data"] = pd.to_datetime(df_ev["Data"])
-
-            # Filtros
-            col_f1, col_f2, col_f3 = st.columns(3)
-            with col_f1:
-                mes_sel = st.selectbox("Mês", range(1,13),
-                                        index=date.today().month-1,
-                                        format_func=lambda m: ["Jan","Fev","Mar","Abr","Mai","Jun",
-                                                                "Jul","Ago","Set","Out","Nov","Dez"][m-1],
-                                        key="cal_mes")
-            with col_f2:
-                ano_sel = st.selectbox("Ano", sorted(df_ev["Data"].dt.year.unique().tolist(), reverse=True),
-                                        key="cal_ano")
-            with col_f3:
-                status_fil = st.multiselect("Status", df_ev["Status"].unique().tolist(),
-                                             default=df_ev["Status"].unique().tolist(),
-                                             key="cal_status")
-
-            df_mes = df_ev[
-                (df_ev["Data"].dt.month == mes_sel) &
-                (df_ev["Data"].dt.year  == ano_sel) &
-                (df_ev["Status"].isin(status_fil))
-            ].sort_values("Data")
-
-            if df_mes.empty:
-                warning_box("Nenhum evento neste mês com os filtros selecionados.")
-            else:
-                st.subheader(f"📅 Eventos — {['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][mes_sel-1]}/{ano_sel}")
-
-                for _, ev in df_mes.iterrows():
-                    cor = {"✅ Realizado":"#14532d","⏳ Planejado":"#1e3a5f",
-                           "⚠️ Atrasado":"#78350f","❌ Cancelado":"#7f1d1d"}.get(ev["Status"],"#1e3a5f")
-                    borda = {"✅ Realizado":"#22c55e","⏳ Planejado":"#3b82f6",
-                             "⚠️ Atrasado":"#f59e0b","❌ Cancelado":"#ef4444"}.get(ev["Status"],"#3b82f6")
-                    st.markdown(f'''<div style="background:{cor};color:#fff;padding:12px 18px;
-                    border-radius:10px;border-left:5px solid {borda};
-                    font-weight:600;margin:6px 0;font-size:14px;">
-                    {ev["Tipo"]} &nbsp;|&nbsp; <b>{ev["Data"].strftime("%d/%m/%Y")}</b>
-                    &nbsp;|&nbsp; {ev["Talhão"]} &nbsp;|&nbsp; {ev["Cultura"]}
-                    &nbsp;|&nbsp; {ev["Status"]}<br>
-                    <span style="font-weight:400;font-size:13px;">{ev["Descrição"]}</span>
-                    </div>''', unsafe_allow_html=True)
-
-            # Próximos eventos
-            st.divider()
-            st.subheader("⏰ Próximos Eventos (7 dias)")
-            hoje_ts = pd.Timestamp(date.today())
-            df_prox = df_ev[
-                (df_ev["Data"] >= hoje_ts) &
-                (df_ev["Data"] <= hoje_ts + pd.Timedelta(days=7)) &
-                (df_ev["Status"] == "⏳ Planejado")
-            ].sort_values("Data")
-            if df_prox.empty:
-                info_box("Nenhum evento planejado nos próximos 7 dias.")
-            else:
-                for _, ev in df_prox.iterrows():
-                    dias_rest = (ev["Data"].date() - date.today()).days
-                    st.markdown(f'''<div style="background:#1e3a5f;color:#fff;padding:10px 16px;
-                    border-radius:10px;border-left:5px solid #3b82f6;font-weight:700;margin:4px 0;">
-                    {ev["Tipo"]} — {ev["Talhão"]} em {ev["Data"].strftime("%d/%m/%Y")}
-                    {"(hoje)" if dias_rest==0 else f"(em {dias_rest} dia{'s' if dias_rest>1 else ''})"}
-                    </div>''', unsafe_allow_html=True)
-
-            # Excluir evento
-            st.divider()
-            opcoes_ev = [f"{e['Tipo']} — {e['Talhão']} ({e['Data'].strftime('%d/%m/%Y')})"
-                          for _, e in df_mes.iterrows()]
-            if opcoes_ev:
-                del_ev = st.selectbox("Excluir evento", opcoes_ev, key="del_ev_sel")
-                if st.button("🗑️ Excluir Evento", key="btn_del_ev"):
-                    idx_del = opcoes_ev.index(del_ev)
-                    if idx_del < len(df_mes):
-                        data_del = df_mes.iloc[idx_del]["Data"]
-                        tipo_del = df_mes.iloc[idx_del]["Tipo"]
-                        st.session_state.calendario_eventos = [
-                            e for e in st.session_state.calendario_eventos
-                            if not (e["Tipo"]==tipo_del and e["Data"]==str(data_del.date()))
-                        ]
-                        salvar_dados_iaagro()
-                        success_box("Evento removido.")
-                        st.rerun()
-
-    with tab_plantio:
-        st.subheader("🌱 Cronograma de Plantio por Cultura")
-        cronograma = {
-            "Soja":    {"plantio":["Out","Nov"],"floração":["Dez","Jan"],"colheita":["Mar","Abr"],"ciclo":"120-140 dias"},
-            "Milho":   {"plantio":["Set","Out","Nov"],"floração":["Dez","Jan"],"colheita":["Fev","Mar","Abr"],"ciclo":"120-150 dias"},
-            "Trigo":   {"plantio":["Abr","Mai","Jun"],"floração":["Jul","Ago"],"colheita":["Set","Out"],"ciclo":"100-130 dias"},
-            "Feijão":  {"plantio":["Jan","Jul","Out"],"floração":["Fev","Ago","Nov"],"colheita":["Mar","Set","Dez"],"ciclo":"70-90 dias"},
-            "Canola":  {"plantio":["Abr","Mai"],"floração":["Jun","Jul"],"colheita":["Set","Out"],"ciclo":"120-150 dias"},
-            "Aveia":   {"plantio":["Abr","Mai","Jun"],"floração":["Jul","Ago"],"colheita":["Set","Out"],"ciclo":"100-120 dias"},
+        _tipos_ev = [
+            "🌱 Plantio","🚜 Aplicação de defensivo","🪨 Aplicação de calcário/gesso",
+            "🌾 Colheita","🧪 Análise de solo","💧 Irrigação","🌧️ Registro de chuva",
+            "🔧 Manutenção de máquinas","📋 Vistoria técnica","📦 Recebimento de insumos",
+            "💰 Venda de grãos","🤝 Reunião/Visita técnica","⚠️ Evento climático","📝 Outro"
+        ]
+        _cores_ev = {
+            "🌱 Plantio":"#14532d","🚜 Aplicação de defensivo":"#1e3a5f",
+            "🪨 Aplicação de calcário/gesso":"#3b1f0a","🌾 Colheita":"#713f12",
+            "🧪 Análise de solo":"#1e1b4b","💧 Irrigação":"#0c4a6e",
+            "🌧️ Registro de chuva":"#0f172a","🔧 Manutenção de máquinas":"#1c1917",
+            "📋 Vistoria técnica":"#14532d","📦 Recebimento de insumos":"#064e3b",
+            "💰 Venda de grãos":"#78350f","🤝 Reunião/Visita técnica":"#312e81",
+            "⚠️ Evento climático":"#7f1d1d","📝 Outro":"#1e293b"
         }
-        cultura_cron = st.selectbox("Selecione a cultura", list(cronograma.keys()), key="cron_cultura")
-        cron = cronograma[cultura_cron]
-        col1,col2,col3,col4 = st.columns(4)
-        col1.metric("🌱 Plantio",    ", ".join(cron["plantio"]))
-        col2.metric("🌸 Floração",   ", ".join(cron["floração"]))
-        col3.metric("🌾 Colheita",   ", ".join(cron["colheita"]))
-        col4.metric("⏱️ Ciclo",      cron["ciclo"])
+        _bordas_ev = {
+            "🌱 Plantio":"#22c55e","🚜 Aplicação de defensivo":"#3b82f6",
+            "🪨 Aplicação de calcário/gesso":"#d97706","🌾 Colheita":"#f59e0b",
+            "🧪 Análise de solo":"#818cf8","💧 Irrigação":"#38bdf8",
+            "🌧️ Registro de chuva":"#60a5fa","🔧 Manutenção de máquinas":"#78716c",
+            "📋 Vistoria técnica":"#4ade80","📦 Recebimento de insumos":"#10b981",
+            "💰 Venda de grãos":"#f97316","🤝 Reunião/Visita técnica":"#a78bfa",
+            "⚠️ Evento climático":"#ef4444","📝 Outro":"#64748b"
+        }
 
-        meses_abrev = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
-        fases_linha = []
-        for mes in meses_abrev:
-            if mes in cron["plantio"]:   fase = "🌱 Plantio"
-            elif mes in cron["floração"]: fase = "🌸 Floração"
-            elif mes in cron["colheita"]: fase = "🌾 Colheita"
-            else:                         fase = "—"
-            fases_linha.append({"Mês": mes, "Fase": fase})
-        df_cron = pd.DataFrame(fases_linha)
-        st.dataframe(df_cron.T, use_container_width=True)
+        with st.form("form_evento_cal", clear_on_submit=True):
+            col_e1, col_e2 = st.columns(2)
+            _ev_titulo = col_e1.text_input("Título do evento *", placeholder="Ex: Plantio soja talhão A")
+            _ev_data   = col_e2.date_input("Data *", key="dat_ev_data")
+            col_e3, col_e4 = st.columns(2)
+            _ev_tipo   = col_e3.selectbox("Tipo de evento", _tipos_ev, key="sel_ev_tipo")
+            _ev_area   = col_e4.selectbox("Área/Talhão",
+                ["Toda a propriedade"] + [f"{a.get('ID')} - {a.get('Talhão','')}" for a in st.session_state.areas],
+                key="sel_ev_area")
+            _ev_obs    = st.text_area("Observações", key="txt_ev_obs", height=60)
+            _ev_alerta = st.checkbox("🔔 Criar alerta (aparece nos próximos eventos)", value=True, key="chk_ev_alerta")
+            _ev_salvar = st.form_submit_button("💾 Salvar Evento", use_container_width=True)
 
-        st.markdown('''<div style="background:#14532d;color:#fff;padding:13px 18px;
-        border-radius:10px;border-left:5px solid #22c55e;font-weight:600;margin:10px 0;">
-        💡 Use a aba "Novo Evento" para lançar as datas reais do seu plantio e acompanhar
-        o andamento da safra no calendário.
-        </div>''', unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════════════
-# MENU: RECEITUÁRIO AGRONÔMICO
-# ═══════════════════════════════════════════════════════════════════
-elif menu == "📜 Receituário Agronômico":
-    st.header("📜 Receituário Agronômico")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-    📋 Gere o Receituário Agronômico completo conforme exigido pela Lei 7.802/89 e Decreto 4.074/02.
-    Obrigatório para compra e uso de defensivos agrícolas. Gera PDF pronto para assinatura.
-    </div>''', unsafe_allow_html=True)
-
-    tab_novo_rec, tab_historico_rec = st.tabs(["➕ Novo Receituário", "📁 Histórico"])
-
-    # ── ABA NOVO RECEITUÁRIO ────────────────────────────────────────
-    with tab_novo_rec:
-        st.subheader("📝 Dados do Receituário")
-
-        col_r1, col_r2 = st.columns(2)
-
-        with col_r1:
-            st.markdown("**👨‍🌾 Dados do Produtor**")
-            rec_produtor      = st.text_input("Nome do Produtor / Razão Social", key="rec_prod")
-            rec_cpf_cnpj      = st.text_input("CPF / CNPJ", placeholder="000.000.000-00", key="rec_cpf")
-            rec_propriedade   = st.text_input("Nome da Propriedade", value=st.session_state.dados.get("fazenda",""), key="rec_prop")
-            rec_municipio     = st.text_input("Município / UF", key="rec_mun")
-            rec_area_ha       = st.number_input("Área a tratar (ha)", min_value=0.1,
-                                                value=float(st.session_state.dados.get("area", 1.0)), key="rec_area")
-            rec_cultura       = st.selectbox("Cultura", ["Soja","Milho","Trigo","Feijão","Algodão",
-                                             "Arroz","Cana-de-Açúcar","Café","Pastagem","Outro"], key="rec_cult")
-            rec_alvo          = st.text_input("Alvo / Problema a combater",
-                                              placeholder="Ex: Ferrugem asiática, Lagarta-do-cartucho", key="rec_alvo")
-
-        with col_r2:
-            st.markdown("**🧑‍💼 Dados do Responsável Técnico**")
-            rec_rt_nome       = st.text_input("Nome do Engenheiro Agrônomo / RT", key="rec_rt_nome")
-            rec_rt_crea       = st.text_input("CREA / CRBio nº", placeholder="123456-D/SP", key="rec_rt_crea")
-            rec_rt_email      = st.text_input("E-mail do RT", key="rec_rt_email")
-            rec_rt_telefone   = st.text_input("Telefone do RT", key="rec_rt_tel")
-            rec_data_emissao  = st.date_input("Data de Emissão", value=date.today(), key="rec_data")
-            rec_validade_dias = st.number_input("Validade (dias)", min_value=1, max_value=365, value=30, key="rec_val")
-            rec_numero        = st.text_input("Número do Receituário", placeholder="001/2026", key="rec_num")
-
-        st.divider()
-        st.subheader("🧪 Produtos Recomendados")
-
-        qtd_prods_rec = st.number_input("Quantidade de produtos", min_value=1, max_value=8, value=1, key="rec_qtd_prods")
-        produtos_rec  = []
-
-        for i in range(int(qtd_prods_rec)):
-            st.markdown(f"**Produto {i+1}**")
-            cr1, cr2, cr3, cr4, cr5 = st.columns([3, 2, 1, 1, 2])
-            with cr1:
-                # Busca no catálogo ou digitação livre
-                opcoes_estoque = [p["Insumo"] for p in st.session_state.estoque] if st.session_state.estoque else []
-                if opcoes_estoque:
-                    nome_prod_rec = st.selectbox(f"Produto {i+1}", opcoes_estoque, key=f"rec_prod_{i}")
-                    # Buscar IA do catálogo se disponível
-                    ia_auto = next((p.get("Ingrediente Ativo","") for p in st.session_state.estoque if p["Insumo"] == nome_prod_rec), "")
-                else:
-                    nome_prod_rec = st.text_input(f"Nome comercial {i+1}", key=f"rec_prod_{i}")
-                    ia_auto = ""
-            with cr2:
-                ia_prod_rec   = st.text_input(f"Ingrediente Ativo {i+1}", value=ia_auto, key=f"rec_ia_{i}")
-            with cr3:
-                dose_rec      = st.number_input(f"Dose {i+1}", min_value=0.0, value=0.0, key=f"rec_dose_{i}")
-            with cr4:
-                unid_rec      = st.selectbox(f"Unid {i+1}", ["L/ha","mL/ha","kg/ha","g/ha","kg/100L"], key=f"rec_unid_{i}")
-            with cr5:
-                classe_rec    = st.selectbox(f"Classe {i+1}", ["Fungicida","Herbicida","Inseticida",
-                                             "Acaricida","Nematicida","Adjuvante","Fertilizante","Outro"], key=f"rec_classe_{i}")
-
-            # Calcular totais
-            total_produto = dose_rec * rec_area_ha
-            if dose_rec > 0:
-                st.markdown(f'<div style="background:#0f3460;color:#6ee7b7;padding:5px 12px;border-radius:6px;'
-                            f'font-size:12px;font-weight:700;margin:2px 0 8px 0;">'
-                            f'📦 Total para {rec_area_ha:.1f} ha: <b>{total_produto:.2f} {unid_rec.replace("/ha","").replace("/100L","")}</b>'
-                            f'</div>', unsafe_allow_html=True)
-
-            produtos_rec.append({
-                "Produto":           nome_prod_rec,
-                "Ingrediente Ativo": ia_prod_rec,
-                "Dose":              dose_rec,
-                "Unidade":           unid_rec,
-                "Classe":            classe_rec,
-                "Total":             round(total_produto, 2),
-            })
-
-        st.divider()
-        st.subheader("⚙️ Recomendações de Aplicação")
-        col_ap1, col_ap2, col_ap3 = st.columns(3)
-        with col_ap1:
-            rec_volume_calda  = st.number_input("Volume de calda (L/ha)", min_value=0.0, value=100.0, key="rec_vol")
-            rec_equipamento   = st.selectbox("Equipamento", ["Pulverizador tratorizado","Pulverizador costal",
-                                             "Avião agrícola","Drone","Pivô central","Outro"], key="rec_equip")
-        with col_ap2:
-            rec_epoca         = st.text_input("Época de aplicação", placeholder="Ex: Estádio R1 da soja", key="rec_epoca")
-            rec_intervalo     = st.number_input("Intervalo entre aplicações (dias)", min_value=0, value=14, key="rec_intv")
-        with col_ap3:
-            rec_epi           = st.multiselect("EPI obrigatório", ["Macacão","Luvas nitrílicas","Botas de borracha",
-                                               "Máscara com filtro","Óculos de proteção","Avental impermeável",
-                                               "Chapéu de abas largas"], key="rec_epi")
-            rec_carencia      = st.number_input("Prazo de carência (dias)", min_value=0, value=14, key="rec_car")
-
-        rec_observacoes = st.text_area("Observações / Recomendações adicionais", key="rec_obs",
-                                       placeholder="Ex: Não aplicar com ventos acima de 10 km/h...")
-
-        col_btn1, col_btn2 = st.columns(2)
-
-        with col_btn1:
-            if st.button("💾 Salvar Receituário", key="btn_salvar_rec", use_container_width=True):
-                if not rec_produtor.strip():
-                    error_box("Informe o nome do produtor.")
-                elif not rec_rt_nome.strip():
-                    error_box("Informe o nome do Responsável Técnico.")
-                elif not rec_rt_crea.strip():
-                    error_box("Informe o CREA/CRBio do RT.")
-                else:
-                    novo_rec = {
-                        "numero":         rec_numero or f"{len(st.session_state.receituarios)+1:03d}/{date.today().year}",
-                        "data_emissao":   str(rec_data_emissao),
-                        "validade_dias":  rec_validade_dias,
-                        "validade_ate":   str(pd.Timestamp(rec_data_emissao) + pd.Timedelta(days=rec_validade_dias)),
-                        "produtor":       rec_produtor,
-                        "cpf_cnpj":       rec_cpf_cnpj,
-                        "propriedade":    rec_propriedade,
-                        "municipio":      rec_municipio,
-                        "area_ha":        rec_area_ha,
-                        "cultura":        rec_cultura,
-                        "alvo":           rec_alvo,
-                        "rt_nome":        rec_rt_nome,
-                        "rt_crea":        rec_rt_crea,
-                        "rt_email":       rec_rt_email,
-                        "rt_telefone":    rec_rt_telefone,
-                        "volume_calda":   rec_volume_calda,
-                        "equipamento":    rec_equipamento,
-                        "epoca":          rec_epoca,
-                        "intervalo_dias": rec_intervalo,
-                        "epi":            rec_epi,
-                        "carencia_dias":  rec_carencia,
-                        "observacoes":    rec_observacoes,
-                        "produtos":       produtos_rec,
-                    }
-                    st.session_state.receituarios.append(novo_rec)
-                    salvar_dados_iaagro()
-                    success_box(f"✅ Receituário {novo_rec['numero']} salvo com sucesso!")
-
-        with col_btn2:
-            # Gerar PDF do último receituário preenchido
-            if st.button("🖨️ Gerar PDF", key="btn_pdf_rec", use_container_width=True):
-                if not rec_produtor.strip() or not rec_rt_nome.strip():
-                    error_box("Preencha ao menos produtor e Responsável Técnico antes de gerar o PDF.")
-                else:
-                    try:
-                        from reportlab.lib.units import cm
-                        from reportlab.lib.enums import TA_CENTER, TA_LEFT
-                        from reportlab.lib.styles import ParagraphStyle
-
-                        buf_r = BytesIO()
-                        doc_r = SimpleDocTemplate(buf_r, pagesize=A4,
-                                                  rightMargin=2*cm, leftMargin=2*cm,
-                                                  topMargin=2*cm, bottomMargin=2*cm)
-                        sty_r = getSampleStyleSheet()
-                        el_r  = []
-
-                        # ── Cabeçalho
-                        titulo_sty = ParagraphStyle("titulo", parent=sty_r["Title"],
-                                                    fontSize=16, textColor=colors.HexColor("#0f3460"),
-                                                    alignment=TA_CENTER)
-                        sub_sty    = ParagraphStyle("sub", parent=sty_r["Normal"],
-                                                    fontSize=10, textColor=colors.HexColor("#1e3a5f"),
-                                                    alignment=TA_CENTER)
-
-                        if os.path.exists("IAAgrologo.jpeg"):
-                            el_r.append(Image("IAAgrologo.jpeg", width=2.5*cm, height=1.2*cm))
-                        el_r.append(Spacer(1, 6))
-                        el_r.append(Paragraph("RECEITUÁRIO AGRONÔMICO", titulo_sty))
-                        el_r.append(Paragraph(f"Lei 7.802/89 | Decreto 4.074/02", sub_sty))
-                        el_r.append(Paragraph(f"Nº {rec_numero or '---'} | Emissão: {rec_data_emissao.strftime('%d/%m/%Y')} | "
-                                              f"Validade: {rec_validade_dias} dias", sub_sty))
-                        el_r.append(Spacer(1, 10))
-
-                        # ── Linha horizontal
-                        from reportlab.platypus import HRFlowable
-                        el_r.append(HRFlowable(width="100%", thickness=2,
-                                               color=colors.HexColor("#0f3460")))
-                        el_r.append(Spacer(1, 8))
-
-                        # ── Dados do Produtor
-                        el_r.append(Paragraph("<b>DADOS DO PRODUTOR</b>", sty_r["Heading2"]))
-                        dados_prod = [
-                            ["Produtor / Razão Social:", rec_produtor,     "CPF / CNPJ:", rec_cpf_cnpj],
-                            ["Propriedade:",             rec_propriedade,  "Município/UF:", rec_municipio],
-                            ["Cultura:",                 rec_cultura,      "Área (ha):",  f"{rec_area_ha:.2f} ha"],
-                            ["Alvo / Problema:",         rec_alvo,         "",            ""],
-                        ]
-                        t_prod = Table(dados_prod, colWidths=[4*cm, 7*cm, 3.5*cm, 3*cm])
-                        t_prod.setStyle(TableStyle([
-                            ("FONTNAME",(0,0),(-1,-1),"Helvetica"),
-                            ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
-                            ("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),
-                            ("FONTSIZE",(0,0),(-1,-1),9),
-                            ("GRID",(0,0),(-1,-1),0.3,colors.grey),
-                            ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#eef4ff")),
-                            ("BACKGROUND",(2,0),(2,-1),colors.HexColor("#eef4ff")),
-                            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-                            ("PADDING",(0,0),(-1,-1),4),
-                        ]))
-                        el_r.append(t_prod)
-                        el_r.append(Spacer(1, 10))
-
-                        # ── Produtos recomendados
-                        el_r.append(Paragraph("<b>PRODUTOS RECOMENDADOS</b>", sty_r["Heading2"]))
-                        header_prod = ["Produto Comercial","Ingrediente Ativo","Dose","Unidade","Classe","Total"]
-                        rows_prod   = [header_prod]
-                        for p in produtos_rec:
-                            rows_prod.append([
-                                p["Produto"], p["Ingrediente Ativo"],
-                                str(p["Dose"]), p["Unidade"], p["Classe"], str(p["Total"])
-                            ])
-                        t_prods = Table(rows_prod, colWidths=[4*cm, 4.5*cm, 1.5*cm, 1.8*cm, 2.2*cm, 2*cm])
-                        t_prods.setStyle(TableStyle([
-                            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0f3460")),
-                            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-                            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-                            ("FONTNAME",(0,1),(-1,-1),"Helvetica"),
-                            ("FONTSIZE",(0,0),(-1,-1),8.5),
-                            ("GRID",(0,0),(-1,-1),0.3,colors.grey),
-                            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f0f6ff")]),
-                            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-                            ("PADDING",(0,0),(-1,-1),4),
-                        ]))
-                        el_r.append(t_prods)
-                        el_r.append(Spacer(1, 10))
-
-                        # ── Recomendações de aplicação
-                        el_r.append(Paragraph("<b>RECOMENDAÇÕES DE APLICAÇÃO</b>", sty_r["Heading2"]))
-                        dados_aplic = [
-                            ["Volume de calda:", f"{rec_volume_calda:.0f} L/ha", "Equipamento:", rec_equipamento],
-                            ["Época de aplicação:", rec_epoca, "Intervalo:", f"{rec_intervalo} dias"],
-                            ["Prazo de carência:", f"{rec_carencia} dias", "EPI:", ", ".join(rec_epi) if rec_epi else "Conforme bula"],
-                        ]
-                        t_aplic = Table(dados_aplic, colWidths=[4*cm, 5.5*cm, 3.5*cm, 4.5*cm])
-                        t_aplic.setStyle(TableStyle([
-                            ("FONTNAME",(0,0),(-1,-1),"Helvetica"),
-                            ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
-                            ("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),
-                            ("FONTSIZE",(0,0),(-1,-1),9),
-                            ("GRID",(0,0),(-1,-1),0.3,colors.grey),
-                            ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#eef4ff")),
-                            ("BACKGROUND",(2,0),(2,-1),colors.HexColor("#eef4ff")),
-                            ("PADDING",(0,0),(-1,-1),4),
-                        ]))
-                        el_r.append(t_aplic)
-
-                        if rec_observacoes.strip():
-                            el_r.append(Spacer(1, 8))
-                            el_r.append(Paragraph("<b>OBSERVAÇÕES:</b>", sty_r["Heading3"]))
-                            el_r.append(Paragraph(rec_observacoes, sty_r["BodyText"]))
-
-                        el_r.append(Spacer(1, 16))
-                        el_r.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
-                        el_r.append(Spacer(1, 10))
-
-                        # ── Assinaturas
-                        el_r.append(Paragraph("<b>RESPONSÁVEL TÉCNICO</b>", sty_r["Heading2"]))
-                        dados_rt = [
-                            ["Nome:", rec_rt_nome, "CREA/CRBio:", rec_rt_crea],
-                            ["E-mail:", rec_rt_email, "Telefone:", rec_rt_telefone],
-                        ]
-                        t_rt = Table(dados_rt, colWidths=[2.5*cm, 7*cm, 3*cm, 5*cm])
-                        t_rt.setStyle(TableStyle([
-                            ("FONTNAME",(0,0),(-1,-1),"Helvetica"),
-                            ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
-                            ("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),
-                            ("FONTSIZE",(0,0),(-1,-1),9),
-                            ("GRID",(0,0),(-1,-1),0.3,colors.grey),
-                            ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#eef4ff")),
-                            ("BACKGROUND",(2,0),(2,-1),colors.HexColor("#eef4ff")),
-                            ("PADDING",(0,0),(-1,-1),4),
-                        ]))
-                        el_r.append(t_rt)
-                        el_r.append(Spacer(1, 30))
-
-                        # Linha de assinatura
-                        ass_data = [["_"*40, "   ", "_"*40],
-                                    [f"Assinatura do RT — {rec_rt_crea}", "   ",
-                                     f"Assinatura do Produtor — {rec_cpf_cnpj}"]]
-                        t_ass = Table(ass_data, colWidths=[7.5*cm, 1.5*cm, 8.5*cm])
-                        t_ass.setStyle(TableStyle([
-                            ("FONTSIZE",(0,0),(-1,-1),9),
-                            ("ALIGN",(0,0),(-1,-1),"CENTER"),
-                            ("FONTNAME",(0,1),(-1,1),"Helvetica"),
-                            ("TEXTCOLOR",(0,1),(-1,1),colors.HexColor("#555")),
-                        ]))
-                        el_r.append(t_ass)
-
-                        el_r.append(Spacer(1, 14))
-                        el_r.append(HRFlowable(width="100%", thickness=0.5, color=colors.lightgrey))
-                        el_r.append(Paragraph(
-                            f'<font size="7" color="grey">Documento gerado pelo IAAgro Pro em {date.today().strftime("%d/%m/%Y")} | '
-                            f'Este receituário é válido por {rec_validade_dias} dias a partir da emissão.</font>',
-                            sty_r["Normal"]
-                        ))
-
-                        doc_r.build(el_r)
-                        pdf_rec = buf_r.getvalue()
-                        buf_r.close()
-
-                        num_arquivo = (rec_numero or "receituario").replace("/","_").replace(" ","_")
-                        st.download_button(
-                            "📥 Baixar Receituário PDF",
-                            data=pdf_rec,
-                            file_name=f"Receituario_{num_arquivo}_{rec_produtor[:15].replace(' ','_')}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                    except Exception as e:
-                        error_box(f"Erro ao gerar PDF: {e}")
-
-    # ── ABA HISTÓRICO ───────────────────────────────────────────────
-    with tab_historico_rec:
-        st.subheader("📁 Receituários Emitidos")
-        if not st.session_state.receituarios:
-            info_box("Nenhum receituário salvo ainda.")
-        else:
-            # Tabela resumo
-            resumo = []
-            for r in st.session_state.receituarios:
-                resumo.append({
-                    "Nº":         r.get("numero",""),
-                    "Data":       r.get("data_emissao",""),
-                    "Produtor":   r.get("produtor",""),
-                    "Cultura":    r.get("cultura",""),
-                    "Área (ha)":  r.get("area_ha",0),
-                    "Alvo":       r.get("alvo",""),
-                    "RT":         r.get("rt_nome",""),
-                    "Validade":   r.get("validade_ate","")[:10] if r.get("validade_ate") else "",
+        if _ev_salvar:
+            if _ev_titulo.strip():
+                st.session_state.calendario_eventos.append({
+                    "Título": _ev_titulo.strip(), "Data": str(_ev_data),
+                    "Tipo": _ev_tipo, "Área": _ev_area,
+                    "Obs": _ev_obs, "Alerta": _ev_alerta,
+                    "Concluído": False,
                 })
-            df_rec_hist = pd.DataFrame(resumo)
-            st.dataframe(df_rec_hist, use_container_width=True, hide_index=True)
-
-            # Ver detalhes / regerar PDF
-            st.divider()
-            opcoes_rec = [f"{r.get('numero',i)} — {r.get('produtor','')} — {r.get('data_emissao','')}"
-                          for i, r in enumerate(st.session_state.receituarios)]
-            sel_rec = st.selectbox("Selecionar receituário", opcoes_rec, key="sel_rec_hist")
-            idx_sel = opcoes_rec.index(sel_rec)
-            rec_sel = st.session_state.receituarios[idx_sel]
-
-            with st.expander("👁️ Ver detalhes completos", expanded=False):
-                col_det1, col_det2 = st.columns(2)
-                with col_det1:
-                    st.markdown(f"**Produtor:** {rec_sel.get('produtor','')}")
-                    st.markdown(f"**CPF/CNPJ:** {rec_sel.get('cpf_cnpj','')}")
-                    st.markdown(f"**Propriedade:** {rec_sel.get('propriedade','')}")
-                    st.markdown(f"**Município:** {rec_sel.get('municipio','')}")
-                    st.markdown(f"**Cultura:** {rec_sel.get('cultura','')} — {rec_sel.get('area_ha',0)} ha")
-                    st.markdown(f"**Alvo:** {rec_sel.get('alvo','')}")
-                with col_det2:
-                    st.markdown(f"**RT:** {rec_sel.get('rt_nome','')}")
-                    st.markdown(f"**CREA:** {rec_sel.get('rt_crea','')}")
-                    st.markdown(f"**Emissão:** {rec_sel.get('data_emissao','')}")
-                    st.markdown(f"**Válido até:** {rec_sel.get('validade_ate','')[:10]}")
-                    st.markdown(f"**Equipamento:** {rec_sel.get('equipamento','')}")
-                    st.markdown(f"**Volume calda:** {rec_sel.get('volume_calda',0)} L/ha")
-
-                if rec_sel.get("produtos"):
-                    st.markdown("**Produtos:**")
-                    st.dataframe(pd.DataFrame(rec_sel["produtos"]), use_container_width=True, hide_index=True)
-
-            # Excluir
-            if st.button("🗑️ Excluir este receituário", key="btn_del_rec"):
-                st.session_state.receituarios.pop(idx_sel)
                 salvar_dados_iaagro()
-                success_box("Receituário excluído.")
+                success_box(f"✅ Evento '{_ev_titulo}' salvo!")
                 st.rerun()
 
-            # Exportar todos em Excel
-            if st.button("📊 Exportar todos para Excel", key="btn_xlsx_rec", use_container_width=True):
-                rows_exp = []
-                for r in st.session_state.receituarios:
-                    base = {k: v for k, v in r.items() if k != "produtos"}
-                    for j, p in enumerate(r.get("produtos", [])):
-                        row = base.copy()
-                        row.update({f"prod_{j+1}_{k}": v for k, v in p.items()})
-                        rows_exp.append(row)
-                    if not r.get("produtos"):
-                        rows_exp.append(base)
-                xlsx_r = exportar_excel({"Receituários": rows_exp})
-                if xlsx_r:
-                    st.download_button("📥 Baixar Excel", data=xlsx_r,
-                        file_name=f"receituarios_{date.today()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
+        # Eventos próximos (7 dias)
+        from datetime import date as _date_cal, timedelta as _td_cal
+        _hoje_cal = _date_cal.today()
+        _proximos = []
+        for _ev in st.session_state.calendario_eventos:
+            try:
+                _d = _date_cal.fromisoformat(_ev.get("Data",""))
+                _diff = (_d - _hoje_cal).days
+                if 0 <= _diff <= 7 and not _ev.get("Concluído"):
+                    _proximos.append((_diff, _ev))
+            except Exception:
+                pass
 
+        if _proximos:
+            st.markdown("#### 🔔 Próximos 7 dias")
+            for _diff_d, _ev in sorted(_proximos):
+                _cor  = _cores_ev.get(_ev.get("Tipo","📝 Outro"), "#1e293b")
+                _bord = _bordas_ev.get(_ev.get("Tipo","📝 Outro"), "#64748b")
+                _quando = "Hoje!" if _diff_d == 0 else f"Em {_diff_d} dia{'s' if _diff_d>1 else ''}"
+                st.markdown(f"""
+                <div style='background:{_cor};border-radius:10px;padding:10px 16px;
+                border-left:4px solid {_bord};margin:4px 0;
+                display:flex;justify-content:space-between;align-items:center;'>
+                <div>
+                <span style='color:#fff;font-weight:700;font-size:13px;'>{_ev.get('Tipo','')} {_ev.get('Título','')}</span><br>
+                <span style='color:rgba(255,255,255,0.5);font-size:11px;'>{_ev.get('Área','')} &nbsp;·&nbsp; {_ev.get('Obs','')[:40]}</span>
+                </div>
+                <span style='color:{_bord};font-weight:800;font-size:12px;white-space:nowrap;margin-left:12px;'>{_quando}</span>
+                </div>""", unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════
-# MENU: COMPARATIVO DE SAFRAS
-# ═══════════════════════════════════════════════════════════════════
-elif menu == "📊 Comparativo de Safras":
-    st.header("📊 Comparativo de Safras")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-    📈 Compare produtividade, custos e lucratividade entre todas as safras cadastradas.
-    Identifique tendências e tome decisões com base no histórico real da sua propriedade.
-    </div>''', unsafe_allow_html=True)
+        # Lista completa
+        st.markdown("#### 📋 Todos os Eventos")
+        if st.session_state.calendario_eventos:
+            _fil_tipo = st.selectbox("Filtrar por tipo", ["Todos"] + _tipos_ev, key="fil_tipo_ev")
+            _fil_area_ev = st.selectbox("Filtrar por área", ["Todas"] +
+                [f"{a.get('ID')} - {a.get('Talhão','')}" for a in st.session_state.areas],
+                key="fil_area_ev")
 
-    # Verificar dados disponíveis
-    tem_hist = len(st.session_state.historico_produtividade) > 0
-    tem_dre  = len(st.session_state.get("dre_registros", [])) > 0
-
-    if not tem_hist and not tem_dre:
-        warning_box("Cadastre dados em 'Histórico de Produtividade' e/ou 'Dashboard Financeiro' para ver o comparativo.")
-    else:
-        try:
-            import plotly.express as px
-            import plotly.graph_objects as go
-            from plotly.subplots import make_subplots
-            PLOTLY_OK = True
-        except Exception:
-            PLOTLY_OK = False
-
-        tab_prod, tab_fin, tab_completo, tab_ia = st.tabs([
-            "🌾 Produtividade",
-            "💰 Financeiro",
-            "📋 Comparativo Completo",
-            "🤖 Análise IA"
-        ])
-
-        # ── TAB 1: PRODUTIVIDADE ────────────────────────────────────
-        with tab_prod:
-            st.subheader("🌾 Evolução da Produtividade por Safra")
-            if not tem_hist:
-                info_box("Cadastre dados em 'Histórico de Produtividade' para ver esta aba.")
-            else:
-                df_h = pd.DataFrame(st.session_state.historico_produtividade)
-
-                # Filtros
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    areas_disp = ["Todas"] + sorted(df_h["Área"].unique().tolist())
-                    area_filtro_comp = st.selectbox("Filtrar por área", areas_disp, key="comp_area_filtro")
-                with col_f2:
-                    culturas_disp = ["Todas"] + sorted(df_h["Área"].unique().tolist())
-                    min_safras = st.number_input("Mínimo de safras para exibir", min_value=1, value=1, key="comp_min_safras")
-
-                df_hf = df_h if area_filtro_comp == "Todas" else df_h[df_h["Área"] == area_filtro_comp]
-
-                if df_hf.empty:
-                    info_box("Nenhum dado para o filtro selecionado.")
-                else:
-                    # Métricas gerais
-                    media_geral  = df_hf["Produtividade"].mean()
-                    melhor_safra = df_hf.loc[df_hf["Produtividade"].idxmax()]
-                    pior_safra   = df_hf.loc[df_hf["Produtividade"].idxmin()]
-                    tendencia    = df_hf.groupby("Safra")["Produtividade"].mean()
-                    delta_trend  = tendencia.iloc[-1] - tendencia.iloc[0] if len(tendencia) > 1 else 0
-
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("📊 Média Geral", f"{media_geral:.1f} sc/ha")
-                    c2.metric("🏆 Melhor Safra", f"{melhor_safra['Produtividade']:.1f} sc/ha",
-                              f"{melhor_safra['Safra']}")
-                    c3.metric("⬇️ Pior Safra", f"{pior_safra['Produtividade']:.1f} sc/ha",
-                              f"{pior_safra['Safra']}")
-                    c4.metric("📈 Tendência", f"{delta_trend:+.1f} sc/ha",
-                              "vs 1ª safra" if len(tendencia) > 1 else "—")
-
-                    if PLOTLY_OK:
-                        # Gráfico de barras por safra + linha de média
-                        df_safra_media = df_hf.groupby("Safra")["Produtividade"].mean().reset_index()
-                        df_safra_media.columns = ["Safra","Média sc/ha"]
-
-                        fig_bar = go.Figure()
-                        fig_bar.add_trace(go.Bar(
-                            x=df_safra_media["Safra"],
-                            y=df_safra_media["Média sc/ha"],
-                            marker_color=[
-                                "#22c55e" if v >= media_geral else "#f59e0b"
-                                for v in df_safra_media["Média sc/ha"]
-                            ],
-                            text=[f"{v:.1f}" for v in df_safra_media["Média sc/ha"]],
-                            textposition="outside",
-                            name="Produtividade"
-                        ))
-                        fig_bar.add_hline(y=media_geral, line_dash="dash",
-                                          line_color="#6ee7b7",
-                                          annotation_text=f"Média: {media_geral:.1f}",
-                                          annotation_font_color="#6ee7b7")
-                        fig_bar.update_layout(
-                            title="Produtividade Média por Safra (sc/ha)",
-                            paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                            font_color="#f1f5f9", height=380,
-                            xaxis_title="Safra", yaxis_title="sc/ha",
-                            yaxis=dict(gridcolor="#1e3a5f"),
-                            showlegend=False
-                        )
-                        st.plotly_chart(fig_bar, use_container_width=True)
-
-                        # Evolução por área (se múltiplas)
-                        if df_hf["Área"].nunique() > 1:
-                            fig_line = px.line(
-                                df_hf.groupby(["Safra","Área"])["Produtividade"].mean().reset_index(),
-                                x="Safra", y="Produtividade", color="Área",
-                                title="Evolução por Área/Talhão",
-                                markers=True, height=340,
-                                labels={"Produtividade":"sc/ha"}
-                            )
-                            fig_line.update_layout(
-                                paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                                font_color="#f1f5f9",
-                                yaxis=dict(gridcolor="#1e3a5f")
-                            )
-                            st.plotly_chart(fig_line, use_container_width=True)
-
-                        # Box plot das safras
-                        if df_hf["Safra"].nunique() > 1:
-                            fig_box2 = px.box(
-                                df_hf, x="Safra", y="Produtividade",
-                                color="Safra",
-                                title="Distribuição de Produtividade por Safra",
-                                height=320, labels={"Produtividade":"sc/ha"}
-                            )
-                            fig_box2.update_layout(
-                                paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                                font_color="#f1f5f9", showlegend=False,
-                                yaxis=dict(gridcolor="#1e3a5f")
-                            )
-                            st.plotly_chart(fig_box2, use_container_width=True)
-                    else:
-                        st.line_chart(df_hf.groupby("Safra")["Produtividade"].mean())
-
-                    # Tabela completa
-                    st.subheader("📋 Dados por Safra")
-                    df_tab_comp = df_hf.groupby("Safra").agg(
-                        Média=("Produtividade","mean"),
-                        Mínimo=("Produtividade","min"),
-                        Máximo=("Produtividade","max"),
-                        Registros=("Produtividade","count")
-                    ).round(1).reset_index()
-                    df_tab_comp["vs Média"] = (df_tab_comp["Média"] - media_geral).round(1)
-                    st.dataframe(df_tab_comp, use_container_width=True, hide_index=True)
-
-        # ── TAB 2: FINANCEIRO ───────────────────────────────────────
-        with tab_fin:
-            st.subheader("💰 Comparativo Financeiro entre Safras")
-            if not tem_dre:
-                info_box("Cadastre lançamentos em 'Dashboard Financeiro' para ver esta aba.")
-            else:
-                df_dre_all = pd.DataFrame(st.session_state.dre_registros)
-
-                df_fin_comp = df_dre_all.groupby(["Safra","Tipo"])["Valor R$"].sum().unstack(fill_value=0).reset_index()
-
-                # Garantir colunas mesmo que faltem
-                for col in ["Receita","Custo Variável","Custo Fixo"]:
-                    if col not in df_fin_comp.columns:
-                        df_fin_comp[col] = 0
-
-                df_fin_comp["Custo Total"] = df_fin_comp.get("Custo Variável",0) + df_fin_comp.get("Custo Fixo",0)
-                df_fin_comp["Lucro"]       = df_fin_comp["Receita"] - df_fin_comp["Custo Total"]
-                df_fin_comp["Margem %"]    = (df_fin_comp["Lucro"] / df_fin_comp["Receita"] * 100).round(1).where(df_fin_comp["Receita"]>0, 0)
-
-                # Área por safra (para métricas /ha)
-                df_area_safra = df_dre_all.groupby("Safra")["Área ha"].max().reset_index()
-                df_fin_comp   = df_fin_comp.merge(df_area_safra, on="Safra", how="left")
-                df_fin_comp["Área ha"] = df_fin_comp["Área ha"].fillna(1)
-                df_fin_comp["Receita/ha"]   = (df_fin_comp["Receita"] / df_fin_comp["Área ha"]).round(0)
-                df_fin_comp["Custo/ha"]     = (df_fin_comp["Custo Total"] / df_fin_comp["Área ha"]).round(0)
-                df_fin_comp["Lucro/ha"]     = (df_fin_comp["Lucro"] / df_fin_comp["Área ha"]).round(0)
-
-                # Métricas de destaque
-                melhor_lucro = df_fin_comp.loc[df_fin_comp["Lucro"].idxmax()] if not df_fin_comp.empty else None
-                media_margem = df_fin_comp["Margem %"].mean()
-
-                if melhor_lucro is not None:
-                    cm1, cm2, cm3, cm4 = st.columns(4)
-                    cm1.metric("🏆 Melhor Lucro", f"R$ {melhor_lucro['Lucro']:,.0f}", melhor_lucro["Safra"])
-                    cm2.metric("📊 Margem Média", f"{media_margem:.1f}%")
-                    cm3.metric("💰 Maior Receita", f"R$ {df_fin_comp['Receita'].max():,.0f}")
-                    cm4.metric("💸 Menor Custo/ha", f"R$ {df_fin_comp['Custo/ha'].min():,.0f}/ha")
-
-                if PLOTLY_OK:
-                    # Barras agrupadas Receita x Custo x Lucro
-                    fig_fin = go.Figure()
-                    fig_fin.add_trace(go.Bar(name="Receita", x=df_fin_comp["Safra"],
-                                             y=df_fin_comp["Receita"], marker_color="#22c55e",
-                                             text=df_fin_comp["Receita"].apply(lambda v: f"R$ {v:,.0f}"),
-                                             textposition="outside"))
-                    fig_fin.add_trace(go.Bar(name="Custo Total", x=df_fin_comp["Safra"],
-                                             y=df_fin_comp["Custo Total"], marker_color="#ef4444",
-                                             text=df_fin_comp["Custo Total"].apply(lambda v: f"R$ {v:,.0f}"),
-                                             textposition="outside"))
-                    fig_fin.add_trace(go.Bar(name="Lucro", x=df_fin_comp["Safra"],
-                                             y=df_fin_comp["Lucro"],
-                                             marker_color=["#6ee7b7" if v >= 0 else "#f87171"
-                                                           for v in df_fin_comp["Lucro"]],
-                                             text=df_fin_comp["Lucro"].apply(lambda v: f"R$ {v:,.0f}"),
-                                             textposition="outside"))
-                    fig_fin.update_layout(
-                        barmode="group",
-                        title="Receita x Custo x Lucro por Safra",
-                        paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                        font_color="#f1f5f9", height=400,
-                        xaxis_title="Safra", yaxis_title="R$",
-                        yaxis=dict(gridcolor="#1e3a5f"),
-                        legend=dict(bgcolor="#0f3460", bordercolor="#22c55e", borderwidth=1)
-                    )
-                    st.plotly_chart(fig_fin, use_container_width=True)
-
-                    # Evolução da margem
-                    if len(df_fin_comp) > 1:
-                        fig_margem = go.Figure()
-                        fig_margem.add_trace(go.Scatter(
-                            x=df_fin_comp["Safra"], y=df_fin_comp["Margem %"],
-                            mode="lines+markers+text",
-                            text=[f"{v:.1f}%" for v in df_fin_comp["Margem %"]],
-                            textposition="top center",
-                            line=dict(color="#f59e0b", width=3),
-                            marker=dict(size=10),
-                            name="Margem %"
-                        ))
-                        fig_margem.add_hline(y=0, line_dash="dash", line_color="#ef4444",
-                                             annotation_text="Break-even", annotation_font_color="#ef4444")
-                        fig_margem.update_layout(
-                            title="Evolução da Margem Líquida (%)",
-                            paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                            font_color="#f1f5f9", height=300,
-                            yaxis=dict(gridcolor="#1e3a5f"),
-                            xaxis_title="Safra", yaxis_title="Margem %"
-                        )
-                        st.plotly_chart(fig_margem, use_container_width=True)
-
-                # Tabela financeira completa
-                st.subheader("📋 Resumo Financeiro por Safra")
-                cols_exib = ["Safra","Receita","Custo Total","Lucro","Margem %","Receita/ha","Custo/ha","Lucro/ha","Área ha"]
-                st.dataframe(df_fin_comp[[c for c in cols_exib if c in df_fin_comp.columns]].round(1),
-                             use_container_width=True, hide_index=True)
-
-        # ── TAB 3: COMPARATIVO COMPLETO ─────────────────────────────
-        with tab_completo:
-            st.subheader("📋 Painel Completo — Produtividade + Financeiro")
-
-            if not tem_hist and not tem_dre:
-                info_box("Sem dados suficientes.")
-            else:
-                # Unir produtividade e financeiro por safra
-                dados_comp = {}
-
-                if tem_hist:
-                    df_hc = pd.DataFrame(st.session_state.historico_produtividade)
-                    for safra, grp in df_hc.groupby("Safra"):
-                        dados_comp.setdefault(safra, {})["Prod. Média sc/ha"] = round(grp["Produtividade"].mean(), 1)
-                        dados_comp[safra]["Custo Histórico/ha"] = round(grp["Custo"].mean(), 2)
-
-                if tem_dre:
-                    df_dc = pd.DataFrame(st.session_state.dre_registros)
-                    for safra, grp in df_dc.groupby("Safra"):
-                        rec   = grp[grp["Tipo"]=="Receita"]["Valor R$"].sum()
-                        custo = grp[grp["Tipo"].isin(["Custo Variável","Custo Fixo"])]["Valor R$"].sum()
-                        lucro = rec - custo
-                        area  = grp["Área ha"].max() if not grp.empty else 1
-                        dados_comp.setdefault(safra, {})["Receita R$"]  = round(rec, 0)
-                        dados_comp[safra]["Custo Total R$"] = round(custo, 0)
-                        dados_comp[safra]["Lucro R$"]       = round(lucro, 0)
-                        dados_comp[safra]["Margem %"]       = round(lucro/rec*100, 1) if rec > 0 else 0
-                        dados_comp[safra]["Área ha"]        = area
-
-                df_comp_final = pd.DataFrame(dados_comp).T.reset_index().rename(columns={"index":"Safra"})
-                df_comp_final = df_comp_final.sort_values("Safra")
-
-                # Highlight melhor linha
-                st.dataframe(df_comp_final, use_container_width=True, hide_index=True)
-
-                if PLOTLY_OK and "Prod. Média sc/ha" in df_comp_final.columns and "Lucro R$" in df_comp_final.columns:
-                    df_plot_dual = df_comp_final.dropna(subset=["Prod. Média sc/ha","Lucro R$"])
-                    if not df_plot_dual.empty:
-                        fig_dual = make_subplots(specs=[[{"secondary_y": True}]])
-                        fig_dual.add_trace(go.Bar(
-                            name="Produtividade sc/ha", x=df_plot_dual["Safra"],
-                            y=df_plot_dual["Prod. Média sc/ha"], marker_color="#22c55e",
-                            opacity=0.85
-                        ), secondary_y=False)
-                        fig_dual.add_trace(go.Scatter(
-                            name="Lucro R$", x=df_plot_dual["Safra"],
-                            y=df_plot_dual["Lucro R$"],
-                            mode="lines+markers", line=dict(color="#f59e0b", width=3),
-                            marker=dict(size=9)
-                        ), secondary_y=True)
-                        fig_dual.update_layout(
-                            title="Produtividade (sc/ha) vs Lucro (R$) por Safra",
-                            paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                            font_color="#f1f5f9", height=400,
-                            legend=dict(bgcolor="#0f3460", bordercolor="#22c55e", borderwidth=1)
-                        )
-                        fig_dual.update_yaxes(title_text="sc/ha", secondary_y=False,
-                                              gridcolor="#1e3a5f")
-                        fig_dual.update_yaxes(title_text="Lucro R$", secondary_y=True)
-                        st.plotly_chart(fig_dual, use_container_width=True)
-
-                # Download
-                xlsx_comp = exportar_excel({"Comparativo Safras": df_comp_final.to_dict("records")})
-                if xlsx_comp:
-                    st.download_button("📥 Exportar Comparativo Excel", data=xlsx_comp,
-                        file_name=f"comparativo_safras_{date.today()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
-
-        # ── TAB 4: ANÁLISE IA ───────────────────────────────────────
-        with tab_ia:
-            st.subheader("🤖 Análise Comparativa por Inteligência Artificial")
-
-            if st.button("🚀 Gerar Análise IA das Safras", key="btn_ia_comp", use_container_width=True):
-                with st.spinner("🤖 Analisando histórico de safras..."):
-                    # Montar resumo para o prompt
-                    resumo_hist = ""
-                    if tem_hist:
-                        df_hr = pd.DataFrame(st.session_state.historico_produtividade)
-                        for safra, grp in df_hr.groupby("Safra"):
-                            resumo_hist += (f"Safra {safra}: prod. média {grp['Produtividade'].mean():.1f} sc/ha, "
-                                           f"custo {grp['Custo'].mean():.2f} R$/ha\n")
-
-                    resumo_fin = ""
-                    if tem_dre:
-                        df_dr = pd.DataFrame(st.session_state.dre_registros)
-                        for safra, grp in df_dr.groupby("Safra"):
-                            rec   = grp[grp["Tipo"]=="Receita"]["Valor R$"].sum()
-                            custo = grp[grp["Tipo"].isin(["Custo Variável","Custo Fixo"])]["Valor R$"].sum()
-                            lucro = rec - custo
-                            margem = lucro/rec*100 if rec > 0 else 0
-                            resumo_fin += (f"Safra {safra}: receita R$ {rec:,.0f}, custo R$ {custo:,.0f}, "
-                                          f"lucro R$ {lucro:,.0f}, margem {margem:.1f}%\n")
-
-                    prompt_comp = f"""Você é um consultor agrícola analisando o histórico de safras de uma propriedade rural brasileira no sistema IAAgro Pro.
-
-HISTÓRICO DE PRODUTIVIDADE:
-{resumo_hist if resumo_hist else "Sem dados de produtividade."}
-
-HISTÓRICO FINANCEIRO:
-{resumo_fin if resumo_fin else "Sem dados financeiros."}
-
-Gere uma análise comparativa profissional com:
-1. TENDÊNCIA PRODUTIVA — a propriedade está evoluindo ou regredindo? Por quê?
-2. EFICIÊNCIA FINANCEIRA — qual safra teve melhor relação custo-benefício?
-3. PONTOS DE ATENÇÃO — o que chama atenção negativamente?
-4. DESTAQUES POSITIVOS — o que está indo bem?
-5. RECOMENDAÇÕES ESTRATÉGICAS — top 3 ações para melhorar resultados nas próximas safras
-6. PROJEÇÃO — se mantida a tendência, qual a expectativa para a próxima safra?
-
-Seja objetivo, técnico e prático para o produtor rural brasileiro. Máximo 400 palavras."""
-
-                    try:
-                        resp_ia = requests.post(
-                            "https://api.anthropic.com/v1/messages",
-                            headers={"Content-Type":"application/json"},
-                            json={"model":"claude-sonnet-4-20250514","max_tokens":900,
-                                  "messages":[{"role":"user","content":prompt_comp}]},
-                            timeout=35
-                        )
-                        if resp_ia.status_code == 200:
-                            analise_comp = resp_ia.json()["content"][0]["text"]
-                            st.markdown(f'''<div style="background:#0f3460;color:#f1f5f9;padding:22px 26px;
-                            border-radius:14px;border-left:5px solid #6ee7b7;
-                            font-size:14px;line-height:2;white-space:pre-wrap;font-weight:500;">
-{analise_comp}
-                            </div>''', unsafe_allow_html=True)
-
-                            # PDF da análise
-                            if st.button("🖨️ Gerar PDF da Análise", key="btn_pdf_comp"):
-                                try:
-                                    from reportlab.lib.units import cm
-                                    buf_cp = BytesIO()
-                                    doc_cp = SimpleDocTemplate(buf_cp, pagesize=A4,
-                                                               rightMargin=2*cm, leftMargin=2*cm,
-                                                               topMargin=2*cm, bottomMargin=2*cm)
-                                    sty_cp = getSampleStyleSheet()
-                                    el_cp  = []
-                                    if os.path.exists("IAAgrologo.jpeg"):
-                                        el_cp.append(Image("IAAgrologo.jpeg", width=3*cm, height=1.5*cm))
-                                    el_cp.append(Spacer(1,8))
-                                    el_cp.append(Paragraph("<b>ANÁLISE COMPARATIVA DE SAFRAS — IAAgro IA</b>", sty_cp["Title"]))
-                                    el_cp.append(Paragraph(f"Gerado em: {date.today().strftime('%d/%m/%Y')}", sty_cp["Normal"]))
-                                    el_cp.append(Spacer(1,12))
-                                    el_cp.append(Paragraph("<b>HISTÓRICO DE PRODUTIVIDADE</b>", sty_cp["Heading2"]))
-                                    for linha in resumo_hist.split("\n"):
-                                        if linha.strip():
-                                            el_cp.append(Paragraph(linha, sty_cp["BodyText"]))
-                                    el_cp.append(Spacer(1,8))
-                                    el_cp.append(Paragraph("<b>HISTÓRICO FINANCEIRO</b>", sty_cp["Heading2"]))
-                                    for linha in resumo_fin.split("\n"):
-                                        if linha.strip():
-                                            el_cp.append(Paragraph(linha, sty_cp["BodyText"]))
-                                    el_cp.append(Spacer(1,12))
-                                    el_cp.append(Paragraph("<b>ANÁLISE IA</b>", sty_cp["Heading2"]))
-                                    el_cp.append(Spacer(1,6))
-                                    for linha in analise_comp.split("\n"):
-                                        if linha.strip():
-                                            el_cp.append(Paragraph(linha, sty_cp["BodyText"]))
-                                            el_cp.append(Spacer(1,3))
-                                    doc_cp.build(el_cp)
-                                    pdf_cp = buf_cp.getvalue()
-                                    buf_cp.close()
-                                    st.download_button("📥 Baixar PDF", data=pdf_cp,
-                                        file_name=f"analise_safras_{date.today()}.pdf",
-                                        mime="application/pdf", use_container_width=True)
-                                except Exception as ep:
-                                    error_box(f"Erro PDF: {ep}")
-                        else:
-                            warning_box("IA indisponível. Verifique a conexão.")
-                    except Exception as e:
-                        error_box(f"Erro na análise IA: {e}")
-
-
-# ─────────────────────────────────────────────
-# MENU: MAPA DE COLHEITA IA
-# ─────────────────────────────────────────────
-elif menu == "🗺️ Mapa de Colheita IA":
-    st.header("🗺️ Mapa de Colheita — Análise por Inteligência Artificial")
-    st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-    border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;margin:8px 0;">
-    📡 Carregue o mapa de colheita gerado pela colheitadeira (John Deere, Case, New Holland, Claas, etc.)
-    nos formatos CSV, Excel, GeoJSON ou Shapefile. A IA analisa produtividade por zona,
-    variabilidade espacial, pontos críticos e gera recomendações de manejo.
-    </div>''', unsafe_allow_html=True)
-
-    # ── Dependências opcionais ──
-    try:
-        import numpy as np
-        NUMPY_OK = True
-    except ImportError:
-        NUMPY_OK = False
-    try:
-        import geopandas as gpd
-        GEO_OK = True
-    except ImportError:
-        GEO_OK = False
-    try:
-        import plotly.express as px
-        import plotly.graph_objects as go
-        PLOTLY_OK = True
-    except ImportError:
-        PLOTLY_OK = False
-
-    if not NUMPY_OK:
-        st.markdown('''<div style="background:#78350f;color:#fff;padding:12px 18px;
-        border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">
-        ⚠️ Para análise completa instale: pip install numpy plotly geopandas</div>''',
-        unsafe_allow_html=True)
-
-    # ══ FUNÇÕES AUXILIARES ══════════════════════════════════════════════
-    def detectar_coluna_produtividade(colunas):
-        candidatos = ["produtividade","yield","Yield","YIELD","Prod","prod","PROD",
-                      "HarvestMass","harvest_mass","Massa","massa","sc_ha","sc/ha",
-                      "sacas","Sacas","bu_ac","bu/ac","t_ha","t/ha","ton_ha",
-                      "Rendimento","rendimento","productivity","Productivity"]
-        for c in candidatos:
-            if c in colunas: return c
-        for col in colunas:
-            for chave in ["prod","yield","mass","sacas","rendim","sc","bu"]:
-                if chave.lower() in col.lower(): return col
-        return None
-
-    def detectar_colunas_geo(colunas):
-        lat_c = next((c for c in ["lat","Lat","LAT","latitude","Latitude","LATITUDE","y","Y"] if c in colunas), None)
-        lon_c = next((c for c in ["lon","Lon","LON","lng","Lng","LNG","longitude","Longitude","LONGITUDE","x","X"] if c in colunas), None)
-        if not lat_c: lat_c = next((c for c in colunas if "lat" in c.lower()), None)
-        if not lon_c: lon_c = next((c for c in colunas if any(x in c.lower() for x in ["lon","lng"])), None)
-        return lat_c, lon_c
-
-    def zonear_produtividade(df, col_prod):
-        import numpy as np
-        p33 = np.percentile(df[col_prod].dropna(), 33)
-        p66 = np.percentile(df[col_prod].dropna(), 66)
-        df = df.copy()
-        df["Zona"] = df[col_prod].apply(lambda v: "🔴 Baixa" if v < p33 else ("🟡 Média" if v < p66 else "🟢 Alta"))
-        return df, p33, p66
-
-    def calcular_estatisticas(df, col_prod):
-        s = {}
-        s["media"]     = float(df[col_prod].mean())
-        s["mediana"]   = float(df[col_prod].median())
-        s["desvio"]    = float(df[col_prod].std())
-        s["minimo"]    = float(df[col_prod].min())
-        s["maximo"]    = float(df[col_prod].max())
-        s["cv"]        = float(df[col_prod].std()/df[col_prod].mean()*100) if s["media"] > 0 else 0
-        s["total_pts"] = len(df)
-        if "Zona" in df.columns:
-            for z in ["🔴 Baixa","🟡 Média","🟢 Alta"]:
-                sub = df[df["Zona"]==z]
-                s[f"pct_{z}"] = round(len(sub)/len(df)*100, 1)
-                s[f"med_{z}"] = round(sub[col_prod].mean(), 1) if len(sub) > 0 else 0
-        return s
-
-    def gerar_recomendacoes(stats, col_prod, cultura, area_ha):
-        cv        = stats.get("cv", 0)
-        media     = stats.get("media", 0)
-        pct_baixa = stats.get("pct_🔴 Baixa", 0)
-        pct_alta  = stats.get("pct_🟢 Alta",  0)
-        med_baixa = stats.get("med_🔴 Baixa", 0)
-        med_alta  = stats.get("med_🟢 Alta",  0)
-        gap       = med_alta - med_baixa
-        recs = []
-
-        if cv > 35:
-            recs.append({"zona":"Campo todo","tipo":"⚠️ ALTA VARIABILIDADE","cor":"#7f1d1d","borda":"#ef4444",
-                "texto":f"CV de {cv:.1f}% indica alta heterogeneidade espacial. Implante Aplicação em Taxa "
-                        f"Variável (VRA). Realize amostragem por zona de manejo e verifique histórico de compactação."})
-        elif cv > 20:
-            recs.append({"zona":"Campo todo","tipo":"ℹ️ VARIABILIDADE MODERADA","cor":"#1e3a5f","borda":"#3b82f6",
-                "texto":f"CV de {cv:.1f}% é moderado. Avalie mapeamento de solo para identificar causas da variabilidade."})
+            _evs_sorted = sorted(st.session_state.calendario_eventos,
+                                  key=lambda x: x.get("Data",""), reverse=True)
+            for _idx_ev, _ev in enumerate(_evs_sorted):
+                if _fil_tipo != "Todos" and _ev.get("Tipo") != _fil_tipo:
+                    continue
+                if _fil_area_ev != "Todas" and _ev.get("Área","") not in ("Toda a propriedade", _fil_area_ev):
+                    continue
+                _cor  = _cores_ev.get(_ev.get("Tipo","📝 Outro"), "#1e293b")
+                _bord = _bordas_ev.get(_ev.get("Tipo","📝 Outro"), "#64748b")
+                _concl = _ev.get("Concluído", False)
+                _opcity = "0.5" if _concl else "1"
+                _c1, _c2, _c3 = st.columns([6, 1, 1])
+                _c1.markdown(f"""
+                <div style='background:{_cor};border-radius:8px;padding:8px 14px;
+                border-left:3px solid {_bord};opacity:{_opcity};'>
+                <span style='color:#fff;font-weight:700;font-size:12px;'>
+                {"~~" if _concl else ""}{_ev.get("Tipo","")} {_ev.get("Título","")}{"~~" if _concl else ""}
+                </span><br>
+                <span style='color:rgba(255,255,255,0.5);font-size:11px;'>
+                📅 {_ev.get("Data","")} &nbsp;·&nbsp; {_ev.get("Área","")}
+                </span></div>""", unsafe_allow_html=True)
+                if not _concl:
+                    if _c2.button("✅", key=f"concl_ev_{_idx_ev}", help="Marcar como concluído"):
+                        _idx_orig = st.session_state.calendario_eventos.index(_ev)
+                        st.session_state.calendario_eventos[_idx_orig]["Concluído"] = True
+                        salvar_dados_iaagro()
+                        st.rerun()
+                if _c3.button("🗑️", key=f"del_ev_{_idx_ev}", help="Excluir"):
+                    _idx_orig = st.session_state.calendario_eventos.index(_ev)
+                    st.session_state.calendario_eventos.pop(_idx_orig)
+                    salvar_dados_iaagro()
+                    st.rerun()
         else:
-            recs.append({"zona":"Campo todo","tipo":"✅ BOA UNIFORMIDADE","cor":"#14532d","borda":"#22c55e",
-                "texto":f"CV de {cv:.1f}% indica boa uniformidade. Continue o manejo atual."})
+            st.info("Nenhum evento cadastrado ainda.")
 
-        if pct_baixa > 15:
-            recs.append({"zona":"🔴 Zona Baixa","tipo":"🔴 INTERVENÇÃO PRIORITÁRIA","cor":"#7f1d1d","borda":"#ef4444",
-                "texto":f"{pct_baixa:.0f}% da área com produtividade baixa (média {med_baixa:.1f}). Ações: "
-                        f"(1) Coleta de solo detalhada por zona; "
-                        f"(2) Investigar compactação com penetrômetro; "
-                        f"(3) Verificar drenagem e histórico de doenças; "
-                        f"(4) Aumentar dose de P e K em ≈30%; "
-                        f"(5) Considerar calagem diferenciada se pH < 5.8."})
+    # ════════════════════════════════════════════════════════════════════════
+    # ABA 2 — PLANEJAMENTO DE SAFRAS
+    # ════════════════════════════════════════════════════════════════════════
+    with _tab_plan:
+        st.markdown("#### 🌾 Planejar Safra por Talhão")
 
-        if pct_alta > 20 and med_alta > 0:
-            recs.append({"zona":"🟢 Zona Alta","tipo":"🟢 POTENCIAL A EXPLORAR","cor":"#14532d","borda":"#22c55e",
-                "texto":f"Zona de alta produtividade ({pct_alta:.0f}% da área, média {med_alta:.1f}). "
-                        f"Mantenha adubação de reposição precisa. Priorize fungicidas preventivos. "
-                        f"Use como referência para seleção de cultivares de alto potencial."})
+        CULTURAS_INVERNO = [
+            "🌾 Trigo","🌿 Aveia Branca","🌿 Aveia Preta","🌾 Cevada","🌻 Canola",
+            "🌿 Azevém (pastagem)","🌱 Ervilhaca (cobertura)","🌱 Nabo Forrageiro (cobertura)",
+            "🌿 Mix de Cobertura (aveia+nabo+ervilhaca)","🌿 Pousio Planejado",
+        ]
+        CULTURAS_VERAO = [
+            "🌱 Soja","🌽 Milho 1ª safra","🌽 Milho 2ª safra (safrinha)",
+            "🌱 Feijão","🌻 Girassol","☕ Café","🍠 Mandioca",
+            "🌾 Sorgo","🍚 Arroz","🏷️ Algodão",
+        ]
 
-        if gap > 10:
-            ganho = gap * 0.4 * area_ha
-            recs.append({"zona":"Zonas B vs A","tipo":"📊 GAP PRODUTIVO","cor":"#78350f","borda":"#f59e0b",
-                "texto":f"Diferença de {gap:.1f} sc/ha entre zonas alta e baixa. "
-                        f"Potencial de ganho com manejo diferenciado: ≈{ganho:.0f} sacas adicionais/safra "
-                        f"elevando zona baixa em 40%."})
+        JANELAS_PLANTIO = {
+            "🌾 Trigo":         {"inicio":"Abr","fim":"Jun","colheita":"Set/Out","dias":120},
+            "🌿 Aveia Branca":  {"inicio":"Abr","fim":"Jun","colheita":"Set/Out","dias":110},
+            "🌿 Aveia Preta":   {"inicio":"Mar","fim":"Jun","colheita":"Jul/Ago","dias":90},
+            "🌾 Cevada":        {"inicio":"Mai","fim":"Jun","colheita":"Set/Out","dias":115},
+            "🌻 Canola":        {"inicio":"Abr","fim":"Mai","colheita":"Set/Out","dias":130},
+            "🌿 Azevém (pastagem)": {"inicio":"Mar","fim":"Mai","colheita":"Pastejo","dias":60},
+            "🌿 Mix de Cobertura (aveia+nabo+ervilhaca)": {"inicio":"Mar","fim":"Mai","colheita":"Dessecação","dias":90},
+            "🌱 Soja":          {"inicio":"Out","fim":"Nov","colheita":"Fev/Mar","dias":125},
+            "🌽 Milho 1ª safra":{"inicio":"Set","fim":"Nov","colheita":"Fev/Mar","dias":130},
+            "🌽 Milho 2ª safra (safrinha)": {"inicio":"Jan","fim":"Fev","colheita":"Jun/Jul","dias":120},
+            "🌱 Feijão":        {"inicio":"Out","fim":"Nov","colheita":"Jan/Fev","dias":90},
+        }
 
-        bench = {"Soja":60,"Milho":180,"Trigo":55,"Feijão":40,"Arroz":160,"Algodão":280,"Café":35}.get(cultura, 60)
-        if media < bench * 0.75:
-            recs.append({"zona":"Toda lavoura","tipo":f"📉 ABAIXO DO POTENCIAL ({cultura})","cor":"#4a044e","borda":"#a855f7",
-                "texto":f"Média {media:.1f} está {((bench-media)/bench*100):.0f}% abaixo da referência "
-                        f"regional ({bench} para {cultura}). Revisar programa completo: solo, semente, nutrição e fitossanidade."})
-        elif media >= bench:
-            recs.append({"zona":"Toda lavoura","tipo":f"🏆 ACIMA DA MÉDIA ({cultura})","cor":"#064e3b","borda":"#10b981",
-                "texto":f"Parabéns! Média {media:.1f} supera a referência de {bench} para {cultura}. "
-                        f"Documente o manejo desta safra como referência para as próximas."})
-        return recs
+        ROTACOES_RECOMENDADAS = {
+            "🌱 Soja":  {"inverno_ideal": ["🌾 Trigo","🌿 Aveia Branca","🌻 Canola"], "motivo": "Trigo/aveia após soja quebra ciclo de doenças"},
+            "🌽 Milho 1ª safra": {"inverno_ideal": ["🌿 Aveia Preta","🌿 Mix de Cobertura (aveia+nabo+ervilhaca)","🌿 Azevém (pastagem)"], "motivo": "Coberturas após milho melhoram MO"},
+            "🌾 Trigo": {"verao_ideal": ["🌱 Soja","🌽 Milho 1ª safra"], "motivo": "Soja/milho após trigo otimiza NPK"},
+            "🌿 Aveia Branca": {"verao_ideal": ["🌱 Soja","🌱 Feijão"], "motivo": "Aveia como antecedente da soja é ideal no PR/SC"},
+        }
 
-    def chamar_ia_colheita(stats, col_prod, cultura, area_ha, nome_arquivo, recs):
+        if not st.session_state.areas:
+            st.info("Cadastre áreas para planejar safras.")
+        else:
+            _area_plan = st.selectbox("Selecione o talhão",
+                [f"{a.get('ID')} - {a.get('Talhão','')} ({a.get('Cultura','?')})"
+                 for a in st.session_state.areas], key="sel_area_plan")
+            _id_plan = _area_plan.split(" - ")[0]
+            _area_obj = next((a for a in st.session_state.areas if a.get("ID") == _id_plan), {})
+
+            col_pl1, col_pl2 = st.columns(2)
+
+            with col_pl1:
+                st.markdown("""<div style='background:#1e3a5f;border-radius:10px;padding:10px 14px;
+                border-top:3px solid #38bdf8;margin-bottom:8px;'>
+                <span style='color:#38bdf8;font-weight:800;font-size:12px;letter-spacing:1px;'>
+                ❄️ SAFRA DE INVERNO</span></div>""", unsafe_allow_html=True)
+                _cult_inv = st.selectbox("Cultura de inverno", CULTURAS_INVERNO, key="sel_cult_inv")
+                _ano_inv  = st.selectbox("Ano", [2025,2026,2027], key="sel_ano_inv")
+                _area_inv = st.number_input("Área (ha)", min_value=0.0,
+                    value=float(_area_obj.get("Hectares",0)), key="num_area_inv")
+                _prod_inv = st.number_input("Meta produtividade (sc/ha)", min_value=0.0, key="num_prod_inv")
+                _obs_inv  = st.text_input("Observações", key="txt_obs_inv")
+
+            with col_pl2:
+                st.markdown("""<div style='background:#14532d;border-radius:10px;padding:10px 14px;
+                border-top:3px solid #22c55e;margin-bottom:8px;'>
+                <span style='color:#22c55e;font-weight:800;font-size:12px;letter-spacing:1px;'>
+                ☀️ SAFRA DE VERÃO</span></div>""", unsafe_allow_html=True)
+                _cult_ver = st.selectbox("Cultura de verão", CULTURAS_VERAO, key="sel_cult_ver")
+                _ano_ver  = st.selectbox("Ano", [2025,2026,2027], key="sel_ano_ver",
+                    index=[2025,2026,2027].index(min(2027, _ano_inv + (1 if _ano_inv in [2025,2026,2027] else 0))))
+                _area_ver = st.number_input("Área (ha)", min_value=0.0,
+                    value=float(_area_obj.get("Hectares",0)), key="num_area_ver")
+                _prod_ver = st.number_input("Meta produtividade (sc/ha)", min_value=0.0,
+                    value=float(_area_obj.get("Meta Produtividade",0)), key="num_prod_ver")
+                _obs_ver  = st.text_input("Observações", key="txt_obs_ver")
+
+            # Sugestão de rotação
+            _cult_ver_limpa = _cult_ver.split(" ",1)[1] if " " in _cult_ver else _cult_ver
+            _rot_rec = ROTACOES_RECOMENDADAS.get(_cult_ver)
+            if _rot_rec:
+                _inv_ideais = _rot_rec.get("inverno_ideal",[])
+                _is_ideal = _cult_inv in _inv_ideais
+                _bg_rot = "#14532d" if _is_ideal else "#78350f"
+                _brd_rot = "#22c55e" if _is_ideal else "#f59e0b"
+                _ico_rot = "✅" if _is_ideal else "⚠️"
+                st.markdown(f"""
+                <div style='background:{_bg_rot};border-radius:10px;padding:10px 16px;
+                border-left:4px solid {_brd_rot};margin:12px 0;'>
+                <span style='color:#fff;font-weight:700;font-size:12px;'>
+                {_ico_rot} Rotação: {_rot_rec.get('motivo','')}</span><br>
+                <span style='color:rgba(255,255,255,0.6);font-size:11px;'>
+                Inverno ideal após {_cult_ver}: {", ".join(_inv_ideais[:3])}
+                </span></div>""", unsafe_allow_html=True)
+
+            # Janela de plantio
+            _jan_inv = JANELAS_PLANTIO.get(_cult_inv)
+            _jan_ver = JANELAS_PLANTIO.get(_cult_ver)
+            if _jan_inv or _jan_ver:
+                st.markdown("**📅 Janelas de Plantio — Sul do Brasil (PR/SC/RS)**")
+                _jc1, _jc2 = st.columns(2)
+                if _jan_inv:
+                    _jc1.markdown(f"""
+                    <div style='background:#1e3a5f;border-radius:8px;padding:10px;
+                    border-left:3px solid #38bdf8;font-size:12px;'>
+                    <b style='color:#38bdf8;'>❄️ {_cult_inv}</b><br>
+                    🗓️ Plantio: {_jan_inv['inicio']} a {_jan_inv['fim']}<br>
+                    🌾 Colheita: {_jan_inv['colheita']}<br>
+                    ⏱️ Ciclo: ~{_jan_inv['dias']} dias
+                    </div>""", unsafe_allow_html=True)
+                if _jan_ver:
+                    _jc2.markdown(f"""
+                    <div style='background:#14532d;border-radius:8px;padding:10px;
+                    border-left:3px solid #22c55e;font-size:12px;'>
+                    <b style='color:#22c55e;'>☀️ {_cult_ver}</b><br>
+                    🗓️ Plantio: {_jan_ver['inicio']} a {_jan_ver['fim']}<br>
+                    🌾 Colheita: {_jan_ver['colheita']}<br>
+                    ⏱️ Ciclo: ~{_jan_ver['dias']} dias
+                    </div>""", unsafe_allow_html=True)
+
+            if st.button("💾 Salvar Planejamento", key="btn_salvar_plan",
+                         use_container_width=True, type="primary"):
+                _plan_entry = {
+                    "id_area": _id_plan, "talhao": _area_obj.get("Talhão",""),
+                    "inverno": {"cultura": _cult_inv, "ano": _ano_inv, "area": _area_inv,
+                                "meta": _prod_inv, "obs": _obs_inv},
+                    "verao":   {"cultura": _cult_ver, "ano": _ano_ver, "area": _area_ver,
+                                "meta": _prod_ver, "obs": _obs_ver},
+                    "data_planejamento": str(_date_cal.today()),
+                }
+                # Remove planejamento anterior do mesmo talhão+ano e insere novo
+                st.session_state.planejamento_safras = [
+                    p for p in st.session_state.planejamento_safras
+                    if not (p.get("id_area") == _id_plan and
+                            p.get("inverno",{}).get("ano") == _ano_inv)
+                ]
+                st.session_state.planejamento_safras.append(_plan_entry)
+
+                # Gera eventos automáticos no calendário
+                if _jan_inv:
+                    _mes_inicio = {"Jan":1,"Fev":2,"Mar":3,"Abr":4,"Mai":5,"Jun":6,
+                                    "Jul":7,"Ago":8,"Set":9,"Out":10,"Nov":11,"Dez":12}
+                    _m_ini = _mes_inicio.get(_jan_inv["inicio"],4)
+                    from datetime import date as _d2
+                    _data_plant_inv = _d2(_ano_inv, _m_ini, 1)
+                    st.session_state.calendario_eventos.append({
+                        "Título": f"Plantio {_cult_inv} — {_area_obj.get('Talhão','')}",
+                        "Data": str(_data_plant_inv),
+                        "Tipo": "🌱 Plantio",
+                        "Área": f"{_id_plan} - {_area_obj.get('Talhão','')}",
+                        "Obs": f"Meta: {_prod_inv} sc/ha. {_obs_inv}",
+                        "Alerta": True, "Concluído": False,
+                    })
+
+                salvar_dados_iaagro()
+                success_box(f"✅ Planejamento salvo! Evento de plantio criado no calendário.")
+                st.rerun()
+
+        # Histórico de planejamentos
+        if st.session_state.planejamento_safras:
+            st.markdown("---")
+            st.markdown("#### 📋 Planejamentos Salvos")
+            for _idx_p, _plan in enumerate(st.session_state.planejamento_safras):
+                _c1_p, _c2_p = st.columns([5,1])
+                with _c1_p:
+                    st.markdown(f"""
+                    <div style='background:#0f2d4a;border-radius:10px;padding:12px 16px;
+                    border-left:3px solid #22c55e;margin:4px 0;'>
+                    <span style='color:#6ee7b7;font-weight:700;'>
+                    🌾 {_plan.get('talhao','')} — {_plan.get('inverno',{}).get('ano','')}
+                    </span><br>
+                    <span style='color:#94a3b8;font-size:12px;'>
+                    ❄️ {_plan.get('inverno',{}).get('cultura','')} &nbsp;→&nbsp;
+                    ☀️ {_plan.get('verao',{}).get('cultura','')}
+                    </span>
+                    </div>""", unsafe_allow_html=True)
+                if _c2_p.button("🗑️", key=f"del_plan_{_idx_p}"):
+                    st.session_state.planejamento_safras.pop(_idx_p)
+                    salvar_dados_iaagro()
+                    st.rerun()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # ABA 3 — ROTAÇÃO DE CULTURAS
+    # ════════════════════════════════════════════════════════════════════════
+    with _tab_rot:
+        st.markdown("#### 🔄 Mapa de Rotação por Talhão")
+
+        if not st.session_state.planejamento_safras:
+            st.markdown("""
+            <div style='background:#0f3460;border-radius:12px;padding:24px;text-align:center;
+            border:2px dashed #1e4976;'>
+            <div style='font-size:40px;'>🔄</div>
+            <div style='color:#94a3b8;margin-top:8px;'>
+            Salve planejamentos na aba <b style='color:#6ee7b7;'>🌾 Planejamento de Safras</b>
+            para ver o mapa de rotação.
+            </div></div>""", unsafe_allow_html=True)
+        else:
+            # Agrupa por talhão
+            _by_talhao = {}
+            for _p in st.session_state.planejamento_safras:
+                _t = _p.get("talhao","")
+                if _t not in _by_talhao:
+                    _by_talhao[_t] = []
+                _by_talhao[_t].append(_p)
+
+            for _tal, _plans in _by_talhao.items():
+                st.markdown(f"**🌾 Talhão: {_tal}**")
+                _cols_rot = st.columns(min(len(_plans), 4))
+                for _ci, _p in enumerate(_plans):
+                    with _cols_rot[_ci % 4]:
+                        _inv_c = _p.get("inverno",{}).get("cultura","—")
+                        _ver_c = _p.get("verao",{}).get("cultura","—")
+                        _ano_c = _p.get("inverno",{}).get("ano","")
+                        st.markdown(f"""
+                        <div style='background:#0f2d4a;border-radius:12px;padding:14px;
+                        text-align:center;border:1px solid #1e4976;margin:2px;'>
+                        <div style='color:#94a3b8;font-size:11px;font-weight:700;
+                        letter-spacing:1px;margin-bottom:8px;'>SAFRA {_ano_c}</div>
+                        <div style='background:#1e3a5f;border-radius:8px;padding:8px;
+                        margin-bottom:6px;'>
+                        <div style='color:#38bdf8;font-size:10px;font-weight:700;'>❄️ INVERNO</div>
+                        <div style='color:#f1f5f9;font-size:12px;font-weight:600;margin-top:2px;'>{_inv_c}</div>
+                        </div>
+                        <div style='color:#64748b;font-size:18px;'>↓</div>
+                        <div style='background:#14532d;border-radius:8px;padding:8px;margin-top:6px;'>
+                        <div style='color:#22c55e;font-size:10px;font-weight:700;'>☀️ VERÃO</div>
+                        <div style='color:#f1f5f9;font-size:12px;font-weight:600;margin-top:2px;'>{_ver_c}</div>
+                        </div></div>""", unsafe_allow_html=True)
+
+            # Regras de rotação (EMBRAPA)
+            st.markdown("---")
+            st.markdown("#### 📚 Boas Práticas de Rotação — EMBRAPA Sul")
+            _regras = [
+                ("✅","Soja → Trigo/Aveia → Soja","Rotação clássica do PR/SC/RS. Quebra ciclo de Sclerotinia e ferrugem."),
+                ("✅","Milho → Aveia/Mix Cobertura → Soja","Milho melhora estrutura; cobertura repõe MO; soja fixa N."),
+                ("✅","Soja → Canola → Soja","Canola quebra ciclo de nematoides e melhora P disponível."),
+                ("⚠️","Soja → Soja (monocultura)","Aumenta SCN, ferrugem e podridão radicular. Evitar >2 anos."),
+                ("⚠️","Trigo → Trigo","Aumenta brusone e manchas foliares. Máximo 2 anos seguidos."),
+                ("❌","Soja → Feijão → Soja","Ambas leguminosas. Amplifica patógenos de solo comuns."),
+            ]
+            for _ico_r, _rot_r, _desc_r in _regras:
+                _bg_r = "#14532d" if _ico_r == "✅" else ("#78350f" if _ico_r == "⚠️" else "#7f1d1d")
+                _bd_r = "#22c55e" if _ico_r == "✅" else ("#f59e0b" if _ico_r == "⚠️" else "#ef4444")
+                st.markdown(f"""
+                <div style='background:{_bg_r};border-radius:8px;padding:8px 14px;
+                border-left:3px solid {_bd_r};margin:3px 0;'>
+                <span style='color:#fff;font-weight:700;font-size:12px;'>{_ico_r} {_rot_r}</span><br>
+                <span style='color:rgba(255,255,255,0.6);font-size:11px;'>{_desc_r}</span>
+                </div>""", unsafe_allow_html=True)
+
+if menu == "🌍 Inteligência":
+  with _sub_int[4]:
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🤖 Assistente IA Agrícola</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Especialista em agricultura brasileira — EMBRAPA, CQFS RS/SC, manejo integrado
+    </p></div>""", unsafe_allow_html=True)
+
+    if "assistente_hist" not in st.session_state:
+        st.session_state.assistente_hist = []
+
+    # Contexto rico da propriedade
+    _d_ia  = st.session_state.dados
+    _areas_ctx = ""
+    if st.session_state.areas:
+        _areas_ctx = "; ".join([
+            f"{a.get('Talhão','?')} {a.get('Hectares',0)}ha {a.get('Cultura','?')}"
+            for a in st.session_state.areas[:3]
+        ])
+    _ctx_ia = (
+        f"Segmento: {st.session_state.get('segmento','Grãos')}. "
+        f"Propriedade: {_areas_ctx or 'não cadastrada'}. "
+        f"Região: Sul do Brasil (PR/SC/RS). "
+        f"Plano: {st.session_state.get('plano','free')}."
+    )
+
+    # Busca API key de forma robusta
+    import os as _os_ia
+    _api_key_ia = ""
+    try:
+        _api_key_ia = st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass
+    if not _api_key_ia:
         try:
-            resumo_rec = "\n".join([f"- {r['tipo']} ({r['zona']}): {r['texto'][:100]}..." for r in recs])
-            prompt = f"""Você é um agrônomo especialista em agricultura de precisão analisando um mapa de colheita do app IAAgro.
-
-DADOS:
-- Arquivo: {nome_arquivo} | Cultura: {cultura} | Área: {area_ha} ha | Pontos: {stats['total_pts']}
-
-ESTATÍSTICAS:
-- Média: {stats['media']:.1f} sc/ha | Mediana: {stats['mediana']:.1f}
-- Mínimo: {stats['minimo']:.1f} | Máximo: {stats['maximo']:.1f}
-- Desvio padrão: {stats['desvio']:.1f} | CV: {stats['cv']:.1f}%
-- Zona Baixa: {stats.get('pct_🔴 Baixa',0):.0f}% da área (média {stats.get('med_🔴 Baixa',0):.1f})
-- Zona Média: {stats.get('pct_🟡 Média',0):.0f}% da área (média {stats.get('med_🟡 Média',0):.1f})
-- Zona Alta:  {stats.get('pct_🟢 Alta',0):.0f}% da área (média {stats.get('med_🟢 Alta',0):.1f})
-
-RECOMENDAÇÕES AUTOMÁTICAS:
-{resumo_rec}
-
-Gere um laudo agronômico profissional com:
-1. DIAGNÓSTICO GERAL (2-3 frases sobre desempenho da lavoura)
-2. ANÁLISE DA VARIABILIDADE ESPACIAL (interprete o CV e causas prováveis)
-3. PRIORIDADES DE MANEJO (top 3 ações para próxima safra)
-4. PROJEÇÃO DE GANHO (o que é possível alcançar com manejo diferenciado)
-5. NOTA DO TALHÃO (0-100 com justificativa breve)
-
-Seja direto, técnico e acessível ao produtor rural brasileiro. Máximo 350 palavras."""
-            resp = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"Content-Type":"application/json"},
-                json={"model":"claude-sonnet-4-20250514","max_tokens":900,
-                      "messages":[{"role":"user","content":prompt}]},
-                timeout=35
-            )
-            if resp.status_code == 200:
-                return resp.json()["content"][0]["text"]
+            _api_key_ia = st.secrets.get("ANTHROPIC_API_KEY", "")
         except Exception:
             pass
-        return None
+    if not _api_key_ia:
+        _api_key_ia = _os_ia.environ.get("ANTHROPIC_API_KEY", "")
 
-    # ══ UPLOAD ═══════════════════════════════════════════════════════════
-    st.subheader("📂 Carregar Mapa de Colheita")
-    col_up1, col_up2 = st.columns([2,1])
-    with col_up1:
-        arquivo = st.file_uploader(
-            "Selecione o arquivo",
-            type=["csv","xlsx","xls","geojson","json","zip"],
-            help="CSV/Excel: John Deere Ops Center, Climate, AFS Connect | GeoJSON/Shapefile ZIP"
+    if not _api_key_ia or len(_api_key_ia) < 20:
+        st.warning("⚠️ Chave API não configurada. Adicione ANTHROPIC_API_KEY nos secrets do Streamlit.")
+    else:
+        # Histórico de mensagens
+        for msg in st.session_state.assistente_hist:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo...")
+
+        if _prompt_ia:
+            st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
+            with st.chat_message("user"):
+                st.markdown(_prompt_ia)
+            with st.chat_message("assistant"):
+                with st.spinner("🌾 Consultando especialista agrícola..."):
+                    try:
+                        import requests as _rq_ia
+                        # Monta histórico limitado a 10 mensagens para não exceder tokens
+                        _msgs_ia = [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in st.session_state.assistente_hist[-10:]
+                        ]
+                        _system_ia = (
+                            "Você é um agrônomo especialista brasileiro com foco no Sul do Brasil (PR, SC, RS). "
+                            "Responda SEMPRE em português, de forma prática e objetiva para produtores rurais. "
+                            "Use dados da EMBRAPA, CQFS RS/SC, IAPAR e boas práticas agronômicas. "
+                            "Para recomendações de adubação, siga as tabelas CQFS RS/SC 2016. "
+                            "Para defensivos, cite apenas produtos registrados no MAPA. "
+                            "Seja direto: dê doses, épocas e práticas concretas. "
+                            f"Contexto da propriedade: {_ctx_ia}"
+                        )
+                        _resp_ia = _rq_ia.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "x-api-key":         _api_key_ia,
+                                "anthropic-version": "2023-06-01",
+                                "content-type":      "application/json",
+                            },
+                            json={
+                                "model":      "claude-sonnet-4-6",
+                                "max_tokens": 1024,
+                                "system":     _system_ia,
+                                "messages":   _msgs_ia,
+                            },
+                            timeout=45,
+                        )
+                        if _resp_ia.status_code == 200:
+                            _data_ia = _resp_ia.json()
+                            _ans = (_data_ia.get("content") or [{}])[0].get("text","")
+                            if _ans:
+                                st.markdown(_ans)
+                                st.session_state.assistente_hist.append(
+                                    {"role":"assistant","content":_ans})
+                            else:
+                                st.error("Resposta vazia da API.")
+                        elif _resp_ia.status_code == 401:
+                            st.error("❌ Chave API inválida ou expirada. Verifique ANTHROPIC_API_KEY.")
+                        elif _resp_ia.status_code == 429:
+                            st.warning("⏳ Limite de requisições. Aguarde alguns segundos e tente novamente.")
+                        else:
+                            st.error(f"Erro na API: HTTP {_resp_ia.status_code}")
+                    except Exception as _e_ia:
+                        st.error(f"Erro de conexão: {str(_e_ia)[:120]}")
+
+    if st.session_state.assistente_hist:
+        st.markdown("---")
+        _btn_col1, _btn_col2, _btn_col3 = st.columns(3)
+
+        # Exportar como TXT
+        _conv_txt = ""
+        for _m in st.session_state.assistente_hist:
+            _role = "👨‍🌾 Você" if _m["role"] == "user" else "🤖 IAAgro IA"
+            _conv_txt += f"{_role}:\n{_m['content']}\n\n{'─'*50}\n\n"
+        _btn_col1.download_button(
+            "📥 Exportar TXT", _conv_txt.encode("utf-8"),
+            "conversa_iaagro.txt", "text/plain",
+            key="btn_exp_conv_txt", use_container_width=True
         )
-    with col_up2:
-        cultura_mapa = st.selectbox("Cultura", ["Soja","Milho","Trigo","Feijão","Algodão","Arroz","Canola","Café","Outro"], key="cultura_mapa_sel")
-        area_mapa    = st.number_input("Área (ha)", min_value=0.1, value=float(st.session_state.dados.get("area",50.0)), key="area_mapa_num")
 
-    if arquivo is not None and arquivo.name != st.session_state.harvest_arquivo:
-        st.session_state.harvest_arquivo = arquivo.name
-        st.session_state.harvest_df      = None
-        st.session_state.harvest_analise = None
-        with st.spinner(f"⏳ Lendo {arquivo.name}..."):
-            try:
-                nome  = arquivo.name.lower()
-                df_raw = None
-                if nome.endswith(".csv"):
-                    conteudo = arquivo.read().decode("utf-8", errors="replace")
-                    arquivo.seek(0)
-                    sep = ";" if conteudo.count(";") > conteudo.count(",") else ","
-                    df_raw = pd.read_csv(arquivo, sep=sep, encoding="utf-8", on_bad_lines="skip")
-                elif nome.endswith((".xlsx",".xls")):
-                    df_raw = pd.read_excel(arquivo)
-                elif nome.endswith((".geojson",".json")):
-                    if GEO_OK:
-                        import geopandas as gpd
-                        gdf    = gpd.read_file(arquivo)
-                        df_raw = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                        try:
-                            df_raw["latitude"]  = gdf.geometry.centroid.y
-                            df_raw["longitude"] = gdf.geometry.centroid.x
-                        except Exception: pass
-                    else:
-                        dados_geo = json.load(arquivo)
-                        rows = []
-                        for feat in dados_geo.get("features",[]):
-                            row = feat.get("properties",{}).copy()
-                            geom = feat.get("geometry",{})
-                            if geom.get("type") == "Point":
-                                row["longitude"] = geom["coordinates"][0]
-                                row["latitude"]  = geom["coordinates"][1]
-                            rows.append(row)
-                        df_raw = pd.DataFrame(rows)
-                elif nome.endswith(".zip") and GEO_OK:
-                    import geopandas as gpd, zipfile, tempfile
-                    with zipfile.ZipFile(arquivo) as zf:
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            zf.extractall(tmpdir)
-                            shps = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-                            if shps:
-                                gdf    = gpd.read_file(os.path.join(tmpdir, shps[0]))
-                                df_raw = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                                try:
-                                    df_raw["latitude"]  = gdf.geometry.centroid.y
-                                    df_raw["longitude"] = gdf.geometry.centroid.x
-                                except Exception: pass
-                elif nome.endswith(".zip"):
-                    st.markdown('''<div style="background:#78350f;color:#fff;padding:12px 18px;border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">⚠️ Para Shapefile: pip install geopandas</div>''', unsafe_allow_html=True)
+        # Exportar como PDF simples (texto)
+        import json as _json_conv
+        _conv_json = _json_conv.dumps(st.session_state.assistente_hist,
+                                       ensure_ascii=False, indent=2).encode("utf-8")
+        _btn_col2.download_button(
+            "📋 Exportar JSON", _conv_json,
+            "conversa_iaagro.json", "application/json",
+            key="btn_exp_conv_json", use_container_width=True
+        )
 
-                if df_raw is not None and len(df_raw) > 0:
-                    st.session_state.harvest_df = df_raw
-                    success_box(f"✅ {arquivo.name} — {len(df_raw):,} pontos carregados")
-                else:
-                    error_box("Não foi possível ler. Verifique o formato.")
-            except Exception as e:
-                error_box(f"Erro: {e}")
-
-    # ══ CONFIGURAR E ANALISAR ════════════════════════════════════════════
-    if st.session_state.harvest_df is not None:
-        df = st.session_state.harvest_df.copy()
-        st.divider()
-        st.subheader("⚙️ Configurar Análise")
-
-        col_prod_auto = detectar_coluna_produtividade(df.columns.tolist())
-        lat_auto, lon_auto = detectar_colunas_geo(df.columns.tolist())
-
-        cc1, cc2, cc3 = st.columns(3)
-        with cc1:
-            col_prod = st.selectbox("Coluna de Produtividade", df.columns.tolist(),
-                index=df.columns.tolist().index(col_prod_auto) if col_prod_auto in df.columns else 0, key="col_prod_sel")
-        with cc2:
-            col_lat = st.selectbox("Coluna de Latitude", ["(nenhuma)"]+df.columns.tolist(),
-                index=(["(nenhuma)"]+df.columns.tolist()).index(lat_auto) if lat_auto in df.columns else 0, key="col_lat_sel")
-        with cc3:
-            col_lon = st.selectbox("Coluna de Longitude", ["(nenhuma)"]+df.columns.tolist(),
-                index=(["(nenhuma)"]+df.columns.tolist()).index(lon_auto) if lon_auto in df.columns else 0, key="col_lon_sel")
-
-        cc4, cc5 = st.columns(2)
-        with cc4:
-            unidade = st.selectbox("Unidade", ["sc/ha (sacas)","t/ha (toneladas)","kg/ha","bu/ac"], key="unid_sel")
-        with cc5:
-            st.checkbox("Remover outliers automático (±3σ)", value=True, key="filtro_out")
-
-        df[col_prod] = pd.to_numeric(df[col_prod], errors="coerce")
-        df = df.dropna(subset=[col_prod])
-        df = df[df[col_prod] > 0]
-        if NUMPY_OK and st.session_state.get("filtro_out", True):
-            import numpy as np
-            mu, sigma = df[col_prod].mean(), df[col_prod].std()
-            df = df[abs(df[col_prod] - mu) <= 3 * sigma]
-
-        st.markdown(f'<div style="background:#0f3460;color:#93c5fd;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700;">'
-                    f'📊 {len(df):,} pontos válidos após filtro | Faixa: {df[col_prod].min():.1f} – {df[col_prod].max():.1f} | Média prévia: {df[col_prod].mean():.1f}</div>',
-                    unsafe_allow_html=True)
-
-        if st.button("🚀 Analisar Mapa com IA", use_container_width=True, key="btn_analisar"):
-            with st.spinner("🤖 Processando... gerando zonas, gráficos e laudo IA..."):
-                df_z, p33, p66 = zonear_produtividade(df, col_prod)
-                stats           = calcular_estatisticas(df_z, col_prod)
-                recs            = gerar_recomendacoes(stats, col_prod, cultura_mapa, area_mapa)
-                laudo_ia        = chamar_ia_colheita(stats, col_prod, cultura_mapa, area_mapa,
-                                                     st.session_state.harvest_arquivo, recs)
-
-                has_geo = (col_lat != "(nenhuma)" and col_lon != "(nenhuma)"
-                           and col_lat in df_z.columns and col_lon in df_z.columns)
-                if has_geo:
-                    df_z[col_lat] = pd.to_numeric(df_z[col_lat], errors="coerce")
-                    df_z[col_lon] = pd.to_numeric(df_z[col_lon], errors="coerce")
-                    df_z = df_z.dropna(subset=[col_lat, col_lon])
-
-                st.session_state.harvest_analise = {
-                    "df":df_z,"stats":stats,"recs":recs,"laudo_ia":laudo_ia,
-                    "col_prod":col_prod,"col_lat":col_lat if has_geo else None,
-                    "col_lon":col_lon if has_geo else None,"has_geo":has_geo,
-                    "p33":p33,"p66":p66,"unidade":unidade,"cultura":cultura_mapa,
-                    "area_ha":area_mapa,"arquivo":st.session_state.harvest_arquivo,"data":str(date.today()),
-                }
-                st.session_state.harvest_historico.append({
-                    "arquivo":st.session_state.harvest_arquivo,"data":str(date.today()),
-                    "cultura":cultura_mapa,"area_ha":area_mapa,
-                    "media":round(stats["media"],1),"cv":round(stats["cv"],1),"pontos":stats["total_pts"],
-                })
-                salvar_dados_iaagro()
-            success_box("✅ Análise concluída!")
+        if _btn_col3.button("🗑️ Limpar conversa", key="btn_limpar_assistente",
+                            use_container_width=True):
+            st.session_state.assistente_hist = []
             st.rerun()
 
-    # ══ RESULTADOS ═══════════════════════════════════════════════════════
-    if st.session_state.harvest_analise:
-        an       = st.session_state.harvest_analise
-        df_z     = an["df"]
-        stats    = an["stats"]
-        recs     = an["recs"]
-        col_prod = an["col_prod"]
-        unid     = an["unidade"].split()[0]
-
+# ─────────────────────────────────────────────
+# MENU: SAFRINHA
+# ─────────────────────────────────────────────
+elif menu == "🌱 Safrinha":
+    st.header("🌱 Safrinha")
+    if "safrinha_registros" not in st.session_state:
+        st.session_state.safrinha_registros = []
+    ROTACOES = {
+        "Milho → Feijão":  {"1a":"Milho","2a":"Feijão","janela":"Set–Jan / Fev–Mai"},
+        "Milho → Soja":    {"1a":"Milho","2a":"Soja",  "janela":"Set–Jan / Out–Mar"},
+        "Soja → Feijão":   {"1a":"Soja", "2a":"Feijão","janela":"Out–Jan / Fev–Mai"},
+        "Feijão → Soja":   {"1a":"Feijão","2a":"Soja", "janela":"Jan–Abr / Out–Mar"},
+        "Feijão → Milho":  {"1a":"Feijão","2a":"Milho","janela":"Jan–Abr / Abr–Ago"},
+        "Soja → Milho":    {"1a":"Soja", "2a":"Milho", "janela":"Out–Jan / Fev–Jun"},
+    }
+    rot_sel = st.selectbox("🔄 Rotação de culturas", list(ROTACOES.keys()), key="safrinha_rotacao_sel")
+    rot_info = ROTACOES[rot_sel]
+    if rot_info["janela"]:
+        st.caption(f"📅 Janela de plantio: {rot_info['janela']}")
+    col_sf1, col_sf2 = st.columns(2)
+    if st.session_state.areas:
+        _lista_sf = [f"{a['ID']} — {a.get('Talhão','?')}" for a in st.session_state.areas]
+        area_sf   = col_sf1.selectbox("Área", _lista_sf, key="sf_area")
+        _id_sf    = area_sf.split(" — ")[0]
+    else:
+        st.warning("Cadastre uma área primeiro."); _id_sf = ""
+    safra_sf  = col_sf2.text_input("Safra", placeholder="2024/2025", key="sf_safra")
+    col_sf3, col_sf4, col_sf5 = st.columns(3)
+    data_plantio_sf = col_sf3.date_input("Data de plantio", key="sf_data")
+    area_ha_sf      = col_sf4.number_input("Área (ha)", min_value=0.0, key="sf_area_ha")
+    prod_esp_sf     = col_sf5.number_input("Produtividade esperada (sc/ha)", min_value=0.0, key="sf_prod")
+    obs_sf          = st.text_area("Observações", key="sf_obs", height=80)
+    if st.button("💾 Salvar Safrinha", key="btn_salvar_safrinha", use_container_width=True):
+        if _id_sf:
+            st.session_state.safrinha_registros.append({
+                "Rotação": rot_sel, "1ª Cultura": rot_info["1a"], "2ª Cultura": rot_info["2a"],
+                "Área ID": _id_sf, "Safra": safra_sf, "Data Plantio": str(data_plantio_sf),
+                "Área ha": area_ha_sf, "Produtividade Esperada": prod_esp_sf, "Obs": obs_sf,
+            })
+            salvar_dados_iaagro()
+            success_box(f"✅ Safrinha {rot_sel} registrada!")
+        else:
+            warning_box("Selecione uma área.")
+    if st.session_state.safrinha_registros:
+        import pandas as pd
         st.divider()
-        st.subheader(f"📊 {an['arquivo']} | {an['cultura']} | {an['area_ha']} ha | {an['data']}")
+        st.subheader("📋 Registros de Safrinha")
+        st.dataframe(pd.DataFrame(st.session_state.safrinha_registros), use_container_width=True)
 
-        # Métricas rápidas
-        c1,c2,c3,c4,c5,c6 = st.columns(6)
-        c1.metric("🌾 Média",      f"{stats['media']:.1f}",     unid)
-        c2.metric("📊 CV",         f"{stats['cv']:.1f}%",       "variabilidade")
-        c3.metric("⬇️ Mínimo",    f"{stats['minimo']:.1f}",     unid)
-        c4.metric("⬆️ Máximo",    f"{stats['maximo']:.1f}",     unid)
-        c5.metric("🔴 Zona Baixa", f"{stats.get('pct_🔴 Baixa',0):.0f}%", "da área")
-        c6.metric("🟢 Zona Alta",  f"{stats.get('pct_🟢 Alta',0):.0f}%",  "da área")
-
-        # ── TABS ────────────────────────────────────────────────────────
-        tab_mapa, tab_graf, tab_tab, tab_ia, tab_rec = st.tabs([
-            "🗺️ Mapa Interativo","📈 Gráficos","📋 Dados","🤖 Laudo IA","📌 Recomendações"
-        ])
-
-        with tab_mapa:
-            if an["has_geo"] and PLOTLY_OK:
-                import plotly.express as px
-                df_plot = df_z.sample(min(5000,len(df_z)), random_state=42) if len(df_z)>5000 else df_z
-                fig_map = px.scatter_mapbox(
-                    df_plot, lat=an["col_lat"], lon=an["col_lon"], color=col_prod,
-                    color_continuous_scale=[[0,"#dc2626"],[0.4,"#f59e0b"],[0.7,"#16a34a"],[1,"#065f46"]],
-                    size_max=8, zoom=13, mapbox_style="open-street-map",
-                    title=f"Mapa de Produtividade — {an['cultura']}",
-                    labels={col_prod: unid},
-                    hover_data={col_prod:":.1f", an["col_lat"]:False, an["col_lon"]:False},
-                    height=560
-                )
-                fig_map.update_layout(
-                    paper_bgcolor="#0d2137", plot_bgcolor="#0d2137", font_color="#f1f5f9",
-                    coloraxis_colorbar=dict(title=unid, tickfont=dict(color="#f1f5f9"),
-                                           titlefont=dict(color="#6ee7b7")),
-                    margin=dict(l=0,r=0,t=40,b=0)
-                )
-                st.plotly_chart(fig_map, use_container_width=True)
-                st.markdown(f'''<div style="background:#0f3460;color:#fff;padding:9px 16px;
-                border-radius:10px;font-size:12px;font-weight:700;text-align:center;">
-                🔴 Baixa: &lt; {an["p33"]:.1f} {unid} &nbsp;|&nbsp;
-                🟡 Média: {an["p33"]:.1f} – {an["p66"]:.1f} &nbsp;|&nbsp;
-                🟢 Alta: &gt; {an["p66"]:.1f} {unid}
-                </div>''', unsafe_allow_html=True)
-
-            elif an["has_geo"]:
-                lat_c = df_z[an["col_lat"]].mean()
-                lon_c = df_z[an["col_lon"]].mean()
-                mf = folium.Map(location=[lat_c, lon_c], zoom_start=13)
-                cores_z = {"🔴 Baixa":"red","🟡 Média":"orange","🟢 Alta":"green"}
-                for _, row in df_z.sample(min(2000,len(df_z)), random_state=42).iterrows():
-                    try:
-                        folium.CircleMarker([row[an["col_lat"]], row[an["col_lon"]]],
-                            radius=4, color=cores_z.get(row.get("Zona",""),"gray"),
-                            fill=True, fill_opacity=0.7,
-                            popup=f"{col_prod}: {row[col_prod]:.1f}").add_to(mf)
-                    except Exception: pass
-                st_folium(mf, width=700, height=500)
-            else:
-                info_box("Arquivo sem coordenadas geográficas — mapa indisponível. Veja os gráficos e laudo nas outras abas.")
-
-        with tab_graf:
-            if PLOTLY_OK:
-                import plotly.express as px
-                import plotly.graph_objects as go
-                g1, g2 = st.columns(2)
-                with g1:
-                    fig_h = px.histogram(df_z, x=col_prod, nbins=40, color="Zona",
-                        color_discrete_map={"🔴 Baixa":"#dc2626","🟡 Média":"#f59e0b","🟢 Alta":"#16a34a"},
-                        title="Distribuição por Zona", labels={col_prod:unid}, height=360)
-                    fig_h.update_layout(paper_bgcolor="#0f3460",plot_bgcolor="#0f3460",font_color="#f1f5f9")
-                    st.plotly_chart(fig_h, use_container_width=True)
-                with g2:
-                    zc = df_z["Zona"].value_counts().reset_index()
-                    zc.columns = ["Zona","Pontos"]
-                    fig_p = px.pie(zc, names="Zona", values="Pontos",
-                        color="Zona",
-                        color_discrete_map={"🔴 Baixa":"#dc2626","🟡 Média":"#f59e0b","🟢 Alta":"#16a34a"},
-                        title="% da Área por Zona", height=360)
-                    fig_p.update_layout(paper_bgcolor="#0f3460",font_color="#f1f5f9")
-                    st.plotly_chart(fig_p, use_container_width=True)
-                fig_b = px.box(df_z, x="Zona", y=col_prod, color="Zona",
-                    color_discrete_map={"🔴 Baixa":"#dc2626","🟡 Média":"#f59e0b","🟢 Alta":"#16a34a"},
-                    title="Box Plot por Zona de Manejo", labels={col_prod:unid}, height=380)
-                fig_b.update_layout(paper_bgcolor="#0f3460",plot_bgcolor="#0d2137",
-                                    font_color="#f1f5f9",showlegend=False,
-                                    yaxis=dict(gridcolor="#1e3a5f"))
-                st.plotly_chart(fig_b, use_container_width=True)
-            else:
-                st.bar_chart(df_z[col_prod].value_counts().sort_index())
-
-            # Tabela por zona
-            st.subheader("📊 Estatísticas por Zona")
-            zonas_tab = []
-            for z in ["🔴 Baixa","🟡 Média","🟢 Alta"]:
-                sub = df_z[df_z["Zona"]==z]
-                if len(sub) > 0:
-                    zonas_tab.append({"Zona":z,"Pontos":len(sub),
-                        "% Área":f"{len(sub)/len(df_z)*100:.1f}%",
-                        f"Média {unid}":f"{sub[col_prod].mean():.1f}",
-                        "Mín":f"{sub[col_prod].min():.1f}","Máx":f"{sub[col_prod].max():.1f}",
-                        "Desvio":f"{sub[col_prod].std():.1f}"})
-            if zonas_tab:
-                st.dataframe(pd.DataFrame(zonas_tab), use_container_width=True, hide_index=True)
-
-        with tab_tab:
-            exibir = [col_prod,"Zona"]
-            if an["col_lat"]: exibir.append(an["col_lat"])
-            if an["col_lon"]: exibir.append(an["col_lon"])
-            exibir += [c for c in df_z.columns if c not in exibir and c not in ["p33","p66"]]
-            st.dataframe(df_z[[c for c in exibir if c in df_z.columns]].head(5000),
-                         use_container_width=True)
-            st.caption(f"Exibindo até 5.000 de {len(df_z):,} pontos")
-            st.download_button("📥 Baixar CSV com zonas",
-                data=df_z.to_csv(index=False).encode("utf-8"),
-                file_name=f"colheita_zonas_{date.today()}.csv",
-                mime="text/csv", use_container_width=True)
-
-        with tab_ia:
-            st.subheader("🤖 Laudo Agronômico — Inteligência Artificial")
-            if an.get("laudo_ia"):
-                st.markdown(f'''<div style="background:#0f3460;color:#f1f5f9;padding:22px 26px;
-                border-radius:14px;border-left:5px solid #6ee7b7;
-                font-size:14px;line-height:2;white-space:pre-wrap;font-weight:500;">
-{an["laudo_ia"]}
-                </div>''', unsafe_allow_html=True)
-                st.divider()
-                if st.button("🖨️ Gerar PDF do Laudo", key="btn_pdf_col", use_container_width=True):
-                    try:
-                        from reportlab.lib.units import cm
-                        buf_pdf = BytesIO()
-                        doc_p   = SimpleDocTemplate(buf_pdf, pagesize=A4,
-                                                    rightMargin=2*cm,leftMargin=2*cm,
-                                                    topMargin=2*cm,bottomMargin=2*cm)
-                        sty = getSampleStyleSheet()
-                        el  = []
-                        if os.path.exists("IAAgrologo.jpeg"):
-                            el.append(Image("IAAgrologo.jpeg", width=3*cm, height=1.5*cm))
-                        el.append(Spacer(1,8))
-                        el.append(Paragraph("<b>LAUDO DE MAPA DE COLHEITA — IAAgro IA</b>", sty["Title"]))
-                        el.append(Paragraph(f"Arquivo: {an['arquivo']} | Cultura: {an['cultura']} | Área: {an['area_ha']} ha | Data: {an['data']}", sty["Normal"]))
-                        el.append(Spacer(1,12))
-                        tab_data = [["Métrica","Valor"],
-                            ["Média", f"{stats['media']:.1f} {unid}"],
-                            ["Mínimo/Máximo", f"{stats['minimo']:.1f} / {stats['maximo']:.1f}"],
-                            ["Desvio Padrão", f"{stats['desvio']:.1f}"],
-                            ["Coef. Variação", f"{stats['cv']:.1f}%"],
-                            ["Pontos", f"{stats['total_pts']:,}"],
-                            ["Zona Baixa", f"{stats.get('pct_🔴 Baixa',0):.0f}% — {stats.get('med_🔴 Baixa',0):.1f} {unid}"],
-                            ["Zona Média",  f"{stats.get('pct_🟡 Média',0):.0f}% — {stats.get('med_🟡 Média',0):.1f} {unid}"],
-                            ["Zona Alta",   f"{stats.get('pct_🟢 Alta',0):.0f}% — {stats.get('med_🟢 Alta',0):.1f} {unid}"],
-                        ]
-                        t_e = Table(tab_data, colWidths=[7*cm,9*cm])
-                        t_e.setStyle(TableStyle([
-                            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0f3460")),
-                            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-                            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-                            ("FONTNAME",(0,1),(-1,-1),"Helvetica"),
-                            ("FONTSIZE",(0,0),(-1,-1),10),
-                            ("GRID",(0,0),(-1,-1),0.5,colors.grey),
-                            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#f0f9ff")]),
-                        ]))
-                        el.append(t_e)
-                        el.append(Spacer(1,14))
-                        el.append(Paragraph("<b>LAUDO AGRONÔMICO IA</b>", sty["Heading2"]))
-                        el.append(Spacer(1,6))
-                        for linha in an["laudo_ia"].split("\n"):
-                            if linha.strip():
-                                el.append(Paragraph(linha, sty["BodyText"]))
-                                el.append(Spacer(1,3))
-                        el.append(Spacer(1,12))
-                        el.append(Paragraph("<b>RECOMENDAÇÕES DE MANEJO</b>", sty["Heading2"]))
-                        el.append(Spacer(1,6))
-                        for r in recs:
-                            el.append(Paragraph(f"<b>{r['tipo']} — {r['zona']}</b>", sty["Heading3"]))
-                            el.append(Paragraph(r["texto"], sty["BodyText"]))
-                            el.append(Spacer(1,8))
-                        doc_p.build(el)
-                        pdf_b = buf_pdf.getvalue()
-                        buf_pdf.close()
-                        st.download_button("📥 Baixar Laudo PDF", data=pdf_b,
-                            file_name=f"laudo_colheita_{date.today()}.pdf",
-                            mime="application/pdf", use_container_width=True)
-                    except Exception as e:
-                        error_box(f"Erro ao gerar PDF: {e}")
-            else:
-                warning_box("Laudo IA indisponível. Verifique a conexão com a internet. As recomendações automáticas estão na aba Recomendações.")
-
-        with tab_rec:
-            st.subheader("📌 Recomendações de Manejo por Zona")
-            for r in recs:
-                st.markdown(f'''<div style="background:{r["cor"]};color:#fff;padding:14px 18px;
-                border-radius:12px;border-left:6px solid {r["borda"]};
-                font-size:14px;line-height:1.9;margin:8px 0;">
-                <b>{r["tipo"]}</b> &nbsp;|&nbsp; Zona: {r["zona"]}<br>{r["texto"]}
-                </div>''', unsafe_allow_html=True)
-
-            st.divider()
-            st.subheader("🗓️ Plano de Ação — Próxima Safra")
-            acoes = [
-                ("Pré-plantio","🔬","Coletar amostras de solo por zona (mín. 1/zona)"),
-                ("Pré-plantio","📐","Delimitar zonas de manejo no GPS do trator"),
-                ("Plantio","🌱","Aplicar taxa variável de P e K por zona"),
-                ("V3–V4","💊","Monitorar desenvolvimento por zona com fotos georeferenciadas"),
-                ("Floração","🚁","NDVI por drone ou satélite para correlacionar com mapa"),
-                ("Colheita","📡","Ativar monitor de produtividade para novo mapa"),
-                ("Pós-colheita","📊","Comparar este mapa com o anterior no IAAgro"),
-            ]
-            st.dataframe(pd.DataFrame(acoes, columns=["Momento","","Ação"]),
-                         use_container_width=True, hide_index=True)
-
-    # ══ HISTÓRICO DE MAPAS ════════════════════════════════════════════════
-    if st.session_state.harvest_historico:
-        st.divider()
-        st.subheader("📁 Histórico de Mapas Analisados")
-        df_hist_m = pd.DataFrame(st.session_state.harvest_historico)
-        st.dataframe(df_hist_m, use_container_width=True, hide_index=True)
-        if len(st.session_state.harvest_historico) >= 2 and PLOTLY_OK:
-            import plotly.graph_objects as go
-            fig_ev = go.Figure()
-            fig_ev.add_trace(go.Scatter(
-                x=[h["arquivo"] for h in st.session_state.harvest_historico],
-                y=[h["media"]   for h in st.session_state.harvest_historico],
-                mode="lines+markers+text",
-                text=[f"{h['media']:.1f}" for h in st.session_state.harvest_historico],
-                textposition="top center",
-                line=dict(color="#22c55e", width=3),
-                marker=dict(size=10, color="#6ee7b7"),
-            ))
-            fig_ev.update_layout(
-                title="Evolução da Produtividade Média entre Safras",
-                paper_bgcolor="#0f3460", plot_bgcolor="#0d2137",
-                font_color="#f1f5f9", xaxis_title="Mapa/Safra",
-                yaxis_title="Média sc/ha", height=300
-            )
-            st.plotly_chart(fig_ev, use_container_width=True)
 # ─────────────────────────────────────────────
 elif menu == "⚙️ Configurações":
     st.header("⚙️ Configurações do Sistema")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab0, tab_planos, tab1, tab2, tab3, tab4 = st.tabs([
+        "🌾 Meu Segmento",
+        "💳 Planos & Preços",
         "💾 Backup & Restore",
         "📧 Email & Alertas",
         "📊 Histórico do Solo",
         "📤 Exportar Excel"
     ])
+
+    with tab_planos:
+        st.subheader("💳 Planos & Preços")
+        _plano_atual = st.session_state.get("sb_plano", "free")
+
+        cols = st.columns(3)
+        for idx, (key, plano) in enumerate(PLANOS.items()):
+            with cols[idx]:
+                is_atual   = key == _plano_atual
+                cor        = plano["cor"]
+                borda      = plano["borda"]
+                nome       = plano["nome"]
+                preco      = plano["preco"]
+                borda_css  = f"border:3px solid {borda};" if is_atual else f"border:1px solid {borda};"
+                atual_txt  = "&nbsp;✅ ATUAL" if is_atual else ""
+                preco_txt  = "Grátis" if preco == 0 else f"R$ {preco:.2f}/mês"
+                rec_html   = "".join(f"✅ {r}<br>" for r in plano["recursos"])
+                bloq_html  = "".join(f"🔒 {r}<br>" for r in plano["bloqueados"])
+
+                card_html = (
+                    f"<div style='background:{cor};border-radius:14px;"
+                    f"padding:18px 14px;{borda_css}text-align:center;min-height:380px;'>"
+                    f"<div style='font-size:22px;font-weight:900;color:{borda};'>{nome}{atual_txt}</div>"
+                    f"<div style='font-size:26px;font-weight:800;color:#fff;margin:10px 0;'>{preco_txt}</div>"
+                    f"<hr style='border-color:{borda};margin:10px 0;'>"
+                    f"<div style='text-align:left;font-size:12px;color:#d1fae5;line-height:1.8;'>"
+                    f"{rec_html}{bloq_html}</div></div>"
+                )
+                st.markdown(card_html, unsafe_allow_html=True)
+
+                if not is_atual and plano["preco"] > 0:
+                    # Cada plano tem seu próprio link
+                    if key == "pro":
+                        btn_lmes = MP_LINK_PRO_MES
+                        btn_lano = MP_LINK_PRO_ANO
+                        btn_pano = round(39.90 * 12 * 0.85)
+                        btn_preco = 39.90
+                    else:  # premium
+                        btn_lmes = MP_LINK_PREMIUM_MES
+                        btn_lano = MP_LINK_PREMIUM_ANO
+                        btn_pano = round(99.90 * 12 * 0.85)
+                        btn_preco = 99.90
+                    st.link_button(
+                        f"💳 Mensal — R$ {btn_preco:.2f}/mês",
+                        btn_lmes,
+                        use_container_width=True
+                    )
+                    st.link_button(
+                        f"🏆 Anual — R$ {btn_pano} (-15%)",
+                        btn_lano,
+                        use_container_width=True
+                    )
+                    st.caption("PIX • Cartão • Boleto")
+                elif is_atual:
+                    st.markdown(f"""
+                    <div style='background:{plano["borda"]}33;border-radius:8px;padding:10px;
+                    text-align:center;margin-top:8px;color:{plano["borda"]};font-weight:700;'>
+                    ✅ Plano Ativo
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown("""
+        <div style='background:#0f3460;border-radius:10px;padding:14px 18px;border:1px solid #3b82f6;'>
+        <b style='color:#3b82f6;'>💳 Como ativar o Plano Pro ou Premium?</b><br>
+        <span style='color:#f1f5f9;font-size:13px;'>
+        1. Clique em <b>Mensal</b> ou <b>Anual</b> no plano desejado<br>
+        2. Você será redirecionado para o <b>Mercado Pago</b><br>
+        3. Pague via PIX, cartão ou boleto<br>
+        4. Seu plano é ativado <b>automaticamente</b> após confirmação<br>
+        5. Faça logout e login novamente para ver o novo plano
+        </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with tab0:
+        st.subheader("🌾 Alterar Segmento de Atuação")
+        st.info(f"Segmento atual: **{st.session_state.segmento or 'Não definido'}**")
+        SEGMENTOS_CFG = {
+            "🌾 Grãos":        "Soja, Milho, Trigo e outros cereais",
+            "🌿 Horticultura": "Hortaliças, verduras e legumes",
+            "🍎 Fruticultura": "Frutas tropicais, uva, café e outras",
+            "🌲 Silvicultura": "Eucalipto, Pinus e reflorestamento",
+        }
+        st.markdown("#### Selecione o novo segmento:")
+        for seg, desc in SEGMENTOS_CFG.items():
+            col_s1, col_s2 = st.columns([2, 5])
+            with col_s1:
+                if st.button(seg, key=f"cfg_seg_{seg}", use_container_width=True):
+                    st.session_state.segmento = seg
+                    salvar_dados_iaagro()
+                    st.success(f"✅ Segmento alterado para **{seg}**!")
+                    st.rerun()
+            with col_s2:
+                st.markdown(f"<div style='padding:10px 0;color:#94a3b8;font-size:13px;'>{desc}</div>", unsafe_allow_html=True)
 
     # ── TAB 1: BACKUP & RESTORE ──
     with tab1:
@@ -7436,19 +9339,28 @@ elif menu == "⚙️ Configurações":
         }
         </style>
         """, unsafe_allow_html=True)
-        arquivo_restore = st.file_uploader("Selecione o arquivo de backup (.json)", type=["json"])
-        if arquivo_restore:
-            if st.button("🔄 Restaurar Backup Agora", key="btn_restore"):
-                ok, msg = restaurar_backup(arquivo_restore)
+        arquivo_restore = st.file_uploader(
+            "Selecione o arquivo de backup (.json)",
+            type=["json"],
+            key="upl_backup_restore"
+        )
+
+        if arquivo_restore is not None:
+            # Lê e armazena o conteúdo no session_state imediatamente
+            conteudo_backup = arquivo_restore.read()
+            st.session_state["_backup_conteudo"] = conteudo_backup
+            st.success(f"✅ Arquivo **{arquivo_restore.name}** carregado ({len(conteudo_backup)//1024} KB)")
+
+        if st.session_state.get("_backup_conteudo"):
+            if st.button("🔄 Restaurar Backup Agora", key="btn_restore", use_container_width=True, type="primary"):
+                import io
+                ok, msg = restaurar_backup(io.BytesIO(st.session_state["_backup_conteudo"]))
                 if ok:
-                    st.markdown(f'''<div style="background:#14532d;color:#fff;padding:13px 18px;
-                    border-radius:10px;border-left:5px solid #22c55e;font-weight:600;">
-                    ✅ {msg}</div>''', unsafe_allow_html=True)
+                    st.session_state["_backup_conteudo"] = None
+                    st.success(f"✅ {msg}")
                     st.rerun()
                 else:
-                    st.markdown(f'''<div style="background:#7f1d1d;color:#fff;padding:13px 18px;
-                    border-radius:10px;border-left:5px solid #ef4444;font-weight:600;">
-                    ❌ {msg}</div>''', unsafe_allow_html=True)
+                    st.error(f"❌ {msg}")
 
         # Passo a passo
         st.divider()
@@ -7485,14 +9397,14 @@ elif menu == "⚙️ Configurações":
         cfg = st.session_state.email_config
         col1, col2 = st.columns(2)
         with col1:
-            cfg["remetente"]     = st.text_input("Email remetente (Gmail)", value=cfg.get("remetente",""))
-            cfg["senha"]         = st.text_input("Senha de app Gmail", type="password", value=cfg.get("senha",""))
+            cfg["remetente"]     = st.text_input("Email remetente (Gmail)", value=cfg.get("remetente",""), key="txt_email_remetente_8822")
+            cfg["senha"]         = st.text_input("Senha de app Gmail", type="password", value=cfg.get("senha",""), key="txt_senha_de_app_gm_8823")
         with col2:
-            cfg["email_destino"] = st.text_input("Email destino dos alertas", value=cfg.get("email_destino",""))
-            cfg["porta"]         = st.number_input("Porta SMTP", value=int(cfg.get("porta",587)), min_value=1)
+            cfg["email_destino"] = st.text_input("Email destino dos alertas", value=cfg.get("email_destino",""), key="txt_email_destino_d_8825")
+            cfg["porta"]         = st.number_input("Porta SMTP", value=int(cfg.get("porta",587)), min_value=1, key="num_porta_smtp_8826")
 
-        cfg["smtp"] = st.text_input("Servidor SMTP", value=cfg.get("smtp","smtp.gmail.com"))
-        cfg["ativo"] = st.checkbox("✅ Ativar alertas por email", value=cfg.get("ativo", False))
+        cfg["smtp"] = st.text_input("Servidor SMTP", value=cfg.get("smtp","smtp.gmail.com"), key="txt_servidor_smtp_8828")
+        cfg["ativo"] = st.checkbox("✅ Ativar alertas por email", value=cfg.get("ativo", False), key="chk___ativar_alerta_8829")
 
         col_a, col_b = st.columns(2)
         with col_a:
@@ -7527,32 +9439,17 @@ elif menu == "⚙️ Configurações":
 
     # ── TAB 3: HISTÓRICO DO SOLO ──
     with tab3:
-        st.subheader("📊 Evolução da Fertilidade do Solo")
-        if not st.session_state.areas:
-            st.markdown('''<div style="background:#1e3a5f;color:#fff;padding:13px 18px;
-            border-radius:10px;border-left:5px solid #3b82f6;font-weight:600;">
-            ℹ️ Cadastre e analise áreas para ver o histórico.</div>''', unsafe_allow_html=True)
-        else:
-            opcoes_area = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-            area_hist   = st.selectbox("Selecione a área", opcoes_area, key="hist_solo_area")
-            id_area_sel = area_hist.split(" - ")[0]
-
-            df_hist = carregar_historico_solo_db(id_area_sel)
-            if df_hist.empty:
-                st.markdown('''<div style="background:#78350f;color:#fff;padding:13px 18px;
-                border-radius:10px;border-left:5px solid #f59e0b;font-weight:600;">
-                ⚠️ Nenhuma análise salva no banco ainda. Salve uma análise na aba "Análise de Solo".</div>''',
-                unsafe_allow_html=True)
-            else:
-                st.dataframe(df_hist[["data","ph","fosforo","potassio","materia_organica",
-                                       "calcio","magnesio","nota","score","classe"]],
-                             use_container_width=True)
-                st.subheader("📈 Evolução do Score e Nota")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.line_chart(df_hist.set_index("data")[["score","nota"]])
-                with col2:
-                    st.line_chart(df_hist.set_index("data")[["ph","fosforo","potassio"]])
+        st.markdown("""
+        <div style='background:#14532d;border-radius:12px;padding:20px 24px;
+        border-left:5px solid #22c55e;text-align:center;margin:20px 0;'>
+        <div style='font-size:36px;'>📊</div>
+        <div style='color:#6ee7b7;font-size:16px;font-weight:800;margin:8px 0;'>
+        Evolução da Fertilidade do Solo</div>
+        <div style='color:#f1f5f9;font-size:13px;'>
+        Esta aba foi movida para o menu principal.<br>
+        Acesse em: <b>🧪 Solo & Adubação → 📊 Evolução da Fertilidade</b>
+        </div></div>
+        """, unsafe_allow_html=True)
 
     # ── TAB 4: EXPORTAR EXCEL ──
     with tab4:
@@ -7584,3 +9481,83 @@ elif menu == "⚙️ Configurações":
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
+
+# ── PWA — IAAgro Pro — manifest forçado via JS ────────────────────────────
+_IC192 = "data:image/png;base64,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"
+_IC512 = "data:image/png;base64,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"
+st.markdown(f"""
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="IAAgro Pro">
+<meta name="application-name" content="IAAgro Pro">
+<meta name="theme-color" content="#22c55e">
+<link rel="apple-touch-icon" sizes="192x192" href="{_IC192}">
+<link rel="apple-touch-icon" sizes="512x512" href="{_IC512}">
+<link rel="icon" type="image/png" sizes="192x192" href="{_IC192}">
+<script>
+(function forcePWA() {{
+  // Remove qualquer manifest existente
+  document.querySelectorAll('link[rel="manifest"]').forEach(el => el.remove());
+  // Cria novo manifest com ícone embutido
+  var manifest = {{
+    "name": "IAAgro Pro",
+    "short_name": "IAAgro",
+    "description": "Gestão agrícola inteligente",
+    "start_url": window.location.origin + window.location.pathname,
+    "display": "standalone",
+    "background_color": "#0d2137",
+    "theme_color": "#22c55e",
+    "orientation": "portrait-primary",
+    "icons": [
+      {{"src": "{_IC192}", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"}},
+      {{"src": "{_IC512}", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}}
+    ]
+  }};
+  var blob = new Blob([JSON.stringify(manifest)], {{type: "application/manifest+json"}});
+  var url  = URL.createObjectURL(blob);
+  var link = document.createElement("link");
+  link.rel  = "manifest";
+  link.href = url;
+  document.head.appendChild(link);
+  // Service Worker mínimo via blob
+  if ('serviceWorker' in navigator) {{
+    var swCode = 'self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>self.clients.claim());';
+    var swBlob = new Blob([swCode], {{type: "text/javascript"}});
+    var swUrl  = URL.createObjectURL(swBlob);
+    navigator.serviceWorker.register(swUrl, {{scope: "/"}}).catch(function(){{}});
+  }}
+}})();
+</script>
+""", unsafe_allow_html=True)
+
+# ── Persiste token nos query_params e sessionStorage para sobreviver reload ──
+if st.session_state.get("sb_token") and st.session_state.get("sb_user_id"):
+    _tk  = st.session_state.sb_token
+    _uid = st.session_state.sb_user_id
+    _pl  = st.session_state.get("sb_plano","free")
+    _nm  = st.session_state.get("usuario_atual","").replace(" ","_")[:20]
+    _rf  = st.session_state.get("sb_refresh_token","")
+    # Mantém query_params atualizados a cada render
+    try:
+        st.query_params["_u"]  = _uid
+        st.query_params["_p"]  = _pl
+        st.query_params["_n"]  = _nm
+        st.query_params["_t1"] = _tk[:200]
+        st.query_params["_t2"] = _tk[200:400]
+        st.query_params["_t3"] = _tk[400:]
+        if _rf:
+            st.query_params["_rf"] = _rf[:200]
+    except Exception:
+        pass
+    st.markdown(f"""
+    <script>
+    try {{
+        sessionStorage.setItem('iaagro_token',   '{_tk}');
+        sessionStorage.setItem('iaagro_uid',     '{_uid}');
+        sessionStorage.setItem('iaagro_plano',   '{_pl}');
+        sessionStorage.setItem('iaagro_usuario', '{_nm}');
+    }} catch(e) {{}}
+    </script>
+    """, unsafe_allow_html=True)
+
