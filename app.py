@@ -7466,12 +7466,69 @@ if menu == "📦 Operacional":
                     col_i2.markdown(f"**Operador:** {aplic.get('Operador','—')}")
                     col_i2.markdown(f"**Pulverizador:** {aplic.get('Pulverizador','—')}")
                     col_i2.markdown(f"**Clima:** {aplic.get('Clima aplicação','—')}")
+
+                    # ── DADOS DE PLANTIO ─────────────────────────────────────
+                    _dp_view = aplic.get("Dados Plantio", {})
+                    if _dp_view:
+                        st.markdown("---")
+                        st.markdown("**🚜 Dados de Plantio:**")
+                        _dv1, _dv2, _dv3 = st.columns(3)
+
+                        # Semente
+                        if _dp_view.get("semente") or _dp_view.get("dose_sem_ha",0) > 0:
+                            _dv1.markdown(f"""
+                            <div style='background:#14532d;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#6ee7b7;font-size:12px;'>🌱 SEMENTE</b><br>
+                            <span style='color:#f1f5f9;font-size:13px;'>{_dp_view.get('semente','—')}</span><br>
+                            <span style='color:#94a3b8;font-size:11px;'>
+                            {_dp_view.get('dose_sem_ha',0)} kg/ha · Total: {_dp_view.get('semente_total_kg',0):,.0f} kg<br>
+                            Pop: {_dp_view.get('populacao',0):,} pl/ha · Esp: {_dp_view.get('espacamento',0)} cm
+                            </span>
+                            {f"<br><span style='color:#fbbf24;font-size:11px;'>TSI: {_dp_view.get('tsi','')}</span>" if _dp_view.get('tsi') else ""}
+                            </div>""", unsafe_allow_html=True)
+
+                        # Fertilizantes
+                        _ferts = []
+                        if _dp_view.get("adubo_nome") and _dp_view.get("adubo_kg_ha",0) > 0:
+                            _ferts.append(f"🟡 **{_dp_view['adubo_nome']}** — {_dp_view['adubo_kg_ha']} kg/ha (Total: {_dp_view.get('adubo_total_kg',0):,.0f} kg)")
+                        if _dp_view.get("kcl_nome") and _dp_view.get("kcl_kg_ha",0) > 0:
+                            _ferts.append(f"🟣 **{_dp_view['kcl_nome']}** — {_dp_view['kcl_kg_ha']} kg/ha (Total: {_dp_view.get('kcl_total_kg',0):,.0f} kg)")
+                        if _dp_view.get("ureia_nome") and _dp_view.get("ureia_kg_ha",0) > 0:
+                            _ferts.append(f"⬜ **{_dp_view['ureia_nome']}** — {_dp_view['ureia_kg_ha']} kg/ha (Total: {_dp_view.get('ureia_total_kg',0):,.0f} kg)")
+                        if _ferts:
+                            _dv2.markdown(f"""
+                            <div style='background:#1e3a5f;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#38bdf8;font-size:12px;'>🧪 FERTILIZANTES</b><br>
+                            {"<br>".join([f"<span style='color:#f1f5f9;font-size:11px;'>{f}</span>" for f in _ferts])}
+                            </div>""", unsafe_allow_html=True)
+
+                        # Inoculantes e micros
+                        _inocs = []
+                        if _dp_view.get("inoc1_nome") and _dp_view.get("inoc1_dose",0) > 0:
+                            _inocs.append(f"🦠 {_dp_view['inoc1_nome']} — {_dp_view['inoc1_dose']} mL/ha")
+                        if _dp_view.get("inoc2_nome") and _dp_view.get("inoc2_dose",0) > 0:
+                            _inocs.append(f"🦠 {_dp_view['inoc2_nome']} — {_dp_view['inoc2_dose']} mL/ha")
+                        if _dp_view.get("inoc3_nome") and _dp_view.get("inoc3_dose",0) > 0:
+                            _inocs.append(f"💉 {_dp_view['inoc3_nome']} — {_dp_view['inoc3_dose']} mL/sc")
+                        if _dp_view.get("micro1_nome") and _dp_view.get("micro1_dose",0) > 0:
+                            _inocs.append(f"🌿 {_dp_view['micro1_nome']} — {_dp_view['micro1_dose']} kg/ha")
+                        if _dp_view.get("micro2_nome") and _dp_view.get("micro2_dose",0) > 0:
+                            _inocs.append(f"🌿 {_dp_view['micro2_nome']} — {_dp_view['micro2_dose']} kg/ha")
+                        if _inocs:
+                            _dv3.markdown(f"""
+                            <div style='background:#064e3b;border-radius:8px;padding:8px 12px;margin:2px 0;'>
+                            <b style='color:#34d399;font-size:12px;'>🦠 INOCULANTES / MICROS</b><br>
+                            {"<br>".join([f"<span style='color:#f1f5f9;font-size:11px;'>{i}</span>" for i in _inocs])}
+                            </div>""", unsafe_allow_html=True)
+
                     st.markdown("**🧪 Produtos:**")
                     for p in aplic.get("Produtos",[]):
                         unid = p.get("Unidade","").replace("/ha","")
                         st.markdown(f"- **{p.get('Produto','')}** ({p.get('Tipo','')}) — "
                                     f"{p.get('Dose por ha',0)} {p.get('Unidade','')} | "
                                     f"Total: {p.get('Total usado',0)} {unid}")
+                    if not aplic.get("Produtos") and not _dp_view:
+                        st.info("Nenhum produto registrado.")
                     col_b1, col_b2, col_b3 = st.columns(3)
                     if _status != "aplicado":
                         if col_b1.button("✅ Marcar como Aplicado", key=f"btn_confirmar_aplic_{idx_a}",
