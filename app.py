@@ -7516,6 +7516,7 @@ if menu == "📦 Operacional":
                     "semente": _pl_semente, "dose_sem_ha": _pl_dose_sem,
                     "populacao": _pl_pop, "tsi": _pl_tsi,
                     "espacamento": _pl_espacamento,
+                    "variedades": st.session_state.get("pl_variedades", []),
                     "adubo_nome": _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
                     "kcl_nome": _pl_kcl_nome, "kcl_kg_ha": _pl_kcl_kg,
                     "ureia_nome": _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
