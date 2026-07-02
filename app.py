@@ -7322,7 +7322,38 @@ if menu == "📦 Operacional":
                 re.IGNORECASE
             )
 
-            # Selectbox com sementes do estoque + manual
+            # Catálogo de híbridos de milho das principais empresas — pesquisado na
+            # internet — para poder escolher a variedade mesmo que ela ainda não
+            # esteja cadastrada no estoque (ex: comprou a semente mas ainda não
+            # deu entrada no estoque, ou só quer simular o plantio).
+            CATALOGO_SEMENTES_MILHO = [
+                {"nome":"AG 1051",        "fab":"Agroceres"},
+                {"nome":"AG 7098 PRO2",   "fab":"Agroceres"},
+                {"nome":"AG 8065 PRO3",   "fab":"Agroceres"},
+                {"nome":"AG 8600 PRO4",   "fab":"Agroceres"},
+                {"nome":"AG 8606 VT PRO4","fab":"Agroceres"},
+                {"nome":"AG 8701 VT PRO4","fab":"Agroceres"},
+                {"nome":"AG 9045 PRO3",   "fab":"Agroceres"},
+                {"nome":"AG 9070 PRO4",   "fab":"Agroceres"},
+                {"nome":"AS 1633 PRO3",   "fab":"Agroeste"},
+                {"nome":"AS 1666 PRO3",   "fab":"Agroeste"},
+                {"nome":"AS 1730 PRO3",   "fab":"Agroeste"},
+                {"nome":"AS 1735 PRO3",   "fab":"Agroeste"},
+                {"nome":"AS 1757 PRO4",   "fab":"Agroeste"},
+                {"nome":"AS 1770 PRO3",   "fab":"Agroeste"},
+                {"nome":"AS 1780 PRO3",   "fab":"Agroeste"},
+                {"nome":"AS 1844 PRO3",   "fab":"Agroeste"},
+                {"nome":"AS 1900 PRO4",   "fab":"Agroeste"},
+                {"nome":"AS 1955 PRO4",   "fab":"Agroeste"},
+                {"nome":"P 3016",         "fab":"Corteva - Pioneer"},
+                {"nome":"P 3898",         "fab":"Corteva - Pioneer"},
+                {"nome":"30F53",          "fab":"Corteva - Pioneer"},
+                {"nome":"B2401 PWU",      "fab":"Corteva - Brevant"},
+                {"nome":"B2688 PWU",      "fab":"Corteva - Brevant"},
+            ]
+            _SEPARADOR_CATALOGO = "── 🌽 Catálogo de milho (não requer estoque) ──"
+
+            # Selectbox com sementes do estoque + manual + catálogo de milho
             _sem_est = ["— digitar manualmente —"] + [
                 i["Insumo"] for i in st.session_state.estoque
                 if any(p in i.get("Categoria","").lower() or p in i.get("Insumo","").lower()
@@ -7331,20 +7362,26 @@ if menu == "📦 Operacional":
             ]
             if len(_sem_est) <= 1:
                 _sem_est = ["— digitar manualmente —"] + [i["Insumo"] for i in st.session_state.estoque]
+            _sem_est += [_SEPARADOR_CATALOGO] + [
+                f"{p['nome']} — {p['fab']}" for p in CATALOGO_SEMENTES_MILHO
+            ]
 
             # Form para adicionar variedade
             with st.form("form_add_variedade", clear_on_submit=True):
                 _sv_c1, _sv_c2, _sv_c3 = st.columns(3)
                 _sv_sel   = _sv_c1.selectbox("🔍 Variedade/Híbrido", _sem_est, key="sv_sel")
                 _sv_man   = _sv_c1.text_input("Ou digite", placeholder="Ex: Brasmax Bônus IPRO", key="sv_man") if _sv_sel == "— digitar manualmente —" else ""
-                _sv_nome  = _sv_man if _sv_sel == "— digitar manualmente —" else _sv_sel
+                _sv_invalido = _sv_sel in ("— digitar manualmente —", _SEPARADOR_CATALOGO)
+                _sv_nome  = _sv_man if _sv_sel == "— digitar manualmente —" else ("" if _sv_sel == _SEPARADOR_CATALOGO else _sv_sel)
                 _sv_ha    = _sv_c2.number_input("Hectares desta variedade", min_value=0.1, value=10.0, step=0.5, key="sv_ha")
                 _sv_dose  = _sv_c2.number_input("Dose (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="sv_dose")
                 _sv_pop   = _sv_c3.number_input("População (pl/ha)", min_value=0, value=240000, step=5000, key="sv_pop")
                 _sv_esp   = _sv_c3.number_input("Espaçamento (cm)", min_value=0.0, value=45.0, key="sv_esp")
                 _sv_add   = st.form_submit_button("➕ Adicionar Variedade", use_container_width=True)
+                if _sv_sel == _SEPARADOR_CATALOGO:
+                    st.caption("⚠️ Isso é só um separador visual — selecione um híbrido da lista acima ou abaixo dele.")
 
-            if _sv_add and _sv_nome and _sv_nome != "— digitar manualmente —":
+            if _sv_add and _sv_nome and not _sv_invalido:
                 st.session_state.pl_variedades.append({
                     "nome": _sv_nome, "ha": _sv_ha,
                     "dose": _sv_dose, "pop": _sv_pop,
@@ -7756,7 +7793,7 @@ if menu == "📦 Operacional":
                                     f"Total: {p.get('Total usado',0)} {unid}")
                     if not aplic.get("Produtos") and not _dp_view:
                         st.info("Nenhum produto registrado.")
-                    col_b1, col_b2, col_b3 = st.columns(3)
+                    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
                     if _status != "aplicado":
                         if col_b1.button("✅ Marcar como Aplicado", key=f"btn_confirmar_aplic_{idx_a}",
                                          use_container_width=True, type="primary"):
@@ -7811,6 +7848,102 @@ if menu == "📦 Operacional":
                             st.session_state.aplicacoes.pop(_idx_orig)
                         salvar_dados_iaagro()
                         st.rerun()
+
+                    # ── EDITAR APLICAÇÃO ─────────────────────────────────────
+                    _edit_key = f"edit_mode_aplic_{idx_a}"
+                    if _edit_key not in st.session_state:
+                        st.session_state[_edit_key] = False
+                    if col_b4.button("✖️ Fechar edição" if st.session_state[_edit_key] else "✏️ Editar",
+                                      key=f"btn_toggle_edit_{idx_a}", use_container_width=True):
+                        st.session_state[_edit_key] = not st.session_state[_edit_key]
+                        st.rerun()
+
+                    if st.session_state[_edit_key]:
+                        st.markdown("---")
+                        st.markdown("**✏️ Editar Aplicação**")
+                        with st.form(key=f"form_edit_aplic_{idx_a}"):
+                            _e1, _e2, _e3 = st.columns(3)
+                            _edt_data     = _e1.text_input("Data (dd/mm/aaaa)", value=aplic.get("Data",""), key=f"edt_data_{idx_a}")
+                            _edt_estadio  = _e2.text_input("Estádio/Nome da aplicação",
+                                value=aplic.get("Estádio", aplic.get("Aplicação","")), key=f"edt_estadio_{idx_a}")
+                            _edt_operador = _e3.text_input("Operador", value=aplic.get("Operador",""), key=f"edt_operador_{idx_a}")
+
+                            _e4, _e5, _e6 = st.columns(3)
+                            _edt_pulv  = _e4.text_input("Pulverizador", value=aplic.get("Pulverizador",""), key=f"edt_pulv_{idx_a}")
+                            _edt_area  = _e5.number_input("Área aplicada (ha)", min_value=0.0,
+                                value=float(aplic.get("Área aplicada ha",0) or 0), key=f"edt_area_{idx_a}")
+                            _edt_calda = _e6.number_input("Volume calda (L/ha)", min_value=0.0,
+                                value=float(aplic.get("Volume calda L/ha",0) or 0), key=f"edt_calda_{idx_a}")
+
+                            _edt_clima = st.text_input("Clima na aplicação", value=aplic.get("Clima aplicação",""), key=f"edt_clima_{idx_a}")
+
+                            # Produtos
+                            _produtos_orig = aplic.get("Produtos",[])
+                            _edt_produtos = []
+                            if _produtos_orig:
+                                st.markdown("**🧪 Produtos:**")
+                                for _pi, _p in enumerate(_produtos_orig):
+                                    _pc1, _pc2, _pc3 = st.columns([2,1,1])
+                                    _p_nome = _pc1.text_input("Produto", value=_p.get("Produto",""),
+                                        key=f"edt_prod_nome_{idx_a}_{_pi}")
+                                    _p_dose = _pc2.number_input("Dose/ha", min_value=0.0,
+                                        value=float(_p.get("Dose por ha",0) or 0), key=f"edt_prod_dose_{idx_a}_{_pi}")
+                                    _p_unid = _pc3.text_input("Unidade", value=_p.get("Unidade",""),
+                                        key=f"edt_prod_unid_{idx_a}_{_pi}")
+                                    _edt_produtos.append({
+                                        **_p,
+                                        "Produto": _p_nome, "Dose por ha": _p_dose, "Unidade": _p_unid,
+                                        "Total usado": round(_p_dose * _edt_area, 3),
+                                    })
+
+                            # Variedades de sementes (plantio)
+                            _vars_orig = aplic.get("Dados Plantio", {}).get("variedades", [])
+                            _edt_variedades = []
+                            if _vars_orig:
+                                st.markdown("**🌱 Variedades de sementes:**")
+                                for _vi, _v in enumerate(_vars_orig):
+                                    _vc1, _vc2, _vc3, _vc4 = st.columns([2,1,1,1])
+                                    _v_nome = _vc1.text_input("Variedade", value=_v.get("nome",""),
+                                        key=f"edt_var_nome_{idx_a}_{_vi}")
+                                    _v_ha   = _vc2.number_input("Ha", min_value=0.0,
+                                        value=float(_v.get("ha",0) or 0), key=f"edt_var_ha_{idx_a}_{_vi}")
+                                    _v_dose = _vc3.number_input("Dose kg/ha", min_value=0.0,
+                                        value=float(_v.get("dose",0) or 0), key=f"edt_var_dose_{idx_a}_{_vi}")
+                                    _v_pop  = _vc4.number_input("Pop pl/ha", min_value=0,
+                                        value=int(_v.get("pop",0) or 0), key=f"edt_var_pop_{idx_a}_{_vi}")
+                                    _edt_variedades.append({
+                                        **_v,
+                                        "nome": _v_nome, "ha": _v_ha, "dose": _v_dose, "pop": _v_pop,
+                                        "total_kg": round(_v_dose * _v_ha, 1),
+                                    })
+
+                            _salvar_edicao = st.form_submit_button("💾 Salvar edição", type="primary", use_container_width=True)
+                            if _salvar_edicao:
+                                _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
+                                                 if a.get("Data") == aplic.get("Data") and
+                                                 a.get("Aplicação") == aplic.get("Aplicação")), None)
+                                if _idx_orig is not None:
+                                    _reg = st.session_state.aplicacoes[_idx_orig]
+                                    _reg["Data"]              = _edt_data
+                                    _reg["Estádio"]           = _edt_estadio
+                                    _reg["Aplicação"]         = _edt_estadio
+                                    _reg["Operador"]          = _edt_operador
+                                    _reg["Pulverizador"]      = _edt_pulv
+                                    _reg["Área aplicada ha"]  = _edt_area
+                                    _reg["Volume calda L/ha"] = _edt_calda
+                                    _reg["Clima aplicação"]   = _edt_clima
+                                    if _produtos_orig:
+                                        _reg["Produtos"] = _edt_produtos
+                                    if _vars_orig:
+                                        if "Dados Plantio" not in _reg:
+                                            _reg["Dados Plantio"] = {}
+                                        _reg["Dados Plantio"]["variedades"] = _edt_variedades
+                                    salvar_dados_iaagro()
+                                    st.session_state[_edit_key] = False
+                                    success_box("✅ Aplicação atualizada!")
+                                    st.rerun()
+                                else:
+                                    error_box("Não foi possível localizar a aplicação original para salvar a edição.")
 
 # ─────────────────────────────────────────────
 # MENU: CARÊNCIA
