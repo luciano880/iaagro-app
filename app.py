@@ -3840,9 +3840,10 @@ def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
     def converter_para_base(qtd, unid):
         """Converte para a unidade base: L ou kg."""
         unid = (unid or "").lower().replace(" ", "")
-        if "ml" in unid:     return qtd / 1000  # mL → L
-        if "g/ha" in unid or unid == "g":   return qtd / 1000  # g → kg
-        if "mg" in unid:     return qtd / 1_000_000
+        base = unid.split("/")[0]  # "ml/ha"->"ml"  "kg/ha"->"kg"  "g/ha"->"g"  "mg/ha"->"mg"
+        if base == "ml": return qtd / 1000       # mL → L
+        if base == "g":  return qtd / 1000       # g → kg (NÃO confundir com "kg")
+        if base == "mg": return qtd / 1_000_000
         return qtd  # já em L ou kg
 
     qtd_convertida = converter_para_base(quantidade_usada, unidade_usada)
@@ -6198,9 +6199,11 @@ if menu == "💰 Financeiro":
                 _item_e  = next((e for e in st.session_state.estoque if e.get("Insumo") == _nome_p), None)
                 _preco_u = _item_e.get("Valor Unitário R$", 0) if _item_e else 0
                 def _conv(q, u):
-                    u = (u or "").lower()
-                    if "ml" in u: return q/1000
-                    if "g/" in u or u == "g": return q/1000
+                    u = (u or "").lower().replace(" ", "")
+                    base = u.split("/")[0]
+                    if base == "ml": return q/1000
+                    if base == "g":  return q/1000
+                    if base == "mg": return q/1_000_000
                     return q
                 _qtd_base     = _conv(_total, _unid)
                 _custo_p      = _qtd_base * _preco_u
@@ -7560,7 +7563,17 @@ if menu == "📦 Operacional":
         _nomes_estoque = [item["Insumo"] for item in st.session_state.estoque]
         n_produtos = int(st.number_input("Quantidade de produtos", min_value=1, max_value=10, value=1, step=1, key="num_qtd_produtos_aplic"))
 
+        def _conv_unid_base(q, u):
+            """Converte mL→L e g→kg pra bater com a unidade do preço no estoque (R$/L ou R$/kg)."""
+            u = (u or "").lower().replace(" ", "")
+            base = u.split("/")[0]  # "ml/ha"->"ml"  "kg/ha"->"kg"  "g/ha"->"g"
+            if base == "ml": return q/1000
+            if base == "g":  return q/1000
+            if base == "mg": return q/1_000_000
+            return q
+
         produtos_aplic = []
+        _custo_total_aplic = 0.0
         for i in range(n_produtos):
             st.markdown(f"**Produto {i+1}**")
             col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([3,2,1,1,2])
@@ -7571,12 +7584,36 @@ if menu == "📦 Operacional":
             _obs_p = col_p5.text_input("Obs.", key=f"txt_obs_prod_{i}")
             _por_tanque = round(_dose * area_por_tanque, 3)
             _total_prod = round(_dose * area_aplic, 3)
+
+            # Busca o preço unitário desse produto no estoque (R$/L ou R$/kg)
+            _item_estq   = next((e for e in st.session_state.estoque if e.get("Insumo") == _prod), None)
+            _preco_unit  = float(_item_estq.get("Valor Unitário R$", 0)) if _item_estq else 0.0
+            _qtd_base    = _conv_unid_base(_total_prod, _unid)
+            _custo_prod  = round(_qtd_base * _preco_unit, 2)
+            _custo_total_aplic += _custo_prod
+
             if _dose > 0:
-                st.caption(f"  → {_por_tanque} {_unid.replace('/ha','')} por tanque | Total: {_total_prod} {_unid.replace('/ha','')}")
+                st.caption(
+                    f"  → {_por_tanque} {_unid.replace('/ha','')} por tanque | "
+                    f"Total: {_total_prod} {_unid.replace('/ha','')}  |  "
+                    f"💲 R$ {_preco_unit:.2f}/{'kg' if 'g' in _unid.lower() else 'L'}  →  "
+                    f"**Custo: R$ {_custo_prod:,.2f}**"
+                )
+                if _preco_unit == 0:
+                    st.caption("⚠️ Esse produto não tem preço cadastrado no estoque — custo ficará R$ 0,00. Cadastre o preço no Estoque de Insumos pra aparecer aqui.")
+
             produtos_aplic.append({
                 "Produto": _prod, "Tipo": _tipo_p, "Dose por ha": _dose, "Unidade": _unid,
-                "Produto por tanque": _por_tanque, "Total usado": _total_prod, "Observação": _obs_p
+                "Produto por tanque": _por_tanque, "Total usado": _total_prod, "Observação": _obs_p,
+                "Preço Unitário R$": _preco_unit, "Custo Total R$": _custo_prod,
             })
+
+        if n_produtos > 0 and any(p["Dose por ha"] > 0 for p in produtos_aplic):
+            st.markdown(f"""
+            <div style='background:#14532d;border-radius:8px;padding:8px 14px;margin:6px 0;'>
+            <span style='color:#6ee7b7;font-size:13px;font-weight:700;'>
+            💰 Custo total desta aplicação: R$ {_custo_total_aplic:,.2f}
+            </span></div>""", unsafe_allow_html=True)
 
         if st.button("💾 Salvar Aplicação", key="salvar_aplicacao_modelada", use_container_width=True):
             erro = False
@@ -7787,11 +7824,31 @@ if menu == "📦 Operacional":
                             </div>""", unsafe_allow_html=True)
 
                     st.markdown("**🧪 Produtos:**")
+                    _custo_total_hist = 0.0
                     for p in aplic.get("Produtos",[]):
                         unid = p.get("Unidade","").replace("/ha","")
+                        # Registros salvos antes dessa atualização não têm preço gravado —
+                        # nesse caso busca no estoque atual pra não ficar sem mostrar nada.
+                        if "Preço Unitário R$" in p:
+                            _preco_hist = p.get("Preço Unitário R$", 0)
+                            _custo_hist = p.get("Custo Total R$", 0)
+                        else:
+                            _item_hist  = next((e for e in st.session_state.estoque
+                                                 if e.get("Insumo") == p.get("Produto","")), None)
+                            _preco_hist = float(_item_hist.get("Valor Unitário R$", 0)) if _item_hist else 0.0
+                            _u_low = (p.get("Unidade","") or "").lower()
+                            _qtd_b = p.get("Total usado",0)/1000 if ("ml" in _u_low or _u_low in ("g","g/ha")) else p.get("Total usado",0)
+                            _custo_hist = round(_qtd_b * _preco_hist, 2)
+                        _custo_total_hist += _custo_hist
                         st.markdown(f"- **{p.get('Produto','')}** ({p.get('Tipo','')}) — "
                                     f"{p.get('Dose por ha',0)} {p.get('Unidade','')} | "
-                                    f"Total: {p.get('Total usado',0)} {unid}")
+                                    f"Total: {p.get('Total usado',0)} {unid} | "
+                                    f"💲 R$ {_preco_hist:.2f}/{'kg' if 'g' in unid.lower() else 'L'} | "
+                                    f"**Custo: R$ {_custo_hist:,.2f}**")
+                    if aplic.get("Produtos"):
+                        st.markdown(f"<span style='color:#6ee7b7;font-size:12px;font-weight:700;'>"
+                                     f"💰 Custo total dos produtos: R$ {_custo_total_hist:,.2f}</span>",
+                                     unsafe_allow_html=True)
                     if not aplic.get("Produtos") and not _dp_view:
                         st.info("Nenhum produto registrado.")
                     col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -7831,7 +7888,11 @@ if menu == "📦 Operacional":
                     for _pp in aplic.get("Produtos",[]):
                         _linhas_exp.append(
                             f"  {_pp.get('Produto','')} | {_pp.get('Dose por ha',0)} "
-                            f"{_pp.get('Unidade','')} | Total: {_pp.get('Total usado',0)}")
+                            f"{_pp.get('Unidade','')} | Total: {_pp.get('Total usado',0)} | "
+                            f"R$ unit: {_pp.get('Preço Unitário R$',0):.2f} | "
+                            f"Custo: R$ {_pp.get('Custo Total R$',0):,.2f}")
+                    if aplic.get("Produtos"):
+                        _linhas_exp.append(f"  TOTAL PRODUTOS: R$ {sum(p.get('Custo Total R$',0) for p in aplic.get('Produtos',[])):,.2f}")
                     _txt_exp = "\n".join(_linhas_exp)
                     col_b2.download_button(
                         "📥 Exportar",
@@ -7884,17 +7945,24 @@ if menu == "📦 Operacional":
                             if _produtos_orig:
                                 st.markdown("**🧪 Produtos:**")
                                 for _pi, _p in enumerate(_produtos_orig):
-                                    _pc1, _pc2, _pc3 = st.columns([2,1,1])
+                                    _pc1, _pc2, _pc3, _pc4 = st.columns([2,1,1,1])
                                     _p_nome = _pc1.text_input("Produto", value=_p.get("Produto",""),
                                         key=f"edt_prod_nome_{idx_a}_{_pi}")
                                     _p_dose = _pc2.number_input("Dose/ha", min_value=0.0,
                                         value=float(_p.get("Dose por ha",0) or 0), key=f"edt_prod_dose_{idx_a}_{_pi}")
                                     _p_unid = _pc3.text_input("Unidade", value=_p.get("Unidade",""),
                                         key=f"edt_prod_unid_{idx_a}_{_pi}")
+                                    _p_preco = _pc4.number_input("R$ unit.", min_value=0.0,
+                                        value=float(_p.get("Preço Unitário R$",0) or 0), key=f"edt_prod_preco_{idx_a}_{_pi}")
+                                    _p_total_novo = round(_p_dose * _edt_area, 3)
+                                    _u_low = (_p_unid or "").lower()
+                                    _p_qtd_base = _p_total_novo/1000 if ("ml" in _u_low or _u_low in ("g","g/ha")) else _p_total_novo
                                     _edt_produtos.append({
                                         **_p,
                                         "Produto": _p_nome, "Dose por ha": _p_dose, "Unidade": _p_unid,
-                                        "Total usado": round(_p_dose * _edt_area, 3),
+                                        "Total usado": _p_total_novo,
+                                        "Preço Unitário R$": _p_preco,
+                                        "Custo Total R$": round(_p_qtd_base * _p_preco, 2),
                                     })
 
                             # Variedades de sementes (plantio)
