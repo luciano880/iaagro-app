@@ -3832,13 +3832,55 @@ def score_solo(d, cultura="Soja"):
     return score, classe, alertas
 
 
+def preco_por_kg_ou_l(item):
+    """
+    Converte o "Valor Unitário R$" de um item do estoque pra preço por kg ou por L,
+    não importa em que unidade ele foi cadastrado (kg, L, g, mL, sc ou un).
+    Retorna (preco_por_kg_ou_l, "kg"|"L", aviso).
+    Se não der pra converter com segurança (ex: "sc"/"un" sem peso/volume
+    informado na Embalagem), devolve um aviso e o preço cru (pode estar errado).
+    """
+    if not item:
+        return 0.0, "kg", None
+    _preco = float(item.get("Valor Unitário R$", 0) or 0)
+    _u = (item.get("Unidade","") or "").strip().lower()
+    if _u == "kg":
+        return _preco, "kg", None
+    if _u == "l":
+        return _preco, "L", None
+    if _u == "g":
+        return _preco * 1000, "kg", None   # preço era por grama → por kg
+    if _u == "ml":
+        return _preco * 1000, "L", None    # preço era por mL → por L
+    if _u in ("sc", "un"):
+        _emb = (item.get("Embalagem","") or "")
+        _m = re.search(r"([\d.,]+)\s*(kg|l|g|ml)\b", _emb.lower())
+        if _m and _preco > 0:
+            _num = float(_m.group(1).replace(",", "."))
+            _un_emb = _m.group(2)
+            if _num > 0:
+                if _un_emb == "kg": return round(_preco/_num, 4), "kg", None
+                if _un_emb == "l":  return round(_preco/_num, 4), "L", None
+                if _un_emb == "g":  return round(_preco/(_num/1000), 4), "kg", None
+                if _un_emb == "ml": return round(_preco/(_num/1000), 4), "L", None
+        _aviso = (f"⚠️ \"{item.get('Insumo','')}\" está cadastrado por {item.get('Unidade','')} "
+                  f"(embalagem: {_emb or 'não informada'}) — não dá pra converter automaticamente "
+                  f"pra kg/L, então o custo pode estar incorreto. Edite o estoque e informe o peso/volume "
+                  f"da embalagem (ex: \"40 kg\", \"20 L\") ou cadastre o preço direto por kg/L.")
+        return _preco, "kg", _aviso
+    return _preco, "kg", None
+
+
 def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
     """
     Dá baixa no estoque convertendo unidades automaticamente.
-    Estoque sempre em L ou kg. Aplicação pode ser mL/ha, g/ha, etc.
+    A dose aplicada pode vir em mL/ha, g/ha, kg/ha, L/ha — isso é convertido
+    pra kg ou L (base física). Depois, se o item no estoque for controlado em
+    "sc" (saca) ou "un" (unidade) em vez de kg/L, converte de novo usando o
+    peso/volume da Embalagem cadastrada, senão a baixa fica errada.
     """
     def converter_para_base(qtd, unid):
-        """Converte para a unidade base: L ou kg."""
+        """Converte a DOSE (mL/ha, g/ha etc.) pra unidade física base: L ou kg."""
         unid = (unid or "").lower().replace(" ", "")
         base = unid.split("/")[0]  # "ml/ha"->"ml"  "kg/ha"->"kg"  "g/ha"->"g"  "mg/ha"->"mg"
         if base == "ml": return qtd / 1000       # mL → L
@@ -3846,16 +3888,35 @@ def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
         if base == "mg": return qtd / 1_000_000
         return qtd  # já em L ou kg
 
-    qtd_convertida = converter_para_base(quantidade_usada, unidade_usada)
+    qtd_base = converter_para_base(quantidade_usada, unidade_usada)  # sempre em kg ou L
 
     for item in st.session_state.estoque:
         if item["Insumo"] == nome_insumo:
+            _u_item = (item.get("Unidade","") or "").strip().lower()
+            if _u_item in ("sc", "un"):
+                # Item controlado por saca/unidade — converte kg/L pra nº de sacas/unidades
+                _emb = (item.get("Embalagem","") or "")
+                _m = re.search(r"([\d.,]+)\s*(kg|l|g|ml)\b", _emb.lower())
+                if _m:
+                    _num = float(_m.group(1).replace(",", "."))
+                    _un_emb = _m.group(2)
+                    _fator = _num/1000 if _un_emb in ("g","ml") else _num  # tudo em kg/L
+                    qtd_convertida = qtd_base / _fator if _fator > 0 else qtd_base
+                else:
+                    qtd_convertida = qtd_base  # não deu pra converter — melhor esforço
+            elif _u_item == "g":
+                qtd_convertida = qtd_base * 1000   # base está em kg, item em g
+            elif _u_item == "ml":
+                qtd_convertida = qtd_base * 1000   # base está em L, item em mL
+            else:
+                qtd_convertida = qtd_base          # item já em kg ou L
+
             estoque_atual = float(item.get("Quantidade", 0))
             if estoque_atual >= qtd_convertida:
                 item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
                 item["Valor Total R$"] = item["Quantidade"] * item.get("Valor Unitário R$", 0)
-                return True, f"Baixa de {qtd_convertida:.3f} realizada."
-            return False, f"Estoque insuficiente: tem {estoque_atual:.3f}, precisa {qtd_convertida:.3f}"
+                return True, f"Baixa de {qtd_convertida:.3f} {item.get('Unidade','')} realizada."
+            return False, f"Estoque insuficiente: tem {estoque_atual:.3f} {item.get('Unidade','')}, precisa {qtd_convertida:.3f}"
     return False, "Insumo não encontrado no estoque."
 
 
@@ -6191,13 +6252,16 @@ if menu == "💰 Financeiro":
         # Calcula custo total de TODAS as aplicações (todas as áreas)
         _custo_insumos = 0.0
         _det_insumos   = []
+        _avisos_preco  = []
         for _ap_idx, ap in enumerate(st.session_state.aplicacoes):
             for p in ap.get("Produtos", []):
                 _nome_p  = p.get("Produto","")
                 _total   = p.get("Total usado", 0)
                 _unid    = p.get("Unidade","L/ha")
                 _item_e  = next((e for e in st.session_state.estoque if e.get("Insumo") == _nome_p), None)
-                _preco_u = _item_e.get("Valor Unitário R$", 0) if _item_e else 0
+                _preco_u, _base_u, _aviso_u = preco_por_kg_ou_l(_item_e)
+                if _aviso_u and _aviso_u not in _avisos_preco:
+                    _avisos_preco.append(_aviso_u)
                 def _conv(q, u):
                     u = (u or "").lower().replace(" ", "")
                     base = u.split("/")[0]
@@ -6213,10 +6277,13 @@ if menu == "💰 Financeiro":
                     "Aplicação":   ap.get("Estádio", ap.get("Aplicação","")),
                     "Produto":     _nome_p,
                     "Tipo":        _item_e.get("Categoria","") if _item_e else p.get("Tipo",""),
-                    "Qtd":         f"{_qtd_base:.2f} L/kg",
-                    "R$ unit":     f"R$ {_preco_u:.2f}",
+                    "Qtd":         f"{_qtd_base:.2f} {_base_u}",
+                    "R$ unit":     f"R$ {_preco_u:.2f}/{_base_u}",
                     "Custo R$":    f"R$ {_custo_p:.2f}",
                 })
+        if _avisos_preco:
+            for _av in _avisos_preco:
+                warning_box(_av)
 
         if _det_insumos:
             # Header
@@ -7585,9 +7652,9 @@ if menu == "📦 Operacional":
             _por_tanque = round(_dose * area_por_tanque, 3)
             _total_prod = round(_dose * area_aplic, 3)
 
-            # Busca o preço unitário desse produto no estoque (R$/L ou R$/kg)
+            # Busca o preço unitário desse produto no estoque, já convertido pra R$/kg ou R$/L
             _item_estq   = next((e for e in st.session_state.estoque if e.get("Insumo") == _prod), None)
-            _preco_unit  = float(_item_estq.get("Valor Unitário R$", 0)) if _item_estq else 0.0
+            _preco_unit, _base_unit, _aviso_preco = preco_por_kg_ou_l(_item_estq)
             _qtd_base    = _conv_unid_base(_total_prod, _unid)
             _custo_prod  = round(_qtd_base * _preco_unit, 2)
             _custo_total_aplic += _custo_prod
@@ -7596,11 +7663,13 @@ if menu == "📦 Operacional":
                 st.caption(
                     f"  → {_por_tanque} {_unid.replace('/ha','')} por tanque | "
                     f"Total: {_total_prod} {_unid.replace('/ha','')}  |  "
-                    f"💲 R$ {_preco_unit:.2f}/{'kg' if 'g' in _unid.lower() else 'L'}  →  "
+                    f"💲 R$ {_preco_unit:.2f}/{_base_unit}  →  "
                     f"**Custo: R$ {_custo_prod:,.2f}**"
                 )
-                if _preco_unit == 0:
+                if _preco_unit == 0 and not _aviso_preco:
                     st.caption("⚠️ Esse produto não tem preço cadastrado no estoque — custo ficará R$ 0,00. Cadastre o preço no Estoque de Insumos pra aparecer aqui.")
+                if _aviso_preco:
+                    st.caption(_aviso_preco)
 
             produtos_aplic.append({
                 "Produto": _prod, "Tipo": _tipo_p, "Dose por ha": _dose, "Unidade": _unid,
@@ -7827,24 +7896,26 @@ if menu == "📦 Operacional":
                     _custo_total_hist = 0.0
                     for p in aplic.get("Produtos",[]):
                         unid = p.get("Unidade","").replace("/ha","")
-                        # Registros salvos antes dessa atualização não têm preço gravado —
-                        # nesse caso busca no estoque atual pra não ficar sem mostrar nada.
-                        if "Preço Unitário R$" in p:
-                            _preco_hist = p.get("Preço Unitário R$", 0)
-                            _custo_hist = p.get("Custo Total R$", 0)
-                        else:
-                            _item_hist  = next((e for e in st.session_state.estoque
-                                                 if e.get("Insumo") == p.get("Produto","")), None)
-                            _preco_hist = float(_item_hist.get("Valor Unitário R$", 0)) if _item_hist else 0.0
-                            _u_low = (p.get("Unidade","") or "").lower()
-                            _qtd_b = p.get("Total usado",0)/1000 if ("ml" in _u_low or _u_low in ("g","g/ha")) else p.get("Total usado",0)
-                            _custo_hist = round(_qtd_b * _preco_hist, 2)
+                        # Sempre recalcula com o preço ATUAL do estoque (não confia em valor
+                        # gravado antigo, que pode ter sido salvo com o bug de sc/un).
+                        _item_hist = next((e for e in st.session_state.estoque
+                                            if e.get("Insumo") == p.get("Produto","")), None)
+                        _preco_hist, _base_hist, _aviso_hist = preco_por_kg_ou_l(_item_hist)
+                        _u_low = (p.get("Unidade","") or "").lower().replace(" ", "")
+                        _base_dose = _u_low.split("/")[0]
+                        if _base_dose == "ml":  _qtd_b = p.get("Total usado",0)/1000
+                        elif _base_dose == "g": _qtd_b = p.get("Total usado",0)/1000
+                        elif _base_dose == "mg":_qtd_b = p.get("Total usado",0)/1_000_000
+                        else:                   _qtd_b = p.get("Total usado",0)
+                        _custo_hist = round(_qtd_b * _preco_hist, 2)
                         _custo_total_hist += _custo_hist
                         st.markdown(f"- **{p.get('Produto','')}** ({p.get('Tipo','')}) — "
                                     f"{p.get('Dose por ha',0)} {p.get('Unidade','')} | "
                                     f"Total: {p.get('Total usado',0)} {unid} | "
-                                    f"💲 R$ {_preco_hist:.2f}/{'kg' if 'g' in unid.lower() else 'L'} | "
+                                    f"💲 R$ {_preco_hist:.2f}/{_base_hist} | "
                                     f"**Custo: R$ {_custo_hist:,.2f}**")
+                        if _aviso_hist:
+                            st.caption(_aviso_hist)
                     if aplic.get("Produtos"):
                         st.markdown(f"<span style='color:#6ee7b7;font-size:12px;font-weight:700;'>"
                                      f"💰 Custo total dos produtos: R$ {_custo_total_hist:,.2f}</span>",
