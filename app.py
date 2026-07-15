@@ -3245,6 +3245,22 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
         _it = next((e for e in st.session_state.estoque if e.get("Insumo") == nome_insumo), None)
         return preco_por_kg_ou_l(_it)  # (preco, base, aviso)
 
+    def _valor_semente_pdf(nome_variedade):
+        """
+        Pra SEMENTE o custo é o VALOR TOTAL do lote no estoque (o que foi pago
+        por aquela variedade pra área toda), sem multiplicar por kg — ex: a
+        BMX 53IX55 pra 32 ha custou R$ 19.942,17, e é isso que aparece.
+        Retorna (valor_unitario_cadastrado, valor_total_lote).
+        """
+        _it = next((e for e in st.session_state.estoque if e.get("Insumo") == nome_variedade), None)
+        if not _it:
+            return 0.0, 0.0
+        _vu = float(_it.get("Valor Unitário R$", 0) or 0)
+        _vt = float(_it.get("Valor Total R$", 0) or 0)
+        if _vt <= 0:  # fallback: quantidade × unitário
+            _vt = round(float(_it.get("Quantidade", 0) or 0) * _vu, 2)
+        return _vu, _vt
+
     def _qtd_base_pdf(qtd, unid):
         """Converte mL→L e g→kg pra bater com o preço (que é sempre por kg ou L)."""
         u = (unid or "").lower().replace(" ", "")
@@ -3338,8 +3354,7 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
             if _vars_pdf:
                 _tsi_pdf = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
                 for _vp in _vars_pdf:
-                    _pr_u, _base_pr, _ = _preco_pdf(_vp.get("nome",""))
-                    _pr_t = round(_vp.get("total_kg",0) * _pr_u, 2)
+                    _pr_u, _pr_t = _valor_semente_pdf(_vp.get("nome",""))
                     _custo_aplic += _pr_t
                     rows.append([
                         P(f"<b>🌱 {_vp.get('nome','Semente')}</b> · {_vp.get('pop',0):,} pl/ha · {_vp.get('esp',0)} cm{_tsi_pdf}",8,True,colors.HexColor("#14532d")),
@@ -3355,8 +3370,7 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                 _sem_nome = _dp.get("semente","Semente")
                 _tsi = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
                 _pop = f" | Pop: {_dp.get('populacao',0):,} pl/ha" if _dp.get("populacao",0) > 0 else ""
-                _pr_u, _base_pr, _ = _preco_pdf(_sem_nome)
-                _pr_t = round(_dp.get("semente_total_kg",0) * _pr_u, 2)
+                _pr_u, _pr_t = _valor_semente_pdf(_sem_nome)
                 _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🌱 {_sem_nome}</b>{_pop}{_tsi}",8,True,colors.HexColor("#14532d")),
