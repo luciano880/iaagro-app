@@ -3247,19 +3247,21 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
 
     def _valor_semente_pdf(nome_variedade):
         """
-        Pra SEMENTE o custo é o VALOR TOTAL do lote no estoque (o que foi pago
-        por aquela variedade pra área toda), sem multiplicar por kg — ex: a
-        BMX 53IX55 pra 32 ha custou R$ 19.942,17, e é isso que aparece.
-        Retorna (valor_unitario_cadastrado, valor_total_lote).
+        Pra SEMENTE, INOCULANTE e MICRO o custo é o VALOR TOTAL do lote no
+        estoque (o que foi pago por aquele produto pra área toda), sem
+        multiplicar por dose — ex: a BMX 53IX55 pra 32 ha custou R$ 19.942,17.
+        Retorna (valor_unitario_cadastrado, valor_total_lote, qtd_lote, unid_lote).
         """
         _it = next((e for e in st.session_state.estoque if e.get("Insumo") == nome_variedade), None)
         if not _it:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0, ""
         _vu = float(_it.get("Valor Unitário R$", 0) or 0)
         _vt = float(_it.get("Valor Total R$", 0) or 0)
+        _qt = float(_it.get("Quantidade", 0) or 0)
+        _un = _it.get("Unidade","")
         if _vt <= 0:  # fallback: quantidade × unitário
-            _vt = round(float(_it.get("Quantidade", 0) or 0) * _vu, 2)
-        return _vu, _vt
+            _vt = round(_qt * _vu, 2)
+        return _vu, _vt, _qt, _un
 
     def _qtd_base_pdf(qtd, unid):
         """Converte mL→L e g→kg pra bater com o preço (que é sempre por kg ou L)."""
@@ -3354,7 +3356,7 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
             if _vars_pdf:
                 _tsi_pdf = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
                 for _vp in _vars_pdf:
-                    _pr_u, _pr_t = _valor_semente_pdf(_vp.get("nome",""))
+                    _pr_u, _pr_t, _, _ = _valor_semente_pdf(_vp.get("nome",""))
                     _custo_aplic += _pr_t
                     rows.append([
                         P(f"<b>🌱 {_vp.get('nome','Semente')}</b> · {_vp.get('pop',0):,} pl/ha · {_vp.get('esp',0)} cm{_tsi_pdf}",8,True,colors.HexColor("#14532d")),
@@ -3370,7 +3372,7 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                 _sem_nome = _dp.get("semente","Semente")
                 _tsi = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
                 _pop = f" | Pop: {_dp.get('populacao',0):,} pl/ha" if _dp.get("populacao",0) > 0 else ""
-                _pr_u, _pr_t = _valor_semente_pdf(_sem_nome)
+                _pr_u, _pr_t, _, _ = _valor_semente_pdf(_sem_nome)
                 _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🌱 {_sem_nome}</b>{_pop}{_tsi}",8,True,colors.HexColor("#14532d")),
@@ -3429,63 +3431,73 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                 ])
             # Inoculante 1
             if _dp.get("inoc1_nome") and _dp.get("inoc1_dose",0) > 0:
+                _pr_u, _pr_t, _qt_l, _un_l = _valor_semente_pdf(_dp["inoc1_nome"])
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🦠 {_dp['inoc1_nome']}</b>",8,True),
                     P("Inoculante sulco",8),
                     P(str(_dp.get("inoc1_dose",0)),8,False,None,TA_CENTER),
                     P("mL/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_qt_l:,.1f}</b> {_un_l}" if _qt_l > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}" if _pr_u > 0 else "—",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>" if _pr_t > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # Co-inoculante
             if _dp.get("inoc2_nome") and _dp.get("inoc2_dose",0) > 0:
+                _pr_u, _pr_t, _qt_l, _un_l = _valor_semente_pdf(_dp["inoc2_nome"])
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🦠 {_dp['inoc2_nome']}</b>",8,True),
                     P("Co-inoculante",8),
                     P(str(_dp.get("inoc2_dose",0)),8,False,None,TA_CENTER),
                     P("mL/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_qt_l:,.1f}</b> {_un_l}" if _qt_l > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}" if _pr_u > 0 else "—",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>" if _pr_t > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # Inoculante semente
             if _dp.get("inoc3_nome") and _dp.get("inoc3_dose",0) > 0:
+                _pr_u, _pr_t, _qt_l, _un_l = _valor_semente_pdf(_dp["inoc3_nome"])
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>💉 {_dp['inoc3_nome']}</b>",8,True),
                     P("Inoc. semente",8),
                     P(str(_dp.get("inoc3_dose",0)),8,False,None,TA_CENTER),
                     P("mL/sc",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_qt_l:,.1f}</b> {_un_l}" if _qt_l > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}" if _pr_u > 0 else "—",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>" if _pr_t > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # Micro 1
             if _dp.get("micro1_nome") and _dp.get("micro1_dose",0) > 0:
+                _pr_u, _pr_t, _qt_l, _un_l = _valor_semente_pdf(_dp["micro1_nome"])
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🌿 {_dp['micro1_nome']}</b>",8,True),
                     P("Micronutriente",8),
                     P(str(_dp.get("micro1_dose",0)),8,False,None,TA_CENTER),
                     P("kg/L ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_qt_l:,.1f}</b> {_un_l}" if _qt_l > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}" if _pr_u > 0 else "—",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>" if _pr_t > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # Micro 2
             if _dp.get("micro2_nome") and _dp.get("micro2_dose",0) > 0:
+                _pr_u, _pr_t, _qt_l, _un_l = _valor_semente_pdf(_dp["micro2_nome"])
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🌿 {_dp['micro2_nome']}</b>",8,True),
                     P("Micronutriente",8),
                     P(str(_dp.get("micro2_dose",0)),8,False,None,TA_CENTER),
                     P("kg/L ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
-                    P("—",8,False,None,TA_CENTER),
+                    P(f"<b>{_qt_l:,.1f}</b> {_un_l}" if _qt_l > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}" if _pr_u > 0 else "—",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>" if _pr_t > 0 else "—",8,True,COR_VERDE_E,TA_CENTER),
                 ])
 
         if len(rows) == 1:
