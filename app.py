@@ -3240,6 +3240,22 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
         c  = color or COR_TEXTO
         return Paragraph(txt, ParagraphStyle("p", fontName=fn, fontSize=size, textColor=c, alignment=align, leading=size+3))
 
+    def _preco_pdf(nome_insumo):
+        """Preço unitário (R$/kg ou R$/L) do estoque, direto — sem conversão por saca."""
+        _it = next((e for e in st.session_state.estoque if e.get("Insumo") == nome_insumo), None)
+        return preco_por_kg_ou_l(_it)  # (preco, base, aviso)
+
+    def _qtd_base_pdf(qtd, unid):
+        """Converte mL→L e g→kg pra bater com o preço (que é sempre por kg ou L)."""
+        u = (unid or "").lower().replace(" ", "")
+        base = u.split("/")[0]
+        if base == "ml": return qtd/1000
+        if base == "g":  return qtd/1000
+        if base == "mg": return qtd/1_000_000
+        return qtd
+
+    _custo_total_pdf = 0.0
+
     # CABEÇALHO
     h = [[P("IAAgro",18,True,COR_VERDE), P("PROGRAMAÇÃO DE APLICACOES",14,True,COR_BRANCO,TA_CENTER),
           P(f"Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}",7,False,COR_CINZA,TA_RIGHT)]]
@@ -3286,12 +3302,23 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
 
         hdr = [P("PRODUTO",8,True,COR_BRANCO,TA_CENTER),P("TIPO",8,True,COR_BRANCO,TA_CENTER),
                P("DOSE/ha",8,True,COR_BRANCO,TA_CENTER),P("UNIDADE",8,True,COR_BRANCO,TA_CENTER),
-               P("POR TANQUE",8,True,COR_BRANCO,TA_CENTER),P("TOTAL AREA",8,True,COR_BRANCO,TA_CENTER)]
+               P("POR TANQUE",8,True,COR_BRANCO,TA_CENTER),P("TOTAL AREA",8,True,COR_BRANCO,TA_CENTER),
+               P("VALOR UNIT",8,True,COR_BRANCO,TA_CENTER),P("VALOR TOTAL",8,True,COR_BRANCO,TA_CENTER)]
         rows = [hdr]
+        _custo_aplic = 0.0
 
         # ── Produtos defensivos normais ─────────────────────────────────────
         for p in aplic.get("Produtos",[]):
             unid = p.get("Unidade","").replace("/ha","")
+            if p.get("Preço Unitário R$") is not None:
+                _pr_u = float(p.get("Preço Unitário R$",0))
+            else:
+                _pr_u, _base_pr, _ = _preco_pdf(p.get("Produto",""))
+            if p.get("Custo Total R$") is not None:
+                _pr_t = float(p.get("Custo Total R$",0))
+            else:
+                _pr_t = round(_qtd_base_pdf(p.get("Total usado",0), p.get("Unidade","")) * _pr_u, 2)
+            _custo_aplic += _pr_t
             rows.append([
                 P(f"<b>{p.get('Produto','')}</b>",8,True),
                 P(p.get("Tipo",""),8),
@@ -3299,6 +3326,8 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                 P(p.get("Unidade",""),8,False,None,TA_CENTER),
                 P(f"<b>{p.get('Produto por tanque',0):.2f}</b> {unid}",8,True,None,TA_CENTER),
                 P(f"<b>{p.get('Total usado',0):.2f}</b> {unid}",8,True,COR_VERDE_E,TA_CENTER),
+                P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
+                P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
             ])
 
         # ── Dados de Plantio (semente, fertilizantes, inoculantes) ─────────
@@ -3309,6 +3338,9 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
             if _vars_pdf:
                 _tsi_pdf = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
                 for _vp in _vars_pdf:
+                    _pr_u, _base_pr, _ = _preco_pdf(_vp.get("nome",""))
+                    _pr_t = round(_vp.get("total_kg",0) * _pr_u, 2)
+                    _custo_aplic += _pr_t
                     rows.append([
                         P(f"<b>🌱 {_vp.get('nome','Semente')}</b> · {_vp.get('pop',0):,} pl/ha · {_vp.get('esp',0)} cm{_tsi_pdf}",8,True,colors.HexColor("#14532d")),
                         P("Semente",8),
@@ -3316,11 +3348,16 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                         P("kg/ha",8,False,None,TA_CENTER),
                         P(f"{_vp.get('ha',0)} ha",8,False,None,TA_CENTER),
                         P(f"<b>{_vp.get('total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                        P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
+                        P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
                     ])
             elif _dp.get("semente") or _dp.get("dose_sem_ha",0) > 0:
                 _sem_nome = _dp.get("semente","Semente")
                 _tsi = f" | TSI: {_dp['tsi']}" if _dp.get("tsi") else ""
                 _pop = f" | Pop: {_dp.get('populacao',0):,} pl/ha" if _dp.get("populacao",0) > 0 else ""
+                _pr_u, _base_pr, _ = _preco_pdf(_sem_nome)
+                _pr_t = round(_dp.get("semente_total_kg",0) * _pr_u, 2)
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🌱 {_sem_nome}</b>{_pop}{_tsi}",8,True,colors.HexColor("#14532d")),
                     P("Semente",8),
@@ -3328,9 +3365,14 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("kg/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P(f"<b>{_dp.get('semente_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # Adubo base
             if _dp.get("adubo_nome") and _dp.get("adubo_kg_ha",0) > 0:
+                _pr_u, _base_pr, _ = _preco_pdf(_dp["adubo_nome"])
+                _pr_t = round(_dp.get("adubo_total_kg",0) * _pr_u, 2)
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🟡 {_dp['adubo_nome']}</b>",8,True),
                     P("Fertilizante",8),
@@ -3338,9 +3380,14 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("kg/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P(f"<b>{_dp.get('adubo_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # KCl
             if _dp.get("kcl_nome") and _dp.get("kcl_kg_ha",0) > 0:
+                _pr_u, _base_pr, _ = _preco_pdf(_dp["kcl_nome"])
+                _pr_t = round(_dp.get("kcl_total_kg",0) * _pr_u, 2)
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>🟣 {_dp['kcl_nome']}</b>",8,True),
                     P("KCl/Potássio",8),
@@ -3348,9 +3395,14 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("kg/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P(f"<b>{_dp.get('kcl_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # Ureia
             if _dp.get("ureia_nome") and _dp.get("ureia_kg_ha",0) > 0:
+                _pr_u, _base_pr, _ = _preco_pdf(_dp["ureia_nome"])
+                _pr_t = round(_dp.get("ureia_total_kg",0) * _pr_u, 2)
+                _custo_aplic += _pr_t
                 rows.append([
                     P(f"<b>⬜ {_dp['ureia_nome']}</b>",8,True),
                     P("Ureia/N",8),
@@ -3358,6 +3410,8 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("kg/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P(f"<b>{_dp.get('ureia_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
+                    P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
                 ])
             # Inoculante 1
             if _dp.get("inoc1_nome") and _dp.get("inoc1_dose",0) > 0:
@@ -3366,6 +3420,8 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("Inoculante sulco",8),
                     P(str(_dp.get("inoc1_dose",0)),8,False,None,TA_CENTER),
                     P("mL/ha",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                 ])
@@ -3378,6 +3434,8 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("mL/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
                 ])
             # Inoculante semente
             if _dp.get("inoc3_nome") and _dp.get("inoc3_dose",0) > 0:
@@ -3386,6 +3444,8 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("Inoc. semente",8),
                     P(str(_dp.get("inoc3_dose",0)),8,False,None,TA_CENTER),
                     P("mL/sc",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                 ])
@@ -3398,6 +3458,8 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("kg/L ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
                 ])
             # Micro 2
             if _dp.get("micro2_nome") and _dp.get("micro2_dose",0) > 0:
@@ -3408,15 +3470,25 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P("kg/L ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
+                    P("—",8,False,None,TA_CENTER),
                 ])
 
         if len(rows) == 1:
-            rows.append([P("Nenhum produto registrado",8,False,COR_SUB),"","","","",""])
+            rows.append([P("Nenhum produto registrado",8,False,COR_SUB),"","","","","","",""])
 
-        tp = Table(rows, colWidths=[4.5*cm,2.5*cm,2*cm,2*cm,3*cm,4.5*cm])
+        # Linha de subtotal da aplicação
+        rows.append([
+            P("<b>TOTAL DESTA APLICAÇÃO</b>",8,True,COR_BRANCO), "", "", "", "", "",
+            "", P(f"<b>R$ {_custo_aplic:,.2f}</b>",9,True,COR_BRANCO,TA_CENTER),
+        ])
+        _custo_total_pdf += _custo_aplic
+
+        tp = Table(rows, colWidths=[3.8*cm,1.7*cm,1.4*cm,1.3*cm,2.0*cm,2.4*cm,1.9*cm,2.2*cm])
         stp = [("BACKGROUND",(0,0),(-1,0),COR_VERDE_E),("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
                ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
-               ("LEFTPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE")]
+               ("LEFTPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+               ("BACKGROUND",(0,-1),(-1,-1),COR_VERDE),("SPAN",(0,-1),(5,-1))]
         for ri, p in enumerate(aplic.get("Produtos",[]),1):
             stp.append(("BACKGROUND",(1,ri),(1,ri),COR_TIPO.get(p.get("Tipo",""),COR_CINZA)))
             stp.append(("BACKGROUND",(0,ri),(0,ri),COR_CINZA if ri%2 else COR_BRANCO))
@@ -3431,6 +3503,19 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
             ("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),8)]))
 
         story.append(KeepTogether([tc,tp,ta,Spacer(1,5*mm)]))
+
+    # ── TOTAL GERAL DO RELATÓRIO (todas as aplicações, área total) ─────────
+    story.append(Spacer(1,2*mm))
+    tg = [[P(f"💰 CUSTO TOTAL GERAL — {area_ha} ha" + (f" de {cultura}" if cultura else ""),
+             11,True,COR_BRANCO),
+           P(f"R$ {_custo_total_pdf:,.2f}",13,True,COR_BRANCO,TA_RIGHT)]]
+    ttg = Table(tg, colWidths=[13*cm,5.5*cm])
+    ttg.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),COR_VERDE_E),
+        ("TOPPADDING",(0,0),(-1,-1),9),("BOTTOMPADDING",(0,0),(-1,-1),9),
+        ("LEFTPADDING",(0,0),(-1,-1),10),("RIGHTPADDING",(0,0),(-1,-1),10),
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.append(ttg)
+    story.append(Spacer(1,3*mm))
 
     story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
     story.append(Spacer(1,2*mm))
@@ -3834,53 +3919,25 @@ def score_solo(d, cultura="Soja"):
 
 def preco_por_kg_ou_l(item):
     """
-    Converte o "Valor Unitário R$" de um item do estoque pra preço por kg ou por L,
-    não importa em que unidade ele foi cadastrado (kg, L, g, mL, sc ou un).
-    Retorna (preco_por_kg_ou_l, "kg"|"L", aviso).
-    Se não der pra converter com segurança (ex: "sc"/"un" sem peso/volume
-    informado na Embalagem), devolve um aviso e o preço cru (pode estar errado).
+    Retorna o preço unitário (R$/kg ou R$/L) de um item do estoque, direto como
+    foi cadastrado — sem tentar converter por saca/embalagem. O cálculo de custo
+    é sempre: dose por hectare × área total = quantidade total, × preço unitário.
     """
     if not item:
         return 0.0, "kg", None
     _preco = float(item.get("Valor Unitário R$", 0) or 0)
     _u = (item.get("Unidade","") or "").strip().lower()
-    if _u == "kg":
-        return _preco, "kg", None
-    if _u == "l":
-        return _preco, "L", None
-    if _u == "g":
-        return _preco * 1000, "kg", None   # preço era por grama → por kg
-    if _u == "ml":
-        return _preco * 1000, "L", None    # preço era por mL → por L
-    if _u in ("sc", "un"):
-        _emb = (item.get("Embalagem","") or "")
-        _m = re.search(r"([\d.,]+)\s*(kg|l|g|ml)\b", _emb.lower())
-        if _m and _preco > 0:
-            _num = float(_m.group(1).replace(",", "."))
-            _un_emb = _m.group(2)
-            if _num > 0:
-                if _un_emb == "kg": return round(_preco/_num, 4), "kg", None
-                if _un_emb == "l":  return round(_preco/_num, 4), "L", None
-                if _un_emb == "g":  return round(_preco/(_num/1000), 4), "kg", None
-                if _un_emb == "ml": return round(_preco/(_num/1000), 4), "L", None
-        _aviso = (f"⚠️ \"{item.get('Insumo','')}\" está cadastrado por {item.get('Unidade','')} "
-                  f"(embalagem: {_emb or 'não informada'}) — não dá pra converter automaticamente "
-                  f"pra kg/L, então o custo pode estar incorreto. Edite o estoque e informe o peso/volume "
-                  f"da embalagem (ex: \"40 kg\", \"20 L\") ou cadastre o preço direto por kg/L.")
-        return _preco, "kg", _aviso
-    return _preco, "kg", None
+    _base = "L" if _u in ("l", "ml") else "kg"
+    return _preco, _base, None
 
 
 def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
     """
     Dá baixa no estoque convertendo unidades automaticamente.
-    A dose aplicada pode vir em mL/ha, g/ha, kg/ha, L/ha — isso é convertido
-    pra kg ou L (base física). Depois, se o item no estoque for controlado em
-    "sc" (saca) ou "un" (unidade) em vez de kg/L, converte de novo usando o
-    peso/volume da Embalagem cadastrada, senão a baixa fica errada.
+    Estoque sempre em L ou kg. Aplicação pode ser mL/ha, g/ha, etc.
     """
     def converter_para_base(qtd, unid):
-        """Converte a DOSE (mL/ha, g/ha etc.) pra unidade física base: L ou kg."""
+        """Converte para a unidade base: L ou kg."""
         unid = (unid or "").lower().replace(" ", "")
         base = unid.split("/")[0]  # "ml/ha"->"ml"  "kg/ha"->"kg"  "g/ha"->"g"  "mg/ha"->"mg"
         if base == "ml": return qtd / 1000       # mL → L
@@ -3888,35 +3945,16 @@ def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
         if base == "mg": return qtd / 1_000_000
         return qtd  # já em L ou kg
 
-    qtd_base = converter_para_base(quantidade_usada, unidade_usada)  # sempre em kg ou L
+    qtd_convertida = converter_para_base(quantidade_usada, unidade_usada)
 
     for item in st.session_state.estoque:
         if item["Insumo"] == nome_insumo:
-            _u_item = (item.get("Unidade","") or "").strip().lower()
-            if _u_item in ("sc", "un"):
-                # Item controlado por saca/unidade — converte kg/L pra nº de sacas/unidades
-                _emb = (item.get("Embalagem","") or "")
-                _m = re.search(r"([\d.,]+)\s*(kg|l|g|ml)\b", _emb.lower())
-                if _m:
-                    _num = float(_m.group(1).replace(",", "."))
-                    _un_emb = _m.group(2)
-                    _fator = _num/1000 if _un_emb in ("g","ml") else _num  # tudo em kg/L
-                    qtd_convertida = qtd_base / _fator if _fator > 0 else qtd_base
-                else:
-                    qtd_convertida = qtd_base  # não deu pra converter — melhor esforço
-            elif _u_item == "g":
-                qtd_convertida = qtd_base * 1000   # base está em kg, item em g
-            elif _u_item == "ml":
-                qtd_convertida = qtd_base * 1000   # base está em L, item em mL
-            else:
-                qtd_convertida = qtd_base          # item já em kg ou L
-
             estoque_atual = float(item.get("Quantidade", 0))
             if estoque_atual >= qtd_convertida:
                 item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
                 item["Valor Total R$"] = item["Quantidade"] * item.get("Valor Unitário R$", 0)
-                return True, f"Baixa de {qtd_convertida:.3f} {item.get('Unidade','')} realizada."
-            return False, f"Estoque insuficiente: tem {estoque_atual:.3f} {item.get('Unidade','')}, precisa {qtd_convertida:.3f}"
+                return True, f"Baixa de {qtd_convertida:.3f} realizada."
+            return False, f"Estoque insuficiente: tem {estoque_atual:.3f}, precisa {qtd_convertida:.3f}"
     return False, "Insumo não encontrado no estoque."
 
 
