@@ -3917,18 +3917,61 @@ def score_solo(d, cultura="Soja"):
     return score, classe, alertas
 
 
+_PKG_RE = re.compile(r"([\d.,]+)\s*(kg|ml|gr|l|g)\b", re.IGNORECASE)
+
+def _parse_pacote(texto):
+    """Extrai (número, unidade) de um texto tipo '10 L', '20L', '880GR', '500 mL'."""
+    if not texto:
+        return None
+    m = _PKG_RE.search(texto)
+    if not m:
+        return None
+    try:
+        num = float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+    un = m.group(2).lower()
+    if un == "gr": un = "g"
+    if num <= 0:
+        return None
+    return num, un  # un em {kg, ml, l, g}
+
+
 def preco_por_kg_ou_l(item):
     """
-    Retorna o preço unitário (R$/kg ou R$/L) de um item do estoque, direto como
-    foi cadastrado — sem tentar converter por saca/embalagem. O cálculo de custo
-    é sempre: dose por hectare × área total = quantidade total, × preço unitário.
+    Preço por kg ou por L de um item do estoque.
+    Na prática o preço quase sempre é cadastrado pelo tamanho da EMBALAGEM
+    comprada (ex: R$ 549 pela bombona de 10 L, não R$ 549 por litro) — então
+    aqui a gente converte usando o tamanho real da embalagem: primeiro olha o
+    campo "Embalagem" do estoque, e se não tiver, olha o próprio nome do
+    produto (que no seu catálogo já vem com o tamanho no final, tipo
+    "WINFIELD INTERLOCK 10L" ou "HERB. PAXEO 880GR").
+    Retorna (preço_por_kg_ou_l, "kg"|"L", aviso).
     """
     if not item:
         return 0.0, "kg", None
     _preco = float(item.get("Valor Unitário R$", 0) or 0)
+    if _preco <= 0:
+        return 0.0, "kg", None
+
+    _pacote = _parse_pacote(item.get("Embalagem","")) or _parse_pacote(item.get("Insumo",""))
+    if _pacote:
+        _num, _un = _pacote
+        if _un == "l":  return round(_preco/_num, 4), "L", None
+        if _un == "kg": return round(_preco/_num, 4), "kg", None
+        if _un == "ml": return round(_preco/(_num/1000), 4), "L", None
+        if _un == "g":  return round(_preco/(_num/1000), 4), "kg", None
+
+    # Não achou tamanho de embalagem — usa a Unidade cadastrada como último recurso
     _u = (item.get("Unidade","") or "").strip().lower()
-    _base = "L" if _u in ("l", "ml") else "kg"
-    return _preco, _base, None
+    if _u == "kg": return _preco, "kg", None
+    if _u == "l":  return _preco, "L", None
+    if _u == "g":  return _preco * 1000, "kg", None
+    if _u == "ml": return _preco * 1000, "L", None
+    _aviso = (f"⚠️ Não consegui identificar o tamanho da embalagem de \"{item.get('Insumo','')}\" "
+              f"pra converter o preço pra R$/kg ou R$/L — o custo mostrado pode estar errado. "
+              f"Edite o estoque e informe a Embalagem (ex: \"20 L\").")
+    return _preco, "kg", _aviso
 
 
 def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
