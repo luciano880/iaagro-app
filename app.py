@@ -3384,18 +3384,24 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
                     P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
                 ])
-            # Adubo base
-            if _dp.get("adubo_nome") and _dp.get("adubo_kg_ha",0) > 0:
-                _pr_u, _base_pr, _ = _preco_pdf(_dp["adubo_nome"])
-                _pr_t = round(_dp.get("adubo_total_kg",0) * _pr_u, 2)
+            # Adubos de base (lista — pode ter 2+ tipos, ex: Inrizza + Top Phos)
+            _adubos_pdf = _dp.get("adubos") or (
+                [{"nome": _dp["adubo_nome"], "kg_ha": _dp.get("adubo_kg_ha",0),
+                  "total_kg": _dp.get("adubo_total_kg",0)}]
+                if _dp.get("adubo_nome") and _dp.get("adubo_kg_ha",0) > 0 else []
+            )
+            for _adb in _adubos_pdf:
+                _pr_u, _base_pr, _ = _preco_pdf(_adb.get("nome",""))
+                _adb_total = _adb.get("total_kg",0) or round(_adb.get("kg_ha",0) * float(aplic.get("Área aplicada ha",0) or 0), 1)
+                _pr_t = round(_adb_total * _pr_u, 2)
                 _custo_aplic += _pr_t
                 rows.append([
-                    P(f"<b>🟡 {_dp['adubo_nome']}</b>",8,True),
+                    P(f"<b>🟡 {_adb.get('nome','')}</b>",8,True),
                     P("Fertilizante",8),
-                    P(str(_dp.get("adubo_kg_ha",0)),8,False,None,TA_CENTER),
+                    P(str(_adb.get("kg_ha",0)),8,False,None,TA_CENTER),
                     P("kg/ha",8,False,None,TA_CENTER),
                     P("—",8,False,None,TA_CENTER),
-                    P(f"<b>{_dp.get('adubo_total_kg',0):,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
+                    P(f"<b>{_adb_total:,.0f}</b> kg",8,True,COR_VERDE_E,TA_CENTER),
                     P(f"R$ {_pr_u:.2f}",8,False,None,TA_CENTER),
                     P(f"<b>R$ {_pr_t:,.2f}</b>",8,True,COR_VERDE_E,TA_CENTER),
                 ])
@@ -7611,13 +7617,38 @@ if menu == "📦 Operacional":
             # Lista do estoque + opção manual
             _est_nomes = ["— digitar manualmente —"] + [i["Insumo"] for i in st.session_state.estoque]
 
-            _fl_c1, _fl_c2, _fl_c3 = st.columns(3)
+            # ── ADUBOS DE BASE (acumulável — pode adicionar 2 ou mais, ex: Inrizza + Top Phos) ──
+            if "pl_adubos" not in st.session_state:
+                st.session_state.pl_adubos = []
 
-            # Adubo base
-            _pl_adubo_sel  = _fl_c1.selectbox("🔍 Adubo de base (estoque)", _est_nomes, key="pl_sel_adubo")
-            _pl_adubo_man  = _fl_c1.text_input("Ou digite o nome", placeholder="MAP, NPK 08-28-16...", key="pl_txt_adubo") if _pl_adubo_sel == "— digitar manualmente —" else ""
-            _pl_adubo_nome = _pl_adubo_man if _pl_adubo_sel == "— digitar manualmente —" else _pl_adubo_sel
-            _pl_adubo_kg   = _fl_c1.number_input("Dose adubo (kg/ha)", min_value=0.0, step=5.0, key="pl_num_adubo")
+            with st.form("form_add_adubo", clear_on_submit=True):
+                _ad_c1, _ad_c2, _ad_c3 = st.columns([3,2,1])
+                _ad_sel  = _ad_c1.selectbox("🔍 Adubo de base (estoque)", _est_nomes, key="ad_sel")
+                _ad_man  = _ad_c1.text_input("Ou digite o nome", placeholder="MAP, Inrizza, Top Phos...", key="ad_man") if _ad_sel == "— digitar manualmente —" else ""
+                _ad_nome = _ad_man if _ad_sel == "— digitar manualmente —" else _ad_sel
+                _ad_kg   = _ad_c2.number_input("Dose (kg/ha)", min_value=0.0, step=5.0, key="ad_kg")
+                _ad_add  = _ad_c3.form_submit_button("➕ Adicionar", use_container_width=True)
+
+            if _ad_add and _ad_nome and _ad_nome != "— digitar manualmente —" and _ad_kg > 0:
+                st.session_state.pl_adubos.append({
+                    "nome": _ad_nome, "kg_ha": _ad_kg,
+                    "total_kg": round(_ad_kg * area_aplic, 1),
+                })
+                st.rerun()
+
+            if st.session_state.pl_adubos:
+                for _ai, _ad in enumerate(st.session_state.pl_adubos):
+                    _adl1, _adl2 = st.columns([5,1])
+                    _adl1.markdown(f"🟡 **{_ad['nome']}** — {_ad['kg_ha']} kg/ha → Total: {_ad['total_kg']:,.0f} kg")
+                    if _adl2.button("🗑️", key=f"del_adubo_{_ai}"):
+                        st.session_state.pl_adubos.pop(_ai)
+                        st.rerun()
+
+            # Compatibilidade: 1º adubo da lista alimenta os campos legados
+            _pl_adubo_nome = st.session_state.pl_adubos[0]["nome"] if st.session_state.pl_adubos else ""
+            _pl_adubo_kg   = st.session_state.pl_adubos[0]["kg_ha"] if st.session_state.pl_adubos else 0.0
+
+            _fl_c2, _fl_c3 = st.columns(2)
 
             # KCl
             _pl_kcl_sel   = _fl_c2.selectbox("🔍 KCl / Potássio (estoque)", _est_nomes, key="pl_sel_kcl")
@@ -7663,14 +7694,16 @@ if menu == "📦 Operacional":
             _pl_micro2_dose = _mn_c2.number_input("Dose micro 2 (kg/L ha)", min_value=0.0, step=0.1, key="pl_num_micro2")
 
             # Mostra totais por ha e área
-            if area_aplic > 0 and (_pl_adubo_kg + _pl_kcl_kg + _pl_ureia_kg) > 0:
+            _soma_adubos_kg = sum(a["kg_ha"] for a in st.session_state.get("pl_adubos", []))
+            if area_aplic > 0 and (_soma_adubos_kg + _pl_kcl_kg + _pl_ureia_kg) > 0:
                 st.markdown("---")
                 st.markdown("**📊 Totais para a área informada:**")
                 _t1, _t2, _t3, _t4 = st.columns(4)
-                if _pl_adubo_kg > 0:
-                    _t1.metric(f"🟡 {_pl_adubo_nome or 'Adubo'}",
-                               f"{_pl_adubo_kg * area_aplic:,.0f} kg",
-                               f"{_pl_adubo_kg} kg/ha")
+                if _soma_adubos_kg > 0:
+                    _n_adubos = len(st.session_state.get("pl_adubos", []))
+                    _t1.metric(f"🟡 Adubos ({_n_adubos})" if _n_adubos > 1 else f"🟡 {_pl_adubo_nome or 'Adubo'}",
+                               f"{_soma_adubos_kg * area_aplic:,.0f} kg",
+                               f"{_soma_adubos_kg} kg/ha")
                 if _pl_kcl_kg > 0:
                     _t2.metric(f"🟣 {_pl_kcl_nome or 'KCl'}",
                                f"{_pl_kcl_kg * area_aplic:,.0f} kg",
@@ -7695,6 +7728,7 @@ if menu == "📦 Operacional":
                     "espacamento": _pl_espacamento,
                     "variedades": st.session_state.get("pl_variedades", []),
                     "adubo_nome": _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
+                    "adubos": [dict(a) for a in st.session_state.get("pl_adubos", [])],
                     "kcl_nome": _pl_kcl_nome, "kcl_kg_ha": _pl_kcl_kg,
                     "ureia_nome": _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
                     "inoc1_nome": _pl_inoc1_nome, "inoc1_dose": _pl_inoc1_dose,
@@ -7730,6 +7764,7 @@ if menu == "📦 Operacional":
                 })
                 salvar_dados_iaagro()
                 st.session_state.pl_variedades = []
+                st.session_state.pl_adubos = []
                 success_box(f"✅ Plantio salvo no cronograma da {st.session_state.get('aplic_cultura_ativa','cultura')}!")
                 st.rerun()
 
@@ -7806,6 +7841,7 @@ if menu == "📦 Operacional":
                         "espacamento":  _pl_espacamento,
                         "variedades":   st.session_state.get("pl_variedades", []),
                         "adubo_nome":   _pl_adubo_nome, "adubo_kg_ha": _pl_adubo_kg,
+                        "adubos": [dict(a) for a in st.session_state.get("pl_adubos", [])],
                         "kcl_nome":     _pl_kcl_nome,   "kcl_kg_ha":   _pl_kcl_kg,
                         "ureia_nome":   _pl_ureia_nome, "ureia_kg_ha": _pl_ureia_kg,
                         "inoc1_nome":   _pl_inoc1_nome, "inoc1_dose":  _pl_inoc1_dose,
@@ -7843,6 +7879,7 @@ if menu == "📦 Operacional":
                 salvar_dados_iaagro()
                 if _is_plantio:
                     st.session_state.pl_variedades = []
+                    st.session_state.pl_adubos = []
                 success_box(f"✅ {nome_aplic} salva! {len(produtos_aplic)} produto(s).")
                 st.rerun()
 
@@ -7967,8 +8004,13 @@ if menu == "📦 Operacional":
 
                         # Fertilizantes
                         _ferts = []
-                        if _dp_view.get("adubo_nome") and _dp_view.get("adubo_kg_ha",0) > 0:
-                            _ferts.append(f"🟡 **{_dp_view['adubo_nome']}** — {_dp_view['adubo_kg_ha']} kg/ha (Total: {_dp_view.get('adubo_total_kg',0):,.0f} kg)")
+                        _adubos_view = _dp_view.get("adubos") or (
+                            [{"nome": _dp_view["adubo_nome"], "kg_ha": _dp_view.get("adubo_kg_ha",0),
+                              "total_kg": _dp_view.get("adubo_total_kg",0)}]
+                            if _dp_view.get("adubo_nome") and _dp_view.get("adubo_kg_ha",0) > 0 else []
+                        )
+                        for _adbv in _adubos_view:
+                            _ferts.append(f"🟡 **{_adbv.get('nome','')}** — {_adbv.get('kg_ha',0)} kg/ha (Total: {_adbv.get('total_kg',0):,.0f} kg)")
                         if _dp_view.get("kcl_nome") and _dp_view.get("kcl_kg_ha",0) > 0:
                             _ferts.append(f"🟣 **{_dp_view['kcl_nome']}** — {_dp_view['kcl_kg_ha']} kg/ha (Total: {_dp_view.get('kcl_total_kg',0):,.0f} kg)")
                         if _dp_view.get("ureia_nome") and _dp_view.get("ureia_kg_ha",0) > 0:
