@@ -4316,13 +4316,35 @@ if menu == "🏠 Início":
             st.metric("Média", f"{produtividade_media:.1f} sc/ha")
         with col6:
             st.subheader("⚠️ Alertas de Estoque")
-            estoque_baixo = [i for i in st.session_state.estoque if i.get("Quantidade", 0) < 10]
+            estoque_baixo = [i for i in st.session_state.estoque if float(i.get("Quantidade",0) or 0) < 10]
+            _est_zerados = [i for i in estoque_baixo if float(i.get("Quantidade",0) or 0) <= 0]
+            _est_baixos  = [i for i in estoque_baixo if float(i.get("Quantidade",0) or 0) > 0]
             if not estoque_baixo:
-                st.markdown('<div style="background:#166534;color:#fff;padding:12px 18px;border-radius:10px;font-weight:700;">✅ Nenhum alerta de estoque.</div>', unsafe_allow_html=True)
+                st.markdown("""
+                <div style='background:#0f172a;border:1px solid #1e3a2f;border-left:3px solid #22c55e;
+                border-radius:8px;padding:7px 12px;margin:2px 0;'>
+                <span style='color:#22c55e;font-size:12px;font-weight:700;letter-spacing:.4px;'>✓ ESTOQUE OK</span>
+                <span style='color:#94a3b8;font-size:12px;'> — nenhum item abaixo do mínimo</span>
+                </div>""", unsafe_allow_html=True)
             else:
-                for item in estoque_baixo:
-                    nome = item.get("Insumo", item.get("Produto", "Produto"))
-                    st.markdown(f'<div style="background:#92400e;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;margin-bottom:4px;">⚠️ {nome} com estoque baixo.</div>', unsafe_allow_html=True)
+                if _est_zerados:
+                    _txt_z = " · ".join(i.get("Insumo", i.get("Produto","Produto")) for i in _est_zerados)
+                    st.markdown(f"""
+                    <div style='background:#0f172a;border:1px solid #3f1d1d;border-left:3px solid #ef4444;
+                    border-radius:8px;padding:7px 12px;margin:2px 0;'>
+                    <span style='color:#ef4444;font-size:12px;font-weight:700;letter-spacing:.4px;'>ESGOTADO ({len(_est_zerados)})</span>
+                    <span style='color:#cbd5e1;font-size:12px;'> — {_txt_z}</span>
+                    </div>""", unsafe_allow_html=True)
+                if _est_baixos:
+                    _txt_b = " · ".join(
+                        f"{i.get('Insumo', i.get('Produto','Produto'))} ({float(i.get('Quantidade',0)):.0f} {i.get('Unidade','')})"
+                        for i in _est_baixos)
+                    st.markdown(f"""
+                    <div style='background:#0f172a;border:1px solid #3f2d1d;border-left:3px solid #f59e0b;
+                    border-radius:8px;padding:7px 12px;margin:2px 0;'>
+                    <span style='color:#f59e0b;font-size:12px;font-weight:700;letter-spacing:.4px;'>ESTOQUE BAIXO ({len(_est_baixos)})</span>
+                    <span style='color:#cbd5e1;font-size:12px;'> — {_txt_b}</span>
+                    </div>""", unsafe_allow_html=True)
 
         st.divider()
         st.subheader("📋 Resumo das Áreas")
@@ -6092,24 +6114,34 @@ if menu == "🧪 Solo & Adubação":
             st.session_state.aplicacoes.append(nova_aplicacao)
             salvar_dados_iaagro()
             success_box("Aplicação de adubação IA enviada para o histórico!")
-            st.subheader("🚨 Alerta Inteligente de Estoque")
+            st.markdown("**📦 Verificação de Estoque**")
             for prod in [{"Insumo":"MAP 11-52-00","Necessario":total_map},
                          {"Insumo":"KCL 00-00-60","Necessario":total_kcl},
                          {"Insumo":"Ureia 45% N","Necessario":total_ureia}]:
                 nome       = prod["Insumo"]
                 necessario = prod["Necessario"]
                 estoque_item = next((item for item in st.session_state.estoque if item["Insumo"] == nome), None)
-                if estoque_item is None:
-                    error_box(f"❌ {nome}: não cadastrado no estoque.")
-                elif necessario <= 0:
-                    info_box(f"ℹ️ {nome}: não necessário nesta recomendação.")
+                if necessario <= 0:
+                    _cor_e, _lbl_e, _det_e = "#64748b", "N/A", "não necessário nesta recomendação"
+                elif estoque_item is None:
+                    _cor_e, _lbl_e, _det_e = "#ef4444", "SEM CADASTRO", "não cadastrado no estoque"
                 elif estoque_item.get("Quantidade",0) >= necessario:
                     sobra = estoque_item["Quantidade"] - necessario
-                    success_box(f"✅ {nome}: estoque suficiente. Necessário: {necessario:.1f} | Sobra: {sobra:.1f} kg")
+                    _cor_e, _lbl_e, _det_e = "#22c55e", "OK", f"necessário {necessario:,.0f} kg · sobra {sobra:,.0f} kg"
                 else:
                     falta     = necessario - estoque_item["Quantidade"]
                     cobertura = (estoque_item["Quantidade"] / necessario) * 100
-                    warning_box(f"⚠️ {nome}: estoque insuficiente. Falta: {falta:.1f} kg | Cobertura: {cobertura:.0f}%")
+                    _cor_e, _lbl_e, _det_e = "#f59e0b", "INSUFICIENTE", f"falta {falta:,.0f} kg · cobertura {cobertura:.0f}%"
+                st.markdown(f"""
+                <div style='background:#0f172a;border-left:3px solid {_cor_e};
+                border-radius:6px;padding:4px 10px;margin:2px 0;
+                display:flex;justify-content:space-between;align-items:center;'>
+                <span style='color:#e2e8f0;font-size:12px;font-weight:600;'>{nome}</span>
+                <span style='font-size:11px;'>
+                <span style='color:{_cor_e};font-weight:700;letter-spacing:.3px;'>{_lbl_e}</span>
+                <span style='color:#94a3b8;'> · {_det_e}</span>
+                </span>
+                </div>""", unsafe_allow_html=True)
 
         st.divider()
         st.subheader("Micronutrientes")
@@ -7479,17 +7511,19 @@ if menu == "📦 Operacional":
         # Cards de alertas
         _alertas = [i for i in st.session_state.estoque if float(i.get("Quantidade",0)) <= float(i.get("Estoque Mínimo",5))]
         if _alertas:
-            with st.expander(f"🔔 {len(_alertas)} alerta(s) de estoque", expanded=True):
+            with st.expander(f"🔔 {len(_alertas)} alerta(s) de estoque", expanded=False):
                 for _al in _alertas:
-                    _cor = "#7f1d1d" if float(_al.get("Quantidade",0)) <= 0 else "#78350f"
-                    _ico = "❌" if float(_al.get("Quantidade",0)) <= 0 else "⚠️"
+                    _zerado = float(_al.get("Quantidade",0)) <= 0
+                    _cor_b  = "#ef4444" if _zerado else "#f59e0b"
+                    _lbl    = "ESGOTADO" if _zerado else "BAIXO"
                     st.markdown(f"""
-                    <div style='background:{_cor};border-radius:8px;padding:8px 14px;
-                    margin:3px 0;display:flex;justify-content:space-between;align-items:center;'>
-                    <span style='color:#fff;font-weight:600;'>{_ico} {_al.get('Insumo','')}</span>
-                    <span style='color:#fca5a5;font-size:13px;'>
-                    {_al.get('Quantidade',0):.2f} {_al.get('Unidade','')} restante
-                    (mín: {_al.get('Estoque Mínimo',5):.0f})
+                    <div style='background:#0f172a;border-left:3px solid {_cor_b};
+                    border-radius:6px;padding:4px 10px;margin:2px 0;
+                    display:flex;justify-content:space-between;align-items:center;'>
+                    <span style='color:#e2e8f0;font-size:12px;font-weight:600;'>{_al.get('Insumo','')}</span>
+                    <span style='font-size:11px;'>
+                    <span style='color:{_cor_b};font-weight:700;letter-spacing:.3px;'>{_lbl}</span>
+                    <span style='color:#94a3b8;'> · {_al.get('Quantidade',0):.1f} {_al.get('Unidade','')} (mín {_al.get('Estoque Mínimo',5):.0f})</span>
                     </span>
                     </div>""", unsafe_allow_html=True)
 
