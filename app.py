@@ -4317,8 +4317,6 @@ if menu == "🏠 Início":
         with col6:
             st.subheader("⚠️ Alertas de Estoque")
             estoque_baixo = [i for i in st.session_state.estoque if float(i.get("Quantidade",0) or 0) < 10]
-            _est_zerados = [i for i in estoque_baixo if float(i.get("Quantidade",0) or 0) <= 0]
-            _est_baixos  = [i for i in estoque_baixo if float(i.get("Quantidade",0) or 0) > 0]
             if not estoque_baixo:
                 st.markdown("""
                 <div style='background:#0f172a;border:1px solid #1e3a2f;border-left:3px solid #22c55e;
@@ -4327,24 +4325,37 @@ if menu == "🏠 Início":
                 <span style='color:#94a3b8;font-size:12px;'> — nenhum item abaixo do mínimo</span>
                 </div>""", unsafe_allow_html=True)
             else:
-                if _est_zerados:
-                    _txt_z = " · ".join(i.get("Insumo", i.get("Produto","Produto")) for i in _est_zerados)
-                    st.markdown(f"""
-                    <div style='background:#0f172a;border:1px solid #3f1d1d;border-left:3px solid #ef4444;
-                    border-radius:8px;padding:7px 12px;margin:2px 0;'>
-                    <span style='color:#ef4444;font-size:12px;font-weight:700;letter-spacing:.4px;'>ESGOTADO ({len(_est_zerados)})</span>
-                    <span style='color:#cbd5e1;font-size:12px;'> — {_txt_z}</span>
-                    </div>""", unsafe_allow_html=True)
-                if _est_baixos:
-                    _txt_b = " · ".join(
-                        f"{i.get('Insumo', i.get('Produto','Produto'))} ({float(i.get('Quantidade',0)):.0f} {i.get('Unidade','')})"
-                        for i in _est_baixos)
-                    st.markdown(f"""
-                    <div style='background:#0f172a;border:1px solid #3f2d1d;border-left:3px solid #f59e0b;
-                    border-radius:8px;padding:7px 12px;margin:2px 0;'>
-                    <span style='color:#f59e0b;font-size:12px;font-weight:700;letter-spacing:.4px;'>ESTOQUE BAIXO ({len(_est_baixos)})</span>
-                    <span style='color:#cbd5e1;font-size:12px;'> — {_txt_b}</span>
-                    </div>""", unsafe_allow_html=True)
+                # Ordena: esgotados primeiro, depois por quantidade crescente
+                _est_ord = sorted(estoque_baixo, key=lambda i: float(i.get("Quantidade",0) or 0))
+                _linhas_tbl = []
+                for _n, _it_a in enumerate(_est_ord, 1):
+                    _q  = float(_it_a.get("Quantidade",0) or 0)
+                    _zr = _q <= 0
+                    _cor_s = "#ef4444" if _zr else "#f59e0b"
+                    _lbl_s = "ESGOTADO" if _zr else "BAIXO"
+                    _linhas_tbl.append(f"""
+                    <tr style='border-bottom:1px solid #1e293b;'>
+                    <td style='padding:5px 10px;color:#64748b;font-weight:700;text-align:center;width:34px;'>{_n}</td>
+                    <td style='padding:5px 10px;color:#e2e8f0;font-weight:600;'>{_it_a.get('Insumo', _it_a.get('Produto','Produto'))}</td>
+                    <td style='padding:5px 10px;color:#cbd5e1;text-align:right;white-space:nowrap;'>{_q:.1f} {_it_a.get('Unidade','')}</td>
+                    <td style='padding:5px 10px;text-align:center;white-space:nowrap;'>
+                    <span style='color:{_cor_s};font-weight:700;font-size:11px;letter-spacing:.3px;'>{_lbl_s}</span></td>
+                    </tr>""")
+                st.markdown(f"""
+                <div style='background:#0f172a;border:1px solid #334155;border-radius:8px;
+                max-height:230px;overflow-y:auto;margin:2px 0;'>
+                <table style='width:100%;border-collapse:collapse;font-size:12px;'>
+                <thead>
+                <tr style='position:sticky;top:0;background:#1e293b;z-index:1;'>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:center;width:34px;'>#</th>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:left;'>INSUMO</th>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:right;'>QTD</th>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:center;'>STATUS</th>
+                </tr>
+                </thead>
+                <tbody>{''.join(_linhas_tbl)}</tbody>
+                </table>
+                </div>""", unsafe_allow_html=True)
 
         st.divider()
         st.subheader("📋 Resumo das Áreas")
@@ -7512,20 +7523,38 @@ if menu == "📦 Operacional":
         _alertas = [i for i in st.session_state.estoque if float(i.get("Quantidade",0)) <= float(i.get("Estoque Mínimo",5))]
         if _alertas:
             with st.expander(f"🔔 {len(_alertas)} alerta(s) de estoque", expanded=False):
-                for _al in _alertas:
-                    _zerado = float(_al.get("Quantidade",0)) <= 0
-                    _cor_b  = "#ef4444" if _zerado else "#f59e0b"
-                    _lbl    = "ESGOTADO" if _zerado else "BAIXO"
-                    st.markdown(f"""
-                    <div style='background:#0f172a;border-left:3px solid {_cor_b};
-                    border-radius:6px;padding:4px 10px;margin:2px 0;
-                    display:flex;justify-content:space-between;align-items:center;'>
-                    <span style='color:#e2e8f0;font-size:12px;font-weight:600;'>{_al.get('Insumo','')}</span>
-                    <span style='font-size:11px;'>
-                    <span style='color:{_cor_b};font-weight:700;letter-spacing:.3px;'>{_lbl}</span>
-                    <span style='color:#94a3b8;'> · {_al.get('Quantidade',0):.1f} {_al.get('Unidade','')} (mín {_al.get('Estoque Mínimo',5):.0f})</span>
-                    </span>
-                    </div>""", unsafe_allow_html=True)
+                _al_ord = sorted(_alertas, key=lambda i: float(i.get("Quantidade",0) or 0))
+                _linhas_al = []
+                for _n, _al in enumerate(_al_ord, 1):
+                    _q_a = float(_al.get("Quantidade",0) or 0)
+                    _zr  = _q_a <= 0
+                    _cor_s = "#ef4444" if _zr else "#f59e0b"
+                    _lbl_s = "ESGOTADO" if _zr else "BAIXO"
+                    _linhas_al.append(f"""
+                    <tr style='border-bottom:1px solid #1e293b;'>
+                    <td style='padding:5px 10px;color:#64748b;font-weight:700;text-align:center;width:34px;'>{_n}</td>
+                    <td style='padding:5px 10px;color:#e2e8f0;font-weight:600;'>{_al.get('Insumo','')}</td>
+                    <td style='padding:5px 10px;color:#cbd5e1;text-align:right;white-space:nowrap;'>{_q_a:.1f} {_al.get('Unidade','')}</td>
+                    <td style='padding:5px 10px;color:#94a3b8;text-align:right;white-space:nowrap;'>{float(_al.get('Estoque Mínimo',5)):.0f}</td>
+                    <td style='padding:5px 10px;text-align:center;white-space:nowrap;'>
+                    <span style='color:{_cor_s};font-weight:700;font-size:11px;letter-spacing:.3px;'>{_lbl_s}</span></td>
+                    </tr>""")
+                st.markdown(f"""
+                <div style='background:#0f172a;border:1px solid #334155;border-radius:8px;
+                max-height:230px;overflow-y:auto;margin:2px 0;'>
+                <table style='width:100%;border-collapse:collapse;font-size:12px;'>
+                <thead>
+                <tr style='position:sticky;top:0;background:#1e293b;z-index:1;'>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:center;width:34px;'>#</th>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:left;'>INSUMO</th>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:right;'>QTD</th>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:right;'>MÍN</th>
+                <th style='padding:6px 10px;color:#94a3b8;font-size:11px;text-align:center;'>STATUS</th>
+                </tr>
+                </thead>
+                <tbody>{''.join(_linhas_al)}</tbody>
+                </table>
+                </div>""", unsafe_allow_html=True)
 
         # Tabela principal
         _cols_exib = [c for c in ["Insumo","Categoria","Quantidade","Unidade",
