@@ -8820,21 +8820,50 @@ if menu == "🌍 Inteligência":
     """, unsafe_allow_html=True)
 
     d = st.session_state.dados
-    cidade = d.get("cidade","")
+
+    # ── Seletor de localização (região/estado + cidade) + atualização ──────
+    _UFS_BR = {
+        "AC":"Acre","AL":"Alagoas","AP":"Amapá","AM":"Amazonas","BA":"Bahia",
+        "CE":"Ceará","DF":"Distrito Federal","ES":"Espírito Santo","GO":"Goiás",
+        "MA":"Maranhão","MT":"Mato Grosso","MS":"Mato Grosso do Sul","MG":"Minas Gerais",
+        "PA":"Pará","PB":"Paraíba","PR":"Paraná","PE":"Pernambuco","PI":"Piauí",
+        "RJ":"Rio de Janeiro","RN":"Rio Grande do Norte","RS":"Rio Grande do Sul",
+        "RO":"Rondônia","RR":"Roraima","SC":"Santa Catarina","SP":"São Paulo",
+        "SE":"Sergipe","TO":"Tocantins",
+    }
+    _lista_ufs = list(_UFS_BR.keys())
+    _sel_c1, _sel_c2, _sel_c3 = st.columns([2.2, 1.8, 1])
+    cidade = _sel_c1.text_input("📍 Cidade", value=d.get("cidade","") or "",
+                                 placeholder="Ex: Xanxerê", key="clima_cidade_inp").strip()
+    _uf_clima = _sel_c2.selectbox("🗺️ Estado / Região", _lista_ufs,
+                                   index=_lista_ufs.index("SC"),
+                                   format_func=lambda u: f"{u} — {_UFS_BR[u]}",
+                                   key="clima_uf_sel")
+    with _sel_c3:
+        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Atualizar", key="btn_atualizar_clima", use_container_width=True):
+            st.rerun()
+
     if not cidade:
         st.markdown("""
         <div style='background:#1e3a5f;border-radius:12px;padding:20px;text-align:center;
         border:2px dashed #3b82f6;'>
         <div style='font-size:40px;'>🏙️</div>
         <div style='color:#94a3b8;margin-top:8px;'>
-        Preencha a <b style='color:#6ee7b7;'>cidade</b> no Cadastro da Área para ver o clima em tempo real.
+        Digite a <b style='color:#6ee7b7;'>cidade</b> acima (ou preencha no Cadastro da Área) para ver o clima em tempo real.
         </div></div>""", unsafe_allow_html=True)
     else:
         try:
             import requests as rq_
-            _r = rq_.get(f"https://wttr.in/{cidade}?format=j1", timeout=10)
+            from urllib.parse import quote as _quote_url
+            # Cidade + estado por extenso melhora a precisão do geocoder
+            _loc_query = _quote_url(f"{cidade},{_UFS_BR[_uf_clima]},Brazil")
+            _r = rq_.get(f"https://wttr.in/{_loc_query}?format=j1", timeout=10)
             if _r.status_code == 200:
                 _w   = _r.json()
+                st.caption(f"📡 Exibindo: **{cidade} — {_UFS_BR[_uf_clima]}** · "
+                           f"Atualizado às {datetime.now().strftime('%H:%M:%S')} · "
+                           f"clique em 🔄 Atualizar para dados em tempo real")
                 _cur = _w["current_condition"][0]
                 _temp_c    = int(_cur.get("temp_C", 0))
                 _feels     = int(_cur.get("FeelsLikeC", 0))
