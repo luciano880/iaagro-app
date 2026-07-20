@@ -5936,6 +5936,11 @@ if menu == "🧪 Solo & Adubação":
         potassio     = d.get("potassio", 0)
         ph           = d.get("ph", 0)
         materia_organica = d.get("materia_organica", 0)
+        # Guarda de segurança: garante que nunca dê NameError no botão de
+        # recomendação, mesmo que algum caminho pule os cálculos abaixo.
+        n_ha = p2o5_ha = k2o_ha = 0.0
+        map_ha = kcl_ha = ureia_ha = 0.0
+        total_map = total_kcl = total_ureia = 0.0
 
         st.subheader("🤖 IA Recomendando Adubação")
 
@@ -6079,9 +6084,9 @@ if menu == "🧪 Solo & Adubação":
                 "Talhão": st.session_state.dados.get("talhao",""),
                 "Cultura": cultura, "Tipo": "Adubação IA", "Área ha": area,
                 "Produtos": [
-                    {"Insumo":"MAP 11-52-00","Dose ha":map_ha_ajustado,"Quantidade usada":total_map,"Unidade":"kg"},
-                    {"Insumo":"KCL 00-00-60","Dose ha":kcl_ha_ajustado,"Quantidade usada":total_kcl,"Unidade":"kg"},
-                    {"Insumo":"Ureia 45% N", "Dose ha":ureia_ha_ajustado,"Quantidade usada":total_ureia,"Unidade":"kg"},
+                    {"Insumo":"MAP 11-52-00","Dose ha":map_ha,"Quantidade usada":total_map,"Unidade":"kg"},
+                    {"Insumo":"KCL 00-00-60","Dose ha":kcl_ha,"Quantidade usada":total_kcl,"Unidade":"kg"},
+                    {"Insumo":"Ureia 45% N", "Dose ha":ureia_ha,"Quantidade usada":total_ureia,"Unidade":"kg"},
                 ]
             }
             st.session_state.aplicacoes.append(nova_aplicacao)
@@ -6796,58 +6801,99 @@ if menu == "💰 Financeiro":
         st.session_state.ir_area_total = _ci2.number_input("Área total (ha)", min_value=0.0, value=float(st.session_state.ir_area_total), key="ir_area_inp")
         st.session_state.ir_ano        = _ci3.selectbox("Ano-calendário", [2025,2024,2023,2022], key="ir_ano_sel")
 
-    # ── Auto-importação dos lançamentos do DRE ─────────────────────────────
+    # ── Importação AUTOMÁTICA dos lançamentos (Financeiro + Estoque) ───────
+    # Tudo que é lançado nas abas de Finanças (Custos da Lavoura, Custos
+    # Complementares, Receitas, Contratos de Troca) e no Estoque entra aqui
+    # automaticamente, recalculado a cada acesso (sem duplicar).
     _dre_all = st.session_state.get("dre_registros", [])
-    _dre_ano = [r for r in _dre_all if str(r.get("Safra","")).startswith(str(st.session_state.ir_ano)[:4])]
+    def _pertence_ano_ir(_r):
+        # Entra se a Safra OU a Data do lançamento bater com o ano-calendário
+        # (custos complementares são gravados com Safra vazia, só com Data)
+        _ano_s = str(st.session_state.ir_ano)
+        return (str(_r.get("Safra","") or "").startswith(_ano_s[:4])
+                or str(_r.get("Data","") or "").startswith(_ano_s))
+    _dre_ano = [r for r in _dre_all if _pertence_ano_ir(r)] or _dre_all
 
-    _rec_dre  = sum(r["Valor R$"] for r in _dre_ano if r.get("Tipo") == "Receita")
-    _desp_dre = sum(r["Valor R$"] for r in _dre_ano if r.get("Tipo") in ("Custo Variável","Custo Fixo","Custo"))
+    # Receitas automáticas (Financeiro)
+    _auto_receitas = {"venda_graos": 0.0, "outras_receitas": 0.0}
+    for _r in _dre_ano:
+        if _r.get("Tipo") == "Receita":
+            _auto_receitas["venda_graos"] += float(_r.get("Valor R$",0) or 0)
 
-    # Também soma custos da lavoura
-    _custos_lavoura = sum(r["Valor R$"] for r in _dre_all
-                          if r.get("Origem") == "lavoura")
-    _custos_comp    = sum(r["Valor R$"] for r in _dre_all
-                          if r.get("Origem") == "complementar")
+    # Receitas automáticas (Contratos de Troca / Barter — entrega de grãos)
+    _trocas_all = st.session_state.get("contratos_troca", [])
+    _trocas_ano = [c for c in _trocas_all
+                   if str(c.get("Data entrega","")).startswith(str(st.session_state.ir_ano))] or _trocas_all
+    _auto_rec_trocas = sum(float(c.get("Valor total R$",0) or 0) for c in _trocas_ano)
 
-    _total_despesas_auto = _desp_dre + _custos_lavoura + _custos_comp
+    # Despesas automáticas (Financeiro — todos os lançamentos de custo,
+    # qualquer origem: lavoura, complementar, etc. — categorizados uma única vez)
+    _mapa_cat = {
+        "Semente":"sementes","Sementes":"sementes",
+        "Fertilizante":"fertilizantes","Fertilizantes":"fertilizantes",
+        "Defensivo":"fertilizantes","Defensivos":"fertilizantes",
+        "Diesel":"combustivel","Diesel e lubrificantes":"combustivel",
+        "Combustível":"combustivel",
+        "Mão de obra":"mao_de_obra","Mão de obra mecânica":"mao_de_obra",
+        "Maquinário":"manutencao","Aquisição de maquinário":"manutencao",
+        "Manutenção":"manutencao","Conserto de máquinas":"manutencao",
+        "Compra de peças":"manutencao","Revisão preventiva":"manutencao",
+        "Pneus":"manutencao","Implementos":"manutencao",
+        "Frete":"frete","Seguro":"seguro",
+        "Arrendamento":"arrendamento_pg","Assistência técnica":"assistencia_tec",
+        "Juros":"juros",
+    }
+    _auto_despesas = {}
+    _lanc_fin_pdf  = []  # lançamentos individuais pro detalhamento do PDF
+    for _r in _dre_ano:
+        _vr = float(_r.get("Valor R$",0) or 0)
+        if _r.get("Tipo") in ("Custo Variável","Custo Fixo","Custo","Despesa"):
+            _chave = _mapa_cat.get(_r.get("Categoria",""), "outras_despesas")
+            _auto_despesas[_chave] = _auto_despesas.get(_chave,0.0) + _vr
+            _lanc_fin_pdf.append(("despesa", _r.get("Data",""), _r.get("Categoria",""),
+                                  _r.get("Descrição",""), _vr))
+        elif _r.get("Tipo") == "Receita":
+            _lanc_fin_pdf.append(("receita", _r.get("Data",""), _r.get("Categoria",""),
+                                  _r.get("Descrição",""), _vr))
+    for _c in _trocas_ano:
+        _lanc_fin_pdf.append(("receita", _c.get("Data entrega",""), "Contrato de troca (barter)",
+                              f"{_c.get('Sacas',0):.0f} sc de {_c.get('Grão','')} × R$ {_c.get('Valor/sc R$',0):.2f}",
+                              float(_c.get("Valor total R$",0) or 0)))
 
-    if _rec_dre > 0 or _total_despesas_auto > 0:
+    # Despesas automáticas (Estoque de Insumos — valor investido em cada item)
+    _mapa_cat_estq = {
+        "semente":"sementes","fertilizante":"fertilizantes","adubo":"fertilizantes",
+        "defensivo":"fertilizantes","herbicida":"fertilizantes","fungicida":"fertilizantes",
+        "inseticida":"fertilizantes","inoculante":"fertilizantes","adjuvante":"fertilizantes",
+        "óleo":"fertilizantes","oleo":"fertilizantes","micronutriente":"fertilizantes",
+        "combustível":"combustivel","combustivel":"combustivel","diesel":"combustivel",
+    }
+    _estq_por_cat = {}
+    for _it in st.session_state.get("estoque", []):
+        _vt = float(_it.get("Valor Total R$",0) or 0)
+        if _vt <= 0:
+            _vt = round(float(_it.get("Quantidade",0) or 0) * float(_it.get("Valor Unitário R$",0) or 0), 2)
+        if _vt <= 0:
+            continue
+        _cat_i  = (_it.get("Categoria","") or "").lower()
+        _chave  = next((v for k, v in _mapa_cat_estq.items() if k in _cat_i), "outras_despesas")
+        _auto_despesas[_chave] = _auto_despesas.get(_chave,0.0) + _vt
+        _estq_por_cat.setdefault(_chave, []).append((_it.get("Insumo",""), _vt))
+
+    _auto_rec_total  = sum(_auto_receitas.values()) + _auto_rec_trocas
+    _auto_desp_total = sum(_auto_despesas.values())
+
+    if _auto_rec_total > 0 or _auto_desp_total > 0:
         st.markdown(f"""
         <div style='background:#14532d;border-radius:10px;padding:12px 16px;
         border-left:4px solid #22c55e;margin-bottom:12px;'>
-        <b style='color:#6ee7b7;'>✅ Valores importados automaticamente dos seus lançamentos</b><br>
+        <b style='color:#6ee7b7;'>✅ Importado automaticamente do Financeiro e do Estoque</b><br>
         <span style='color:#f1f5f9;font-size:13px;'>
-        💰 Receitas lançadas: <b>R$ {_rec_dre:,.2f}</b> &nbsp;|&nbsp;
-        📉 Despesas/custos: <b>R$ {_total_despesas_auto:,.2f}</b>
+        💰 Receitas lançadas: <b>R$ {sum(_auto_receitas.values()):,.2f}</b> &nbsp;|&nbsp;
+        🤝 Contratos de troca: <b>R$ {_auto_rec_trocas:,.2f}</b> &nbsp;|&nbsp;
+        📉 Despesas/custos (Financeiro + Estoque): <b>R$ {_auto_desp_total:,.2f}</b><br>
+        <span style='color:#94a3b8;font-size:11px;'>Esses valores já entram no cálculo abaixo — os campos manuais servem pra complementar o que não foi lançado no app.</span>
         </span></div>""", unsafe_allow_html=True)
-        if st.button("🔄 Sincronizar com lançamentos do Financeiro", key="btn_sync_ir"):
-            # Receitas
-            if _rec_dre > 0:
-                st.session_state.ir_receitas["venda_graos"] = round(
-                    float(st.session_state.ir_receitas.get("venda_graos",0)) + _rec_dre, 2)
-            # Despesas por categoria do DRE
-            _mapa_cat = {
-                "Semente":"sementes","Fertilizante":"fertilizantes",
-                "Defensivo":"fertilizantes","Diesel":"combustivel",
-                "Combustível":"combustivel","Mão de obra":"mao_de_obra",
-                "Maquinário":"manutencao","Frete":"frete","Seguro":"seguro",
-                "Arrendamento":"arrendamento_pg",
-            }
-            for _r in _dre_ano:
-                if _r.get("Tipo") in ("Custo Variável","Custo Fixo","Custo"):
-                    _chave = _mapa_cat.get(_r.get("Categoria",""), "outras_despesas")
-                    st.session_state.ir_despesas[_chave] = round(
-                        float(st.session_state.ir_despesas.get(_chave,0)) + _r["Valor R$"], 2)
-            # Custos lavoura e complementares → fertilizantes e outros
-            if _custos_lavoura > 0:
-                st.session_state.ir_despesas["fertilizantes"] = round(
-                    float(st.session_state.ir_despesas.get("fertilizantes",0)) + _custos_lavoura, 2)
-            if _custos_comp > 0:
-                st.session_state.ir_despesas["outras_despesas"] = round(
-                    float(st.session_state.ir_despesas.get("outras_despesas",0)) + _custos_comp, 2)
-            salvar_dados_iaagro()
-            success_box("✅ Valores sincronizados!")
-            st.rerun()
 
     # ── Receitas manuais ────────────────────────────────────────────────────
     st.markdown("#### 💰 Receitas da Atividade Rural")
@@ -6893,8 +6939,8 @@ if menu == "💰 Financeiro":
 
     # ── Cálculo ─────────────────────────────────────────────────────────────
     st.divider()
-    _rec_total  = sum(st.session_state.ir_receitas.values())
-    _desp_total = sum(st.session_state.ir_despesas.values())
+    _rec_total  = sum(st.session_state.ir_receitas.values()) + _auto_rec_total
+    _desp_total = sum(st.session_state.ir_despesas.values()) + _auto_desp_total
     _resultado  = _rec_total - _desp_total
     _ISENCAO    = 142798.50
     _BASE       = max(_resultado, 0.0)
@@ -6936,8 +6982,11 @@ if menu == "💰 Financeiro":
     with st.expander("📋 Detalhamento completo"):
         import pandas as _pd_ir
         _rows_ir = [
-            {"Item":"(+) Receita Bruta",         "Valor R$": _rec_total},
-            {"Item":"(-) Despesas Dedutíveis",    "Valor R$":-_desp_total},
+            {"Item":"(+) Receitas automáticas (Financeiro)",  "Valor R$": sum(_auto_receitas.values())},
+            {"Item":"(+) Contratos de troca (barter)",         "Valor R$": _auto_rec_trocas},
+            {"Item":"(+) Receitas manuais",                    "Valor R$": sum(st.session_state.ir_receitas.values())},
+            {"Item":"(-) Despesas automáticas (Fin.+Estoque)", "Valor R$":-_auto_desp_total},
+            {"Item":"(-) Despesas manuais",                    "Valor R$":-sum(st.session_state.ir_despesas.values())},
             {"Item":"= Resultado Líquido",        "Valor R$": _resultado},
             {"Item":"Limite de Isenção",          "Valor R$": _ISENCAO},
             {"Item":"Base de Cálculo IR",         "Valor R$": _BASE},
@@ -6945,6 +6994,164 @@ if menu == "💰 Financeiro":
         ]
         st.dataframe(_pd_ir.DataFrame(_rows_ir), use_container_width=True, hide_index=True)
         st.caption("⚠️ Estimativa para planejamento. Declare com contador habilitado.")
+
+    # ── EXPORTAÇÃO EM PDF ───────────────────────────────────────────────────
+    st.divider()
+    st.markdown("#### 📥 Exportar Relatório IR Rural (PDF)")
+
+    def _gerar_pdf_ir_rural():
+        from reportlab.lib.pagesizes import A4 as _A4
+        from reportlab.lib import colors as _cores
+        from reportlab.lib.units import cm as _cm, mm as _mm
+        from reportlab.platypus import SimpleDocTemplate as _Doc, Paragraph as _Par, Spacer as _Spc, Table as _Tab, TableStyle as _TSt, HRFlowable as _HR
+        from reportlab.lib.styles import ParagraphStyle as _PSt
+        from reportlab.lib.enums import TA_LEFT as _TL, TA_CENTER as _TC, TA_RIGHT as _TR
+        import io as _io
+
+        _VERDE_E = _cores.HexColor("#14532d"); _VERDE = _cores.HexColor("#22c55e")
+        _TXT = _cores.HexColor("#1e293b"); _SUB = _cores.HexColor("#64748b")
+        _BRANCO = _cores.white; _CINZA = _cores.HexColor("#f1f5f9"); _BORDA = _cores.HexColor("#cbd5e1")
+
+        def _P(t, s=9, b=False, c=None, a=_TL):
+            return _Par(t, _PSt("p", fontName="Helvetica-Bold" if b else "Helvetica",
+                        fontSize=s, textColor=c or _TXT, alignment=a, leading=s+3))
+
+        _buf = _io.BytesIO()
+        _doc = _Doc(_buf, pagesize=_A4, topMargin=1.2*_cm, bottomMargin=1.2*_cm,
+                    leftMargin=1.4*_cm, rightMargin=1.4*_cm)
+        _story = []
+
+        # Cabeçalho
+        _hdr = _Tab([[_P("IAAgro", 16, True, _VERDE), _P("APURAÇÃO IR RURAL", 14, True, _BRANCO, _TC),
+                      _P(f"Ano-calendário: {st.session_state.ir_ano}<br/>Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 7, False, _BRANCO, _TR)]],
+                    colWidths=[4*_cm, 9.5*_cm, 5*_cm])
+        _hdr.setStyle(_TSt([("BACKGROUND",(0,0),(-1,-1),_VERDE_E),("TOPPADDING",(0,0),(-1,-1),10),
+                            ("BOTTOMPADDING",(0,0),(-1,-1),10),("LEFTPADDING",(0,0),(-1,-1),10),
+                            ("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+        _story.append(_hdr); _story.append(_Spc(1, 3*_mm))
+
+        # Dados do produtor
+        _dp_tab = _Tab([[_P(f"<b>Produtor:</b> {st.session_state.ir_nome or '—'}", 9),
+                         _P(f"<b>CPF:</b> {st.session_state.ir_cpf or '—'}", 9),
+                         _P(f"<b>Cidade/UF:</b> {st.session_state.ir_cidade or '—'}", 9),
+                         _P(f"<b>Área total:</b> {st.session_state.ir_area_total} ha", 9)]],
+                       colWidths=[6*_cm, 4*_cm, 4.5*_cm, 4*_cm])
+        _dp_tab.setStyle(_TSt([("GRID",(0,0),(-1,-1),0.4,_BORDA),("TOPPADDING",(0,0),(-1,-1),6),
+                               ("BOTTOMPADDING",(0,0),(-1,-1),6),("LEFTPADDING",(0,0),(-1,-1),8)]))
+        _story.append(_dp_tab); _story.append(_Spc(1, 4*_mm))
+
+        _LBL_REC = dict(_rec_items); _LBL_DESP = dict(_desp_items)
+
+        # Receitas
+        _story.append(_P("RECEITAS DA ATIVIDADE RURAL", 11, True, _VERDE_E)); _story.append(_Spc(1, 2*_mm))
+        _rrows = [[_P("Descrição",8,True,_BRANCO), _P("Origem",8,True,_BRANCO,_TC), _P("Valor",8,True,_BRANCO,_TR)]]
+        if _auto_receitas.get("venda_graos",0) > 0:
+            _rrows.append([_P("Venda de produção (lançamentos do Financeiro)",8), _P("Automático",8,False,_SUB,_TC),
+                           _P(f"R$ {_auto_receitas['venda_graos']:,.2f}",8,True,None,_TR)])
+        if _auto_rec_trocas > 0:
+            _rrows.append([_P("Contratos de troca / barter (entrega de grãos)",8), _P("Automático",8,False,_SUB,_TC),
+                           _P(f"R$ {_auto_rec_trocas:,.2f}",8,True,None,_TR)])
+        for _k, _v in st.session_state.ir_receitas.items():
+            if float(_v or 0) > 0:
+                _rrows.append([_P(_LBL_REC.get(_k,_k).replace(" (R$)",""),8), _P("Manual",8,False,_SUB,_TC),
+                               _P(f"R$ {float(_v):,.2f}",8,True,None,_TR)])
+        _rrows.append([_P("<b>TOTAL RECEITAS</b>",9,True,_BRANCO), _P("",8),
+                       _P(f"<b>R$ {_rec_total:,.2f}</b>",9,True,_BRANCO,_TR)])
+        _rt = _Tab(_rrows, colWidths=[11*_cm, 3.5*_cm, 4*_cm])
+        _rt.setStyle(_TSt([("BACKGROUND",(0,0),(-1,0),_VERDE_E),("BACKGROUND",(0,-1),(-1,-1),_VERDE),
+                           ("GRID",(0,0),(-1,-1),0.4,_BORDA),("TOPPADDING",(0,0),(-1,-1),5),
+                           ("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),8)]))
+        _story.append(_rt); _story.append(_Spc(1, 4*_mm))
+
+        # Despesas
+        _story.append(_P("DESPESAS DEDUTÍVEIS", 11, True, _VERDE_E)); _story.append(_Spc(1, 2*_mm))
+        _drows = [[_P("Descrição",8,True,_BRANCO), _P("Origem",8,True,_BRANCO,_TC), _P("Valor",8,True,_BRANCO,_TR)]]
+        for _k, _v in sorted(_auto_despesas.items(), key=lambda x: -x[1]):
+            if _v > 0:
+                _drows.append([_P(_LBL_DESP.get(_k,_k).replace(" (R$)",""),8), _P("Automático (Fin./Estoque)",8,False,_SUB,_TC),
+                               _P(f"R$ {_v:,.2f}",8,True,None,_TR)])
+        for _k, _v in st.session_state.ir_despesas.items():
+            if float(_v or 0) > 0:
+                _drows.append([_P(_LBL_DESP.get(_k,_k).replace(" (R$)",""),8), _P("Manual",8,False,_SUB,_TC),
+                               _P(f"R$ {float(_v):,.2f}",8,True,None,_TR)])
+        _drows.append([_P("<b>TOTAL DESPESAS</b>",9,True,_BRANCO), _P("",8),
+                       _P(f"<b>R$ {_desp_total:,.2f}</b>",9,True,_BRANCO,_TR)])
+        _dt = _Tab(_drows, colWidths=[11*_cm, 3.5*_cm, 4*_cm])
+        _dt.setStyle(_TSt([("BACKGROUND",(0,0),(-1,0),_VERDE_E),("BACKGROUND",(0,-1),(-1,-1),_VERDE),
+                           ("GRID",(0,0),(-1,-1),0.4,_BORDA),("TOPPADDING",(0,0),(-1,-1),5),
+                           ("BOTTOMPADDING",(0,0),(-1,-1),5),("LEFTPADDING",(0,0),(-1,-1),8)]))
+        _story.append(_dt); _story.append(_Spc(1, 4*_mm))
+
+        # Detalhamento do Estoque
+        _itens_estq_pdf = [(_nm, _vl) for _lst in _estq_por_cat.values() for _nm, _vl in _lst]
+        if _itens_estq_pdf:
+            _story.append(_P("DETALHAMENTO — INSUMOS DO ESTOQUE", 11, True, _VERDE_E)); _story.append(_Spc(1, 2*_mm))
+            _erows = [[_P("Insumo",8,True,_BRANCO), _P("Valor investido",8,True,_BRANCO,_TR)]]
+            for _nm, _vl in sorted(_itens_estq_pdf, key=lambda x: -x[1]):
+                _erows.append([_P(_nm,8), _P(f"R$ {_vl:,.2f}",8,False,None,_TR)])
+            _et = _Tab(_erows, colWidths=[14.5*_cm, 4*_cm])
+            _et.setStyle(_TSt([("BACKGROUND",(0,0),(-1,0),_VERDE_E),("GRID",(0,0),(-1,-1),0.4,_BORDA),
+                               ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),
+                               ("LEFTPADDING",(0,0),(-1,-1),8),
+                               *[("BACKGROUND",(0,i),(-1,i),_CINZA) for i in range(2, len(_erows), 2)]]))
+            _story.append(_et); _story.append(_Spc(1, 4*_mm))
+
+        # Detalhamento dos lançamentos do Financeiro (cada custo/receita/troca lançado)
+        if _lanc_fin_pdf:
+            _story.append(_P("DETALHAMENTO — LANÇAMENTOS DO FINANCEIRO", 11, True, _VERDE_E)); _story.append(_Spc(1, 2*_mm))
+            _lrows = [[_P("Data",8,True,_BRANCO), _P("Tipo",8,True,_BRANCO,_TC),
+                       _P("Categoria",8,True,_BRANCO), _P("Descrição",8,True,_BRANCO),
+                       _P("Valor",8,True,_BRANCO,_TR)]]
+            for _tp, _dt_l, _cat_l2, _dsc_l, _vl_l in sorted(_lanc_fin_pdf, key=lambda x: str(x[1])):
+                _lrows.append([
+                    _P(str(_dt_l or "—"),7),
+                    _P("Receita" if _tp == "receita" else "Despesa",7,False,
+                       _VERDE if _tp == "receita" else _SUB,_TC),
+                    _P(str(_cat_l2 or "—"),7),
+                    _P(str(_dsc_l or "—"),7),
+                    _P(f"R$ {_vl_l:,.2f}",7,True,None,_TR),
+                ])
+            _lt = _Tab(_lrows, colWidths=[2.2*_cm, 1.8*_cm, 4.2*_cm, 6.8*_cm, 3.5*_cm])
+            _lt.setStyle(_TSt([("BACKGROUND",(0,0),(-1,0),_VERDE_E),("GRID",(0,0),(-1,-1),0.4,_BORDA),
+                               ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),
+                               ("LEFTPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+                               *[("BACKGROUND",(0,i),(-1,i),_CINZA) for i in range(2, len(_lrows), 2)]]))
+            _story.append(_lt); _story.append(_Spc(1, 4*_mm))
+
+        # Apuração final
+        _story.append(_P("APURAÇÃO", 11, True, _VERDE_E)); _story.append(_Spc(1, 2*_mm))
+        _arows = [
+            [_P("(+) Receita Bruta",9), _P(f"R$ {_rec_total:,.2f}",9,True,None,_TR)],
+            [_P("(-) Despesas Dedutíveis",9), _P(f"R$ {_desp_total:,.2f}",9,True,None,_TR)],
+            [_P("<b>= Resultado Líquido</b>",9,True), _P(f"<b>R$ {_resultado:,.2f}</b>",9,True,None,_TR)],
+            [_P("Limite de Isenção",9), _P(f"R$ {_ISENCAO:,.2f}",9,False,None,_TR)],
+            [_P(f"<b>IR Estimado (alíquota {_aliq*100:.1f}%)</b>",10,True,_BRANCO),
+             _P(f"<b>R$ {_ir:,.2f}</b>",11,True,_BRANCO,_TR)],
+        ]
+        _at = _Tab(_arows, colWidths=[13*_cm, 5.5*_cm])
+        _at.setStyle(_TSt([("GRID",(0,0),(-1,-1),0.4,_BORDA),("TOPPADDING",(0,0),(-1,-1),6),
+                           ("BOTTOMPADDING",(0,0),(-1,-1),6),("LEFTPADDING",(0,0),(-1,-1),8),
+                           ("BACKGROUND",(0,-1),(-1,-1),_VERDE_E)]))
+        _story.append(_at); _story.append(_Spc(1, 3*_mm))
+        _story.append(_HR(width="100%", thickness=1, color=_VERDE))
+        _story.append(_Spc(1, 2*_mm))
+        _story.append(_P("Estimativa para planejamento — Lei 8.023/90. Declare com contador habilitado. | IAAgro", 7, False, _SUB, _TC))
+        _doc.build(_story)
+        _buf.seek(0)
+        return _buf.read()
+
+    try:
+        _pdf_ir_bytes = _gerar_pdf_ir_rural()
+        st.download_button(
+            "📥 Baixar PDF do IR Rural",
+            data=_pdf_ir_bytes,
+            file_name=f"ir_rural_{st.session_state.ir_ano}.pdf",
+            mime="application/pdf",
+            key="btn_pdf_ir_rural",
+            use_container_width=True, type="primary",
+        )
+    except Exception as _e_pdf:
+        error_box(f"Erro ao gerar PDF do IR: {_e_pdf}")
 
 # ─────────────────────────────────────────────
 # MENU: OPERACIONAL
