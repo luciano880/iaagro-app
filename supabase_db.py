@@ -193,12 +193,26 @@ def sb_salvar(url, api_key, token, user_id, session):
     return r2.status_code in (200, 201, 204)
 
 
-def sb_plano(url, api_key, token, user_id):
-    """Retorna plano do usuário usando token JWT."""
-    # Usa o token do usuário (JWT) para passar pelo RLS
+def sb_plano(url, api_key, token, user_id, debug=False):
+    """
+    Retorna o plano do usuário usando token JWT.
+
+    Corrigido: a comparação de data agora normaliza o timezone. O Postgres pode
+    devolver a data em vários formatos ("...+00", "...+00:00", "...Z" ou sem
+    timezone nenhum), e o código antigo só tratava dois deles — o formato "+00"
+    passava batido e quebrava a comparação com TypeError
+    ("can't compare offset-naive and offset-aware datetimes").
+
+    Passe debug=True para receber (plano, motivo) e enxergar onde está falhando.
+    """
+    from datetime import datetime, timezone
+
+    def _resultado(plano, motivo):
+        return (plano, motivo) if debug else plano
+
     headers = {
         "apikey":        api_key,
-        "Authorization": f"Bearer {token}",  # token JWT do usuário logado
+        "Authorization": f"Bearer {token}",   # token JWT do usuário logado
         "Content-Type":  "application/json",
     }
     try:
@@ -207,19 +221,42 @@ def sb_plano(url, api_key, token, user_id):
             headers=headers,
             timeout=8
         )
-        if r.status_code == 200:
-            rows = r.json()
-            if rows and isinstance(rows, list):
-                row = rows[0]
-                valido_ate = row.get("valido_ate", "")
-                if valido_ate:
-                    try:
-                        # Remove timezone info para comparar
-                        vat = valido_ate.replace("Z","").replace("+00:00","")
-                        if datetime.fromisoformat(vat) > datetime.now():
-                            return row.get("plano", "free")
-                    except Exception:
-                        return row.get("plano", "free")
-    except Exception:
-        pass
-    return "free"
+        if r.status_code != 200:
+            return _resultado("free", f"HTTP {r.status_code}: {r.text[:200]}")
+
+        rows = r.json()
+        if not rows or not isinstance(rows, list):
+            # Vazio quase sempre = RLS bloqueando ou user_id sem linha na tabela
+            return _resultado("free", "consulta retornou vazio (RLS ou sem registro)")
+
+        row        = rows[0]
+        plano      = row.get("plano", "free") or "free"
+        valido_ate = row.get("valido_ate", "")
+
+        if not valido_ate:
+            # Sem data de validade = plano sem expiração
+            return _resultado(plano, "sem valido_ate; plano liberado")
+
+        try:
+            txt = str(valido_ate).strip().replace(" ", "T")
+            if txt.endswith("Z"):
+                txt = txt[:-1] + "+00:00"
+            # Normaliza offsets curtos: "+00" -> "+00:00", "-03" -> "-03:00"
+            import re as _re
+            txt = _re.sub(r"([+-]\d{2})$", r"\1:00", txt)
+
+            venc = datetime.fromisoformat(txt)
+            # Compara sempre no mesmo "mundo": aware com aware, naive com naive
+            agora = datetime.now(timezone.utc) if venc.tzinfo else datetime.now()
+
+            if venc > agora:
+                return _resultado(plano, f"válido até {venc.isoformat()}")
+            return _resultado("free", f"plano '{plano}' expirou em {venc.isoformat()}")
+        except Exception as e:
+            # Data ilegível: não é motivo pra punir o usuário que pagou
+            return _resultado(plano, f"valido_ate ilegível ({valido_ate!r}: {e}); plano liberado")
+
+    except Exception as e:
+        return _resultado("free", f"erro de conexão: {e}")
+
+
