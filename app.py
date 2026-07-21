@@ -1780,7 +1780,7 @@ PLANOS = {
             "Preços CEPEA tempo real",
             "Mapa de Colheita IA",
             "IR Rural",
-            "Safrinha",
+            "Planejamento de Safras",
         ]
     },
     "pro": {
@@ -1797,7 +1797,7 @@ PLANOS = {
             "Relatório PDF premium",
             "Importação NF-e XML",
             "Preços CEPEA tempo real",
-            "Safrinha",
+            "Planejamento de Safras",
             "IR Rural automatizado",
             "Receituário Agronômico",
             "Suporte via WhatsApp",
@@ -4050,11 +4050,12 @@ menu = st.sidebar.radio(
     [
         "🏠 Início",
         "🌾 Lavoura",
+        "🌧️ Pluviômetro",
         "🧪 Solo & Adubação",
         "💰 Financeiro",
         "📦 Operacional",
         "🌍 Inteligência",
-        "🌱 Safrinha",
+        "📅 Planejamento de Safras",
         "📄 Relatório Final",
         "⚙️ Configurações"
     ]
@@ -4387,7 +4388,7 @@ if menu == "🏠 Início":
 # MENU: ÁREAS CADASTRADAS
 # ─────────────────────────────────────────────
 elif menu == "🌾 Lavoura":
-    _sub_lav = st.tabs(["➕ Cadastro da Área","📍 Áreas Cadastradas","🗺️ Mapa de Fertilidade","🌧️ Pluviômetro","📈 Histórico de Produtividade"])
+    _sub_lav = st.tabs(["➕ Cadastro da Área","📍 Áreas Cadastradas","🗺️ Mapa de Fertilidade","📈 Histórico de Produtividade"])
 
 if menu == "🌾 Lavoura":
   with _sub_lav[1]:
@@ -4615,7 +4616,7 @@ if menu == "🌾 Lavoura":
 # MENU: HISTÓRICO DE PRODUTIVIDADE
 # ─────────────────────────────────────────────
 if menu == "🌾 Lavoura":
-  with _sub_lav[4]:
+  with _sub_lav[3]:
     st.header("📈 Histórico de Produtividade")
 
     if len(st.session_state.areas) == 0:
@@ -4723,222 +4724,6 @@ if menu == "🌾 Lavoura":
 # ─────────────────────────────────────────────
 # MENU: PLUVIÔMETRO
 # ─────────────────────────────────────────────
-if menu == "🌾 Lavoura":
-  with _sub_lav[3]:
-    st.header("🌧️ Pluviômetro Inteligente")
-
-    if len(st.session_state.areas) == 0:
-        warning_box("Cadastre uma área primeiro.")
-    else:
-        lista_areas   = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
-        area_chuva    = st.selectbox("Selecione a Área", lista_areas, key="sel_area_chuva_pluvio")
-        id_area_chuva = area_chuva.split(" - ")[0]
-        area_obj      = next((a for a in st.session_state.areas if a["ID"] == id_area_chuva), {})
-        cultura_chuva = area_obj.get("Cultura", "Soja")
-
-        chuva_ideal_padrao = {
-            "Soja":120.0,"Milho":140.0,"Trigo":90.0,"Feijão":100.0,"Canola":90.0,
-            "Aveia":80.0,"Cana-de-açúcar":180.0,"Arroz":180.0,"Sorgo":90.0,
-            "Girassol":90.0,"Cevada":80.0,"Pastagem":120.0,"Algodão":130.0,
-            "Café":140.0,"Tabaco":110.0,"Mandioca":100.0,"Batata":100.0,
-        }
-        chuva_ideal_mes = chuva_ideal_padrao.get(cultura_limpa(cultura_chuva), 120.0)
-
-        st.markdown(f"""
-        <div style='background:#0f3460;color:#fff;padding:10px 16px;border-radius:8px;
-        border:1px solid #3b82f6;margin-bottom:12px;'>
-        🌱 <b>Cultura:</b> {cultura_chuva} &nbsp;|&nbsp;
-        🌧️ <b>Chuva ideal/mês:</b> {chuva_ideal_mes} mm
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ── Registro diário ──────────────────────────────────
-        st.subheader("➕ Registrar Chuva Diária")
-        col_d1, col_d2, col_d3 = st.columns(3)
-        with col_d1:
-            data_chuva = st.date_input("Data", value=datetime.now().date(), key="date_chuva_diaria")
-        with col_d2:
-            mm_dia = st.number_input("Precipitação (mm)", min_value=0.0, max_value=500.0,
-                                      value=0.0, step=0.1, key="num_mm_dia",
-                                      help="Leitura do pluviômetro de campo")
-        with col_d3:
-            obs_dia = st.text_input("Observação", placeholder="Ex: Chuva forte tarde",
-                                     key="txt_obs_chuva")
-
-        if st.button("💾 Registrar", key="btn_reg_chuva", use_container_width=True):
-            if mm_dia > 0 or obs_dia:
-                _reg = {
-                    "area_id":  id_area_chuva,
-                    "area":     area_chuva,
-                    "data":     str(data_chuva),
-                    "ano":      data_chuva.year,
-                    "mes":      data_chuva.month,
-                    "mes_nome": ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-                                 "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"][data_chuva.month],
-                    "mm":       round(mm_dia, 1),
-                    "obs":      obs_dia,
-                }
-                st.session_state.pluviometro.append(_reg)
-                salvar_dados_iaagro()
-                success_box(f"✅ {mm_dia} mm registrado em {data_chuva.strftime('%d/%m/%Y')}")
-            else:
-                warning_box("Digite a quantidade de chuva.")
-
-        # ── Filtro e acumulado mensal ─────────────────────────
-        _regs = [r for r in st.session_state.pluviometro
-                 if isinstance(r, dict) and r.get("area_id") == id_area_chuva]
-
-        if _regs:
-            import pandas as pd
-            df_pluvio = pd.DataFrame(_regs)
-
-            # Garante colunas necessárias
-            for col in ["data","ano","mes","mes_nome","mm"]:
-                if col not in df_pluvio.columns:
-                    df_pluvio[col] = 0 if col in ["ano","mes","mm"] else ""
-
-            df_pluvio["mm"] = pd.to_numeric(df_pluvio["mm"], errors="coerce").fillna(0)
-            df_pluvio["data_dt"] = pd.to_datetime(df_pluvio["data"], errors="coerce")
-            df_pluvio = df_pluvio.sort_values("data_dt", ascending=False)
-
-            # ── Acumulado mensal automático ──────────────────
-            st.subheader("📊 Acumulado Mensal")
-            df_mensal = (df_pluvio.groupby(["ano","mes","mes_nome"])["mm"]
-                         .sum().reset_index()
-                         .sort_values(["ano","mes"]))
-            df_mensal["ideal"] = chuva_ideal_mes
-            df_mensal["%ideal"] = (df_mensal["mm"] / chuva_ideal_mes * 100).round(1)
-            df_mensal["status"] = df_mensal["%ideal"].apply(
-                lambda x: "✅ Adequado" if 70<=x<=130
-                else ("⚠️ Déficit" if x < 70 else "⚠️ Excesso")
-            )
-            df_mensal["Período"] = df_mensal["mes_nome"].astype(str) + "/" + df_mensal["ano"].astype(str)
-
-            # Cards dos últimos 3 meses
-            _ultimos = df_mensal.tail(3).to_dict("records")
-            cols_m = st.columns(len(_ultimos))
-            for idx_m, row in enumerate(_ultimos):
-                _cor = "#14532d" if "Adequado" in row["status"] else "#78350f"
-                cols_m[idx_m].markdown(f"""
-                <div style='background:{_cor};border-radius:10px;padding:12px;text-align:center;'>
-                <b style='color:#fff;font-size:13px;'>{row['Período']}</b><br>
-                <span style='color:#fff;font-size:22px;font-weight:800;'>{row['mm']:.1f} mm</span><br>
-                <span style='color:#d1fae5;font-size:11px;'>{row['%ideal']}% do ideal</span><br>
-                <span style='color:#fde68a;font-size:11px;'>{row['status']}</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Gráfico acumulado mensal
-            if len(df_mensal) > 0:
-                st.markdown("**Chuva acumulada vs ideal por mês:**")
-                _chart_data = df_mensal.set_index("Período")[["mm","ideal"]]
-                _chart_data.columns = ["Chuva Real (mm)","Ideal (mm)"]
-                st.bar_chart(_chart_data)
-
-            # ── Registros diários ────────────────────────────
-            st.subheader("📋 Registros Diários")
-
-            # Filtro por mês/ano
-            _anos  = sorted(df_pluvio["ano"].dropna().unique().tolist(), reverse=True)
-            _meses_nomes = ["Todos","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-                            "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
-            col_f1, col_f2 = st.columns(2)
-            _ano_sel = col_f1.selectbox("Filtrar ano", ["Todos"] + [str(int(a)) for a in _anos], key="sel_ano_pluvio")
-            _mes_sel = col_f2.selectbox("Filtrar mês", _meses_nomes, key="sel_mes_pluvio")
-
-            df_filtrado = df_pluvio.copy()
-            if _ano_sel != "Todos":
-                df_filtrado = df_filtrado[df_filtrado["ano"] == int(_ano_sel)]
-            if _mes_sel != "Todos":
-                _mes_num = _meses_nomes.index(_mes_sel)
-                df_filtrado = df_filtrado[df_filtrado["mes"] == _mes_num]
-
-            # Resumo do filtro
-            _total_filtro = df_filtrado["mm"].sum()
-            _dias_chuva   = (df_filtrado["mm"] > 0).sum()
-            _media_dia    = df_filtrado[df_filtrado["mm"]>0]["mm"].mean() if _dias_chuva > 0 else 0
-
-            col_r1, col_r2, col_r3, col_r4 = st.columns(4)
-            col_r1.metric("🌧️ Total", f"{_total_filtro:.1f} mm")
-            col_r2.metric("📅 Dias c/ chuva", f"{_dias_chuva}")
-            col_r3.metric("📊 Média/dia", f"{_media_dia:.1f} mm")
-            col_r4.metric("🎯 % do ideal", f"{_total_filtro/chuva_ideal_mes*100:.0f}%" if _mes_sel != "Todos" else "-")
-
-            # Tabela diária
-            _cols_exib = ["data","mm","obs"] if "obs" in df_filtrado.columns else ["data","mm"]
-            _df_show = df_filtrado[_cols_exib].copy()
-            _df_show.columns = ["Data","mm","Obs"] if len(_cols_exib) == 3 else ["Data","mm"]
-            st.dataframe(_df_show.head(60), use_container_width=True)
-
-            # Excluir registro
-            with st.expander("🗑️ Excluir registro"):
-                _datas_disp = df_pluvio["data"].tolist()
-                if _datas_disp:
-                    _data_del = st.selectbox("Selecione a data para excluir",
-                                              _datas_disp, key="sel_del_chuva")
-                    if st.button("🗑️ Excluir", key="btn_del_chuva"):
-                        st.session_state.pluviometro = [
-                            r for r in st.session_state.pluviometro
-                            if not (isinstance(r, dict) and
-                                    r.get("data") == _data_del and
-                                    r.get("area_id") == id_area_chuva)
-                        ]
-                        salvar_dados_iaagro()
-                        success_box("Registro excluído!")
-                        st.rerun()
-
-            # ── Análise de risco ─────────────────────────────
-            st.subheader("🤖 Análise de Risco Hídrico")
-            _mensal_recente = df_mensal.tail(3)["mm"].tolist()
-            _media_3m = sum(_mensal_recente)/len(_mensal_recente) if _mensal_recente else 0
-            _desvio   = abs(_media_3m - chuva_ideal_mes) / chuva_ideal_mes * 100 if chuva_ideal_mes > 0 else 0
-
-            # Estimativa de perda por déficit ou excesso (igual ao modelo anterior)
-            if _media_3m < chuva_ideal_mes * 0.7:
-                _perda_est = round((_chuva_ideal_mes - _media_3m) * 0.15, 1) if hasattr(locals(), '_chuva_ideal_mes') else round((chuva_ideal_mes - _media_3m) * 0.15, 1)
-                _perda_est = round((chuva_ideal_mes - _media_3m) * 0.15, 1)
-                _status_h  = "⚠️ Déficit hídrico"
-                _risco     = "🔴 Alto risco hídrico — avaliar seguro agrícola"
-                _rec       = f"Déficit médio de {chuva_ideal_mes - _media_3m:.0f} mm/mês. Perda estimada: {_perda_est}%. Reavaliar meta produtiva."
-            elif _media_3m > chuva_ideal_mes * 1.3:
-                _perda_est = round((_media_3m - chuva_ideal_mes) * 0.08, 1)
-                _status_h  = "⚠️ Excesso de chuva"
-                _risco     = "🟡 Risco por excesso hídrico"
-                _rec       = f"Excesso médio de {_media_3m - chuva_ideal_mes:.0f} mm/mês. Perda estimada: {_perda_est}%. Monitorar doenças fúngicas e erosão."
-            else:
-                _perda_est = 0
-                _status_h  = "✅ Chuva adequada"
-                _risco     = "🟢 Condição hídrica adequada"
-                _rec       = "Precipitação dentro da faixa ideal para a cultura."
-
-            # Métricas de risco
-            _col_r1, _col_r2, _col_r3 = st.columns(3)
-            _col_r1.metric("🌧️ Média 3 meses", f"{_media_3m:.1f} mm")
-            _col_r2.metric("🎯 Ideal/mês", f"{chuva_ideal_mes} mm")
-            _col_r3.metric("📉 Perda estimada", f"{_perda_est}%",
-                           help="Estimativa de impacto na produtividade por déficit ou excesso hídrico")
-
-            info_box(_risco)
-            st.caption(_rec)
-
-            # Progresso do mês atual
-            _hoje = datetime.now()
-            _regs_mes_atual = [r for r in _regs
-                               if isinstance(r, dict)
-                               and r.get("mes") == _hoje.month
-                               and r.get("ano") == _hoje.year]
-            _total_mes_atual = sum(r.get("mm", 0) for r in _regs_mes_atual)
-            _pct_mes = min(_total_mes_atual / chuva_ideal_mes, 1.0) if chuva_ideal_mes > 0 else 0
-
-            st.subheader(f"📅 {['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][_hoje.month]}/{_hoje.year} — Progresso")
-            st.progress(_pct_mes)
-            st.caption(f"{_total_mes_atual:.1f} mm acumulados de {chuva_ideal_mes} mm ideais ({_pct_mes*100:.0f}%)")
-
-        else:
-            st.info("📝 Nenhum registro de chuva para esta área ainda. Registre a primeira leitura acima!")
-
-
-
 
 # ─────────────────────────────────────────────
 # MENU: MAPA DE FERTILIDADE
@@ -8805,7 +8590,7 @@ elif menu == "📄 Relatório Final":
 # MENU: INTELIGÊNCIA
 # ─────────────────────────────────────────────
 elif menu == "🌍 Inteligência":
-    _sub_int = st.tabs(["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","📅 Calendário Agrícola","🤖 Assistente IA"])
+    _sub_int = st.tabs(["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","🤖 Assistente IA"])
 
 if menu == "🌍 Inteligência":
   with _sub_int[0]:
@@ -9349,8 +9134,429 @@ if menu == "🌍 Inteligência":
     elif not _arquivo_mapa:
         st.info("Faça o upload do mapa de colheita para análise.")
 
+
 if menu == "🌍 Inteligência":
   with _sub_int[3]:
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🤖 Assistente IA Agrícola</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Especialista em agricultura brasileira — EMBRAPA, CQFS RS/SC, manejo integrado
+    </p></div>""", unsafe_allow_html=True)
+
+    if "assistente_hist" not in st.session_state:
+        st.session_state.assistente_hist = []
+
+    # Contexto rico da propriedade
+    _d_ia  = st.session_state.dados
+    _areas_ctx = ""
+    if st.session_state.areas:
+        _areas_ctx = "; ".join([
+            f"{a.get('Talhão','?')} {a.get('Hectares',0)}ha {a.get('Cultura','?')}"
+            for a in st.session_state.areas[:3]
+        ])
+    _ctx_ia = (
+        f"Segmento: {st.session_state.get('segmento','Grãos')}. "
+        f"Propriedade: {_areas_ctx or 'não cadastrada'}. "
+        f"Região: Sul do Brasil (PR/SC/RS). "
+        f"Plano: {st.session_state.get('plano','free')}."
+    )
+
+    # Busca API key de forma robusta
+    import os as _os_ia
+    _api_key_ia = ""
+    try:
+        _api_key_ia = st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass
+    if not _api_key_ia:
+        try:
+            _api_key_ia = st.secrets.get("ANTHROPIC_API_KEY", "")
+        except Exception:
+            pass
+    if not _api_key_ia:
+        _api_key_ia = _os_ia.environ.get("ANTHROPIC_API_KEY", "")
+
+    if not _api_key_ia or len(_api_key_ia) < 20:
+        st.warning("⚠️ Chave API não configurada. Adicione ANTHROPIC_API_KEY nos secrets do Streamlit.")
+    else:
+        # Histórico de mensagens
+        for msg in st.session_state.assistente_hist:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo...")
+
+        if _prompt_ia:
+            st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
+            with st.chat_message("user"):
+                st.markdown(_prompt_ia)
+            with st.chat_message("assistant"):
+                with st.spinner("🌾 Consultando especialista agrícola..."):
+                    try:
+                        import requests as _rq_ia
+                        # Monta histórico limitado a 10 mensagens para não exceder tokens
+                        _msgs_ia = [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in st.session_state.assistente_hist[-10:]
+                        ]
+                        _system_ia = (
+                            "Você é um agrônomo especialista brasileiro com foco no Sul do Brasil (PR, SC, RS). "
+                            "Responda SEMPRE em português, de forma prática e objetiva para produtores rurais. "
+                            "Use dados da EMBRAPA, CQFS RS/SC, IAPAR e boas práticas agronômicas. "
+                            "Para recomendações de adubação, siga as tabelas CQFS RS/SC 2016. "
+                            "Para defensivos, cite apenas produtos registrados no MAPA. "
+                            "Seja direto: dê doses, épocas e práticas concretas. "
+                            f"Contexto da propriedade: {_ctx_ia}"
+                        )
+                        _resp_ia = _rq_ia.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "x-api-key":         _api_key_ia,
+                                "anthropic-version": "2023-06-01",
+                                "content-type":      "application/json",
+                            },
+                            json={
+                                "model":      "claude-sonnet-4-6",
+                                "max_tokens": 1024,
+                                "system":     _system_ia,
+                                "messages":   _msgs_ia,
+                            },
+                            timeout=45,
+                        )
+                        if _resp_ia.status_code == 200:
+                            _data_ia = _resp_ia.json()
+                            _ans = (_data_ia.get("content") or [{}])[0].get("text","")
+                            if _ans:
+                                st.markdown(_ans)
+                                st.session_state.assistente_hist.append(
+                                    {"role":"assistant","content":_ans})
+                            else:
+                                st.error("Resposta vazia da API.")
+                        elif _resp_ia.status_code == 401:
+                            st.error("❌ Chave API inválida ou expirada. Verifique ANTHROPIC_API_KEY.")
+                        elif _resp_ia.status_code == 429:
+                            st.warning("⏳ Limite de requisições. Aguarde alguns segundos e tente novamente.")
+                        else:
+                            st.error(f"Erro na API: HTTP {_resp_ia.status_code}")
+                    except Exception as _e_ia:
+                        st.error(f"Erro de conexão: {str(_e_ia)[:120]}")
+
+    if st.session_state.assistente_hist:
+        st.markdown("---")
+        _btn_col1, _btn_col2, _btn_col3 = st.columns(3)
+
+        # Exportar como TXT
+        _conv_txt = ""
+        for _m in st.session_state.assistente_hist:
+            _role = "👨‍🌾 Você" if _m["role"] == "user" else "🤖 IAAgro IA"
+            _conv_txt += f"{_role}:\n{_m['content']}\n\n{'─'*50}\n\n"
+        _btn_col1.download_button(
+            "📥 Exportar TXT", _conv_txt.encode("utf-8"),
+            "conversa_iaagro.txt", "text/plain",
+            key="btn_exp_conv_txt", use_container_width=True
+        )
+
+        # Exportar como PDF simples (texto)
+        import json as _json_conv
+        _conv_json = _json_conv.dumps(st.session_state.assistente_hist,
+                                       ensure_ascii=False, indent=2).encode("utf-8")
+        _btn_col2.download_button(
+            "📋 Exportar JSON", _conv_json,
+            "conversa_iaagro.json", "application/json",
+            key="btn_exp_conv_json", use_container_width=True
+        )
+
+        if _btn_col3.button("🗑️ Limpar conversa", key="btn_limpar_assistente",
+                            use_container_width=True):
+            st.session_state.assistente_hist = []
+            st.rerun()
+
+# ─────────────────────────────────────────────
+# MENU: PLANEJAMENTO DE SAFRAS
+# ─────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
+# MENU: PLUVIÔMETRO
+# ─────────────────────────────────────────────
+elif menu == "🌧️ Pluviômetro":
+    st.header("🌧️ Pluviômetro Inteligente")
+
+    if len(st.session_state.areas) == 0:
+        warning_box("Cadastre uma área primeiro.")
+    else:
+        lista_areas   = [f"{a['ID']} - {a['Talhão']}" for a in st.session_state.areas]
+        area_chuva    = st.selectbox("Selecione a Área", lista_areas, key="sel_area_chuva_pluvio")
+        id_area_chuva = area_chuva.split(" - ")[0]
+        area_obj      = next((a for a in st.session_state.areas if a["ID"] == id_area_chuva), {})
+        cultura_chuva = area_obj.get("Cultura", "Soja")
+
+        chuva_ideal_padrao = {
+            "Soja":120.0,"Milho":140.0,"Trigo":90.0,"Feijão":100.0,"Canola":90.0,
+            "Aveia":80.0,"Cana-de-açúcar":180.0,"Arroz":180.0,"Sorgo":90.0,
+            "Girassol":90.0,"Cevada":80.0,"Pastagem":120.0,"Algodão":130.0,
+            "Café":140.0,"Tabaco":110.0,"Mandioca":100.0,"Batata":100.0,
+        }
+        chuva_ideal_mes = chuva_ideal_padrao.get(cultura_limpa(cultura_chuva), 120.0)
+
+        st.markdown(f"""
+        <div style='background:#0f3460;color:#fff;padding:10px 16px;border-radius:8px;
+        border:1px solid #3b82f6;margin-bottom:12px;'>
+        🌱 <b>Cultura:</b> {cultura_chuva} &nbsp;|&nbsp;
+        🌧️ <b>Chuva ideal/mês:</b> {chuva_ideal_mes} mm
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Registro diário ──────────────────────────────────
+        st.subheader("➕ Registrar Chuva Diária")
+        col_d1, col_d2, col_d3 = st.columns(3)
+        with col_d1:
+            data_chuva = st.date_input("Data", value=datetime.now().date(), key="date_chuva_diaria")
+        with col_d2:
+            mm_dia = st.number_input("Precipitação (mm)", min_value=0.0, max_value=500.0,
+                                      value=0.0, step=0.1, key="num_mm_dia",
+                                      help="Leitura do pluviômetro de campo")
+        with col_d3:
+            obs_dia = st.text_input("Observação", placeholder="Ex: Chuva forte tarde",
+                                     key="txt_obs_chuva")
+
+        if st.button("💾 Registrar", key="btn_reg_chuva", use_container_width=True):
+            if mm_dia > 0 or obs_dia:
+                _reg = {
+                    "area_id":  id_area_chuva,
+                    "area":     area_chuva,
+                    "data":     str(data_chuva),
+                    "ano":      data_chuva.year,
+                    "mes":      data_chuva.month,
+                    "mes_nome": ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                                 "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"][data_chuva.month],
+                    "mm":       round(mm_dia, 1),
+                    "obs":      obs_dia,
+                }
+                st.session_state.pluviometro.append(_reg)
+                salvar_dados_iaagro()
+                success_box(f"✅ {mm_dia} mm registrado em {data_chuva.strftime('%d/%m/%Y')}")
+            else:
+                warning_box("Digite a quantidade de chuva.")
+
+        # ── Filtro e acumulado mensal ─────────────────────────
+        _regs = [r for r in st.session_state.pluviometro
+                 if isinstance(r, dict) and r.get("area_id") == id_area_chuva]
+
+        if _regs:
+            import pandas as pd
+            df_pluvio = pd.DataFrame(_regs)
+
+            # Garante colunas necessárias
+            for col in ["data","ano","mes","mes_nome","mm"]:
+                if col not in df_pluvio.columns:
+                    df_pluvio[col] = 0 if col in ["ano","mes","mm"] else ""
+
+            df_pluvio["mm"] = pd.to_numeric(df_pluvio["mm"], errors="coerce").fillna(0)
+            df_pluvio["data_dt"] = pd.to_datetime(df_pluvio["data"], errors="coerce")
+            df_pluvio = df_pluvio.sort_values("data_dt", ascending=False)
+
+            # ── Acumulado mensal automático ──────────────────
+            st.subheader("📊 Acumulado Mensal")
+            df_mensal = (df_pluvio.groupby(["ano","mes","mes_nome"])["mm"]
+                         .sum().reset_index()
+                         .sort_values(["ano","mes"]))
+            df_mensal["ideal"] = chuva_ideal_mes
+            df_mensal["%ideal"] = (df_mensal["mm"] / chuva_ideal_mes * 100).round(1)
+            df_mensal["status"] = df_mensal["%ideal"].apply(
+                lambda x: "✅ Adequado" if 70<=x<=130
+                else ("⚠️ Déficit" if x < 70 else "⚠️ Excesso")
+            )
+            df_mensal["Período"] = df_mensal["mes_nome"].astype(str) + "/" + df_mensal["ano"].astype(str)
+
+            # Cards dos últimos 3 meses
+            _ultimos = df_mensal.tail(3).to_dict("records")
+            cols_m = st.columns(len(_ultimos))
+            for idx_m, row in enumerate(_ultimos):
+                _cor = "#14532d" if "Adequado" in row["status"] else "#78350f"
+                cols_m[idx_m].markdown(f"""
+                <div style='background:{_cor};border-radius:10px;padding:12px;text-align:center;'>
+                <b style='color:#fff;font-size:13px;'>{row['Período']}</b><br>
+                <span style='color:#fff;font-size:22px;font-weight:800;'>{row['mm']:.1f} mm</span><br>
+                <span style='color:#d1fae5;font-size:11px;'>{row['%ideal']}% do ideal</span><br>
+                <span style='color:#fde68a;font-size:11px;'>{row['status']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Gráfico acumulado mensal
+            if len(df_mensal) > 0:
+                st.markdown("**Chuva acumulada vs ideal por mês:**")
+                _chart_data = df_mensal.set_index("Período")[["mm","ideal"]]
+                _chart_data.columns = ["Chuva Real (mm)","Ideal (mm)"]
+                st.bar_chart(_chart_data)
+
+            # ── Registros diários ────────────────────────────
+            st.subheader("📋 Registros Diários")
+
+            # Filtro por mês/ano
+            _anos  = sorted(df_pluvio["ano"].dropna().unique().tolist(), reverse=True)
+            _meses_nomes = ["Todos","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                            "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+            col_f1, col_f2 = st.columns(2)
+            _ano_sel = col_f1.selectbox("Filtrar ano", ["Todos"] + [str(int(a)) for a in _anos], key="sel_ano_pluvio")
+            _mes_sel = col_f2.selectbox("Filtrar mês", _meses_nomes, key="sel_mes_pluvio")
+
+            df_filtrado = df_pluvio.copy()
+            if _ano_sel != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["ano"] == int(_ano_sel)]
+            if _mes_sel != "Todos":
+                _mes_num = _meses_nomes.index(_mes_sel)
+                df_filtrado = df_filtrado[df_filtrado["mes"] == _mes_num]
+
+            # Resumo do filtro
+            _total_filtro = df_filtrado["mm"].sum()
+            _dias_chuva   = (df_filtrado["mm"] > 0).sum()
+            _media_dia    = df_filtrado[df_filtrado["mm"]>0]["mm"].mean() if _dias_chuva > 0 else 0
+
+            col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+            col_r1.metric("🌧️ Total", f"{_total_filtro:.1f} mm")
+            col_r2.metric("📅 Dias c/ chuva", f"{_dias_chuva}")
+            col_r3.metric("📊 Média/dia", f"{_media_dia:.1f} mm")
+            col_r4.metric("🎯 % do ideal", f"{_total_filtro/chuva_ideal_mes*100:.0f}%" if _mes_sel != "Todos" else "-")
+
+            # Tabela diária
+            _cols_exib = ["data","mm","obs"] if "obs" in df_filtrado.columns else ["data","mm"]
+            _df_show = df_filtrado[_cols_exib].copy()
+            _df_show.columns = ["Data","mm","Obs"] if len(_cols_exib) == 3 else ["Data","mm"]
+            st.dataframe(_df_show.head(60), use_container_width=True)
+
+            # Excluir registro
+            with st.expander("🗑️ Excluir registro"):
+                _datas_disp = df_pluvio["data"].tolist()
+                if _datas_disp:
+                    _data_del = st.selectbox("Selecione a data para excluir",
+                                              _datas_disp, key="sel_del_chuva")
+                    if st.button("🗑️ Excluir", key="btn_del_chuva"):
+                        st.session_state.pluviometro = [
+                            r for r in st.session_state.pluviometro
+                            if not (isinstance(r, dict) and
+                                    r.get("data") == _data_del and
+                                    r.get("area_id") == id_area_chuva)
+                        ]
+                        salvar_dados_iaagro()
+                        success_box("Registro excluído!")
+                        st.rerun()
+
+            # ── Análise de risco ─────────────────────────────
+            st.subheader("🤖 Análise de Risco Hídrico")
+            _mensal_recente = df_mensal.tail(3)["mm"].tolist()
+            _media_3m = sum(_mensal_recente)/len(_mensal_recente) if _mensal_recente else 0
+            _desvio   = abs(_media_3m - chuva_ideal_mes) / chuva_ideal_mes * 100 if chuva_ideal_mes > 0 else 0
+
+            # Estimativa de perda por déficit ou excesso (igual ao modelo anterior)
+            if _media_3m < chuva_ideal_mes * 0.7:
+                _perda_est = round((_chuva_ideal_mes - _media_3m) * 0.15, 1) if hasattr(locals(), '_chuva_ideal_mes') else round((chuva_ideal_mes - _media_3m) * 0.15, 1)
+                _perda_est = round((chuva_ideal_mes - _media_3m) * 0.15, 1)
+                _status_h  = "⚠️ Déficit hídrico"
+                _risco     = "🔴 Alto risco hídrico — avaliar seguro agrícola"
+                _rec       = f"Déficit médio de {chuva_ideal_mes - _media_3m:.0f} mm/mês. Perda estimada: {_perda_est}%. Reavaliar meta produtiva."
+            elif _media_3m > chuva_ideal_mes * 1.3:
+                _perda_est = round((_media_3m - chuva_ideal_mes) * 0.08, 1)
+                _status_h  = "⚠️ Excesso de chuva"
+                _risco     = "🟡 Risco por excesso hídrico"
+                _rec       = f"Excesso médio de {_media_3m - chuva_ideal_mes:.0f} mm/mês. Perda estimada: {_perda_est}%. Monitorar doenças fúngicas e erosão."
+            else:
+                _perda_est = 0
+                _status_h  = "✅ Chuva adequada"
+                _risco     = "🟢 Condição hídrica adequada"
+                _rec       = "Precipitação dentro da faixa ideal para a cultura."
+
+            # Métricas de risco
+            _col_r1, _col_r2, _col_r3 = st.columns(3)
+            _col_r1.metric("🌧️ Média 3 meses", f"{_media_3m:.1f} mm")
+            _col_r2.metric("🎯 Ideal/mês", f"{chuva_ideal_mes} mm")
+            _col_r3.metric("📉 Perda estimada", f"{_perda_est}%",
+                           help="Estimativa de impacto na produtividade por déficit ou excesso hídrico")
+
+            info_box(_risco)
+            st.caption(_rec)
+
+            # Progresso do mês atual
+            _hoje = datetime.now()
+            _regs_mes_atual = [r for r in _regs
+                               if isinstance(r, dict)
+                               and r.get("mes") == _hoje.month
+                               and r.get("ano") == _hoje.year]
+            _total_mes_atual = sum(r.get("mm", 0) for r in _regs_mes_atual)
+            _pct_mes = min(_total_mes_atual / chuva_ideal_mes, 1.0) if chuva_ideal_mes > 0 else 0
+
+            st.subheader(f"📅 {['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][_hoje.month]}/{_hoje.year} — Progresso")
+            st.progress(_pct_mes)
+            st.caption(f"{_total_mes_atual:.1f} mm acumulados de {chuva_ideal_mes} mm ideais ({_pct_mes*100:.0f}%)")
+
+        else:
+            st.info("📝 Nenhum registro de chuva para esta área ainda. Registre a primeira leitura acima!")
+
+
+
+
+elif menu == "📅 Planejamento de Safras":
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:16px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>📅 Planejamento de Safras</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Rotação de culturas, safrinha e calendário agrícola num só lugar
+    </p></div>""", unsafe_allow_html=True)
+    _sub_plan = st.tabs(["🌱 Rotação & Safrinha","📅 Calendário Agrícola"])
+
+if menu == "📅 Planejamento de Safras":
+  with _sub_plan[0]:
+    if "safrinha_registros" not in st.session_state:
+        st.session_state.safrinha_registros = []
+    ROTACOES = {
+        "Milho → Feijão":  {"1a":"Milho","2a":"Feijão","janela":"Set–Jan / Fev–Mai"},
+        "Milho → Soja":    {"1a":"Milho","2a":"Soja",  "janela":"Set–Jan / Out–Mar"},
+        "Soja → Feijão":   {"1a":"Soja", "2a":"Feijão","janela":"Out–Jan / Fev–Mai"},
+        "Feijão → Soja":   {"1a":"Feijão","2a":"Soja", "janela":"Jan–Abr / Out–Mar"},
+        "Feijão → Milho":  {"1a":"Feijão","2a":"Milho","janela":"Jan–Abr / Abr–Ago"},
+        "Soja → Milho":    {"1a":"Soja", "2a":"Milho", "janela":"Out–Jan / Fev–Jun"},
+    }
+    rot_sel = st.selectbox("🔄 Rotação de culturas", list(ROTACOES.keys()), key="safrinha_rotacao_sel")
+    rot_info = ROTACOES[rot_sel]
+    if rot_info["janela"]:
+        st.caption(f"📅 Janela de plantio: {rot_info['janela']}")
+    col_sf1, col_sf2 = st.columns(2)
+    if st.session_state.areas:
+        _lista_sf = [f"{a['ID']} — {a.get('Talhão','?')}" for a in st.session_state.areas]
+        area_sf   = col_sf1.selectbox("Área", _lista_sf, key="sf_area")
+        _id_sf    = area_sf.split(" — ")[0]
+    else:
+        st.warning("Cadastre uma área primeiro."); _id_sf = ""
+    safra_sf  = col_sf2.text_input("Safra", placeholder="2024/2025", key="sf_safra")
+    col_sf3, col_sf4, col_sf5 = st.columns(3)
+    data_plantio_sf = col_sf3.date_input("Data de plantio", key="sf_data")
+    area_ha_sf      = col_sf4.number_input("Área (ha)", min_value=0.0, key="sf_area_ha")
+    prod_esp_sf     = col_sf5.number_input("Produtividade esperada (sc/ha)", min_value=0.0, key="sf_prod")
+    obs_sf          = st.text_area("Observações", key="sf_obs", height=80)
+    if st.button("💾 Salvar Safrinha", key="btn_salvar_safrinha", use_container_width=True):
+        if _id_sf:
+            st.session_state.safrinha_registros.append({
+                "Rotação": rot_sel, "1ª Cultura": rot_info["1a"], "2ª Cultura": rot_info["2a"],
+                "Área ID": _id_sf, "Safra": safra_sf, "Data Plantio": str(data_plantio_sf),
+                "Área ha": area_ha_sf, "Produtividade Esperada": prod_esp_sf, "Obs": obs_sf,
+            })
+            salvar_dados_iaagro()
+            success_box(f"✅ Safrinha {rot_sel} registrada!")
+        else:
+            warning_box("Selecione uma área.")
+    if st.session_state.safrinha_registros:
+        import pandas as pd
+        st.divider()
+        st.subheader("📋 Registros de Safrinha")
+        st.dataframe(pd.DataFrame(st.session_state.safrinha_registros), use_container_width=True)
+
+# ─────────────────────────────────────────────
+
+# ── Sub-aba: Calendário Agrícola ──
+if menu == "📅 Planejamento de Safras":
+  with _sub_plan[1]:
 
     # ── Header ───────────────────────────────────────────────────────────────
     st.markdown("""
@@ -9368,7 +9574,7 @@ if menu == "🌍 Inteligência":
 
     # ── ABAS DO MÓDULO ────────────────────────────────────────────────────────
     _tab_cal, _tab_plan, _tab_rot = st.tabs([
-        "📅 Eventos", "🌾 Planejamento de Safras", "🔄 Rotação de Culturas"
+        "📅 Eventos", "🌾 Plano por Safra", "🔄 Rotação de Culturas"
     ])
 
     # ════════════════════════════════════════════════════════════════════════
@@ -9691,7 +9897,7 @@ if menu == "🌍 Inteligência":
             border:2px dashed #1e4976;'>
             <div style='font-size:40px;'>🔄</div>
             <div style='color:#94a3b8;margin-top:8px;'>
-            Salve planejamentos na aba <b style='color:#6ee7b7;'>🌾 Planejamento de Safras</b>
+            Salve planejamentos na aba <b style='color:#6ee7b7;'>🌾 Plano por Safra</b>
             para ver o mapa de rotação.
             </div></div>""", unsafe_allow_html=True)
         else:
@@ -9748,194 +9954,6 @@ if menu == "🌍 Inteligência":
                 <span style='color:rgba(255,255,255,0.6);font-size:11px;'>{_desc_r}</span>
                 </div>""", unsafe_allow_html=True)
 
-if menu == "🌍 Inteligência":
-  with _sub_int[4]:
-    st.markdown("""
-    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
-    padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
-    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🤖 Assistente IA Agrícola</h2>
-    <p style='color:#94a3b8;margin:0;font-size:13px;'>
-    Especialista em agricultura brasileira — EMBRAPA, CQFS RS/SC, manejo integrado
-    </p></div>""", unsafe_allow_html=True)
-
-    if "assistente_hist" not in st.session_state:
-        st.session_state.assistente_hist = []
-
-    # Contexto rico da propriedade
-    _d_ia  = st.session_state.dados
-    _areas_ctx = ""
-    if st.session_state.areas:
-        _areas_ctx = "; ".join([
-            f"{a.get('Talhão','?')} {a.get('Hectares',0)}ha {a.get('Cultura','?')}"
-            for a in st.session_state.areas[:3]
-        ])
-    _ctx_ia = (
-        f"Segmento: {st.session_state.get('segmento','Grãos')}. "
-        f"Propriedade: {_areas_ctx or 'não cadastrada'}. "
-        f"Região: Sul do Brasil (PR/SC/RS). "
-        f"Plano: {st.session_state.get('plano','free')}."
-    )
-
-    # Busca API key de forma robusta
-    import os as _os_ia
-    _api_key_ia = ""
-    try:
-        _api_key_ia = st.secrets["ANTHROPIC_API_KEY"]
-    except Exception:
-        pass
-    if not _api_key_ia:
-        try:
-            _api_key_ia = st.secrets.get("ANTHROPIC_API_KEY", "")
-        except Exception:
-            pass
-    if not _api_key_ia:
-        _api_key_ia = _os_ia.environ.get("ANTHROPIC_API_KEY", "")
-
-    if not _api_key_ia or len(_api_key_ia) < 20:
-        st.warning("⚠️ Chave API não configurada. Adicione ANTHROPIC_API_KEY nos secrets do Streamlit.")
-    else:
-        # Histórico de mensagens
-        for msg in st.session_state.assistente_hist:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo...")
-
-        if _prompt_ia:
-            st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
-            with st.chat_message("user"):
-                st.markdown(_prompt_ia)
-            with st.chat_message("assistant"):
-                with st.spinner("🌾 Consultando especialista agrícola..."):
-                    try:
-                        import requests as _rq_ia
-                        # Monta histórico limitado a 10 mensagens para não exceder tokens
-                        _msgs_ia = [
-                            {"role": m["role"], "content": m["content"]}
-                            for m in st.session_state.assistente_hist[-10:]
-                        ]
-                        _system_ia = (
-                            "Você é um agrônomo especialista brasileiro com foco no Sul do Brasil (PR, SC, RS). "
-                            "Responda SEMPRE em português, de forma prática e objetiva para produtores rurais. "
-                            "Use dados da EMBRAPA, CQFS RS/SC, IAPAR e boas práticas agronômicas. "
-                            "Para recomendações de adubação, siga as tabelas CQFS RS/SC 2016. "
-                            "Para defensivos, cite apenas produtos registrados no MAPA. "
-                            "Seja direto: dê doses, épocas e práticas concretas. "
-                            f"Contexto da propriedade: {_ctx_ia}"
-                        )
-                        _resp_ia = _rq_ia.post(
-                            "https://api.anthropic.com/v1/messages",
-                            headers={
-                                "x-api-key":         _api_key_ia,
-                                "anthropic-version": "2023-06-01",
-                                "content-type":      "application/json",
-                            },
-                            json={
-                                "model":      "claude-sonnet-4-6",
-                                "max_tokens": 1024,
-                                "system":     _system_ia,
-                                "messages":   _msgs_ia,
-                            },
-                            timeout=45,
-                        )
-                        if _resp_ia.status_code == 200:
-                            _data_ia = _resp_ia.json()
-                            _ans = (_data_ia.get("content") or [{}])[0].get("text","")
-                            if _ans:
-                                st.markdown(_ans)
-                                st.session_state.assistente_hist.append(
-                                    {"role":"assistant","content":_ans})
-                            else:
-                                st.error("Resposta vazia da API.")
-                        elif _resp_ia.status_code == 401:
-                            st.error("❌ Chave API inválida ou expirada. Verifique ANTHROPIC_API_KEY.")
-                        elif _resp_ia.status_code == 429:
-                            st.warning("⏳ Limite de requisições. Aguarde alguns segundos e tente novamente.")
-                        else:
-                            st.error(f"Erro na API: HTTP {_resp_ia.status_code}")
-                    except Exception as _e_ia:
-                        st.error(f"Erro de conexão: {str(_e_ia)[:120]}")
-
-    if st.session_state.assistente_hist:
-        st.markdown("---")
-        _btn_col1, _btn_col2, _btn_col3 = st.columns(3)
-
-        # Exportar como TXT
-        _conv_txt = ""
-        for _m in st.session_state.assistente_hist:
-            _role = "👨‍🌾 Você" if _m["role"] == "user" else "🤖 IAAgro IA"
-            _conv_txt += f"{_role}:\n{_m['content']}\n\n{'─'*50}\n\n"
-        _btn_col1.download_button(
-            "📥 Exportar TXT", _conv_txt.encode("utf-8"),
-            "conversa_iaagro.txt", "text/plain",
-            key="btn_exp_conv_txt", use_container_width=True
-        )
-
-        # Exportar como PDF simples (texto)
-        import json as _json_conv
-        _conv_json = _json_conv.dumps(st.session_state.assistente_hist,
-                                       ensure_ascii=False, indent=2).encode("utf-8")
-        _btn_col2.download_button(
-            "📋 Exportar JSON", _conv_json,
-            "conversa_iaagro.json", "application/json",
-            key="btn_exp_conv_json", use_container_width=True
-        )
-
-        if _btn_col3.button("🗑️ Limpar conversa", key="btn_limpar_assistente",
-                            use_container_width=True):
-            st.session_state.assistente_hist = []
-            st.rerun()
-
-# ─────────────────────────────────────────────
-# MENU: SAFRINHA
-# ─────────────────────────────────────────────
-elif menu == "🌱 Safrinha":
-    st.header("🌱 Safrinha")
-    if "safrinha_registros" not in st.session_state:
-        st.session_state.safrinha_registros = []
-    ROTACOES = {
-        "Milho → Feijão":  {"1a":"Milho","2a":"Feijão","janela":"Set–Jan / Fev–Mai"},
-        "Milho → Soja":    {"1a":"Milho","2a":"Soja",  "janela":"Set–Jan / Out–Mar"},
-        "Soja → Feijão":   {"1a":"Soja", "2a":"Feijão","janela":"Out–Jan / Fev–Mai"},
-        "Feijão → Soja":   {"1a":"Feijão","2a":"Soja", "janela":"Jan–Abr / Out–Mar"},
-        "Feijão → Milho":  {"1a":"Feijão","2a":"Milho","janela":"Jan–Abr / Abr–Ago"},
-        "Soja → Milho":    {"1a":"Soja", "2a":"Milho", "janela":"Out–Jan / Fev–Jun"},
-    }
-    rot_sel = st.selectbox("🔄 Rotação de culturas", list(ROTACOES.keys()), key="safrinha_rotacao_sel")
-    rot_info = ROTACOES[rot_sel]
-    if rot_info["janela"]:
-        st.caption(f"📅 Janela de plantio: {rot_info['janela']}")
-    col_sf1, col_sf2 = st.columns(2)
-    if st.session_state.areas:
-        _lista_sf = [f"{a['ID']} — {a.get('Talhão','?')}" for a in st.session_state.areas]
-        area_sf   = col_sf1.selectbox("Área", _lista_sf, key="sf_area")
-        _id_sf    = area_sf.split(" — ")[0]
-    else:
-        st.warning("Cadastre uma área primeiro."); _id_sf = ""
-    safra_sf  = col_sf2.text_input("Safra", placeholder="2024/2025", key="sf_safra")
-    col_sf3, col_sf4, col_sf5 = st.columns(3)
-    data_plantio_sf = col_sf3.date_input("Data de plantio", key="sf_data")
-    area_ha_sf      = col_sf4.number_input("Área (ha)", min_value=0.0, key="sf_area_ha")
-    prod_esp_sf     = col_sf5.number_input("Produtividade esperada (sc/ha)", min_value=0.0, key="sf_prod")
-    obs_sf          = st.text_area("Observações", key="sf_obs", height=80)
-    if st.button("💾 Salvar Safrinha", key="btn_salvar_safrinha", use_container_width=True):
-        if _id_sf:
-            st.session_state.safrinha_registros.append({
-                "Rotação": rot_sel, "1ª Cultura": rot_info["1a"], "2ª Cultura": rot_info["2a"],
-                "Área ID": _id_sf, "Safra": safra_sf, "Data Plantio": str(data_plantio_sf),
-                "Área ha": area_ha_sf, "Produtividade Esperada": prod_esp_sf, "Obs": obs_sf,
-            })
-            salvar_dados_iaagro()
-            success_box(f"✅ Safrinha {rot_sel} registrada!")
-        else:
-            warning_box("Selecione uma área.")
-    if st.session_state.safrinha_registros:
-        import pandas as pd
-        st.divider()
-        st.subheader("📋 Registros de Safrinha")
-        st.dataframe(pd.DataFrame(st.session_state.safrinha_registros), use_container_width=True)
-
-# ─────────────────────────────────────────────
 elif menu == "⚙️ Configurações":
     st.header("⚙️ Configurações do Sistema")
 
