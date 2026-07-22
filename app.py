@@ -1217,13 +1217,38 @@ def parsear_laudo_ocr(texto):
 # ─────────────────────────────────────────────
 # CORREÇÃO 3: funções sem duplicatas
 # ─────────────────────────────────────────────
+def _arquivo_dados_do_usuario():
+    """
+    Caminho do arquivo de fallback local, ISOLADO POR USUÁRIO.
+
+    Motivo: no Streamlit Cloud todos os usuários dividem o mesmo container e o
+    mesmo /tmp. Um arquivo de caminho fixo faria o cliente B sobrescrever os
+    dados do cliente A — e, se o Supabase falhasse, o B poderia carregar os
+    dados do A. Cada usuário passa a ter seu próprio arquivo, identificado por
+    um hash do user_id (hash para não expor o UID no nome do arquivo).
+    """
+    _uid = (st.session_state.get("sb_user_id")
+            or st.session_state.get("usuario_atual")
+            or "")
+    if not _uid:
+        # Sem usuário identificado: usa arquivo anônimo isolado da sessão
+        _uid = "anonimo_" + str(st.session_state.get("_sessao_id", "local"))
+    _tag = hashlib.sha256(str(_uid).encode("utf-8")).hexdigest()[:16]
+    return str(_BASE_DIR / f"dados_iaagro_{_tag}.json")
+
+
 def carregar_dados_iaagro():
-    if os.path.exists(ARQUIVO_DADOS_IAAGRO):
-        with open(ARQUIVO_DADOS_IAAGRO, "r", encoding="utf-8") as arquivo:
-            return json.load(arquivo)
-    return {"dados": {}, "areas": [], "estoque": [], "aplicacoes": [],
-            "historico_produtividade": [], "pluviometro": [],
-            "carencia_registros": [], "dre_registros": [], "calendario_eventos": []}
+    _vazio = {"dados": {}, "areas": [], "estoque": [], "aplicacoes": [],
+              "historico_produtividade": [], "pluviometro": [],
+              "carencia_registros": [], "dre_registros": [], "calendario_eventos": []}
+    _arq = _arquivo_dados_do_usuario()
+    if os.path.exists(_arq):
+        try:
+            with open(_arq, "r", encoding="utf-8") as arquivo:
+                return json.load(arquivo)
+        except Exception:
+            return _vazio
+    return _vazio
 
 def salvar_dados_iaagro():
     dados_salvos = {
@@ -1302,17 +1327,24 @@ def salvar_dados_iaagro():
         if not _sb_uid: motivo.append("sem user_id")
         if not _SB_DISPONIVEL: motivo.append("módulo não carregou")
         st.session_state["_ultimo_save"] = f"⚠️ Local ({', '.join(motivo)})"
-    # Fallback: arquivo local
-    with open(ARQUIVO_DADOS_IAAGRO, "w", encoding="utf-8") as arquivo:
-        json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
+    # Fallback: arquivo local — isolado por usuário (ver _arquivo_dados_do_usuario)
+    try:
+        with open(_arquivo_dados_do_usuario(), "w", encoding="utf-8") as arquivo:
+            json.dump(dados_salvos, arquivo, indent=4, ensure_ascii=False)
+    except Exception:
+        pass
 
 def carregar_areas():
+    # ⚠️ LEGADO — não use. Usa caminho fixo compartilhado entre usuários no
+    # Streamlit Cloud (risco de um cliente ler dados de outro). Mantida apenas
+    # por compatibilidade; as áreas vêm de salvar/carregar_dados_iaagro().
     if os.path.exists(ARQUIVO_AREAS):
         with open(ARQUIVO_AREAS, "r", encoding="utf-8") as arquivo:
             return json.load(arquivo)
     return []
 
 def salvar_areas(areas):
+    # ⚠️ LEGADO — veja o aviso em carregar_areas().
     with open(ARQUIVO_AREAS, "w", encoding="utf-8") as arquivo:
         json.dump(areas, arquivo, indent=4, ensure_ascii=False)
 
