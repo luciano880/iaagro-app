@@ -1280,7 +1280,13 @@ def salvar_dados_iaagro():
 
     if _sb_ok:
         try:
-            ok = sb_salvar(_sb_url, _sb_key, _sb_token, _sb_uid, dados_salvos)
+            _res = sb_salvar(_sb_url, _sb_key, _sb_token, _sb_uid, dados_salvos, debug=True)
+            # Compatível com versão nova (tupla) e antiga (bool)
+            if isinstance(_res, tuple):
+                ok, _motivo = _res
+            else:
+                ok, _motivo = _res, "versão antiga (sem debug)"
+            st.session_state["_save_motivo"] = _motivo
             if ok:
                 st.session_state["_ultimo_save"] = f"✅ Supabase {datetime.now().strftime('%H:%M:%S')}"
                 return
@@ -1911,6 +1917,7 @@ if st.session_state.get("_ultimo_save"):
     st.sidebar.warning(
         f"🔍 DEBUG SAVE\n\n"
         f"Status: {_diag}\n\n"
+        f"Motivo: {st.session_state.get('_save_motivo', '(sem motivo)')}\n\n"
         f"Tem token: {_tk_ok}\n\n"
         f"Tem user_id: {_uid_ok}\n\n"
         f"Supabase ativo: {'sim' if _SUPABASE_ATIVO else 'NÃO'}"
