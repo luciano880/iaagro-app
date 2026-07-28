@@ -1904,6 +1904,17 @@ if st.session_state.get("_ultimo_save"):
         f"{st.session_state['_ultimo_save']}</div>",
         unsafe_allow_html=True
     )
+    # ── DIAGNÓSTICO TEMPORÁRIO — remover depois ──
+    _diag = st.session_state["_ultimo_save"]
+    _tk_ok = "sim" if st.session_state.get("sb_token") else "NÃO"
+    _uid_ok = "sim" if st.session_state.get("sb_user_id") else "NÃO"
+    st.sidebar.warning(
+        f"🔍 DEBUG SAVE\n\n"
+        f"Status: {_diag}\n\n"
+        f"Tem token: {_tk_ok}\n\n"
+        f"Tem user_id: {_uid_ok}\n\n"
+        f"Supabase ativo: {'sim' if _SUPABASE_ATIVO else 'NÃO'}"
+    )
 
 
 # ─────────────────────────────────────────────
