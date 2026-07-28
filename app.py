@@ -8680,45 +8680,58 @@ if menu == "🌍 Inteligência":
             import requests as rq_
             from urllib.parse import quote as _quote_url
 
-            # ── 1) Geocoding: cidade+estado -> coordenadas (Open-Meteo, gratuito) ──
+            # ── 1) Geocoding: cidade -> coordenadas (Open-Meteo, gratuito) ──
+            # Busca por várias grafias (com/sem acento resolve nomes como Xanxerê)
             _geo_url = ("https://geocoding-api.open-meteo.com/v1/search"
-                        f"?name={_quote_url(cidade)}&count=10&language=pt&format=json")
-            _geo = rq_.get(_geo_url, timeout=10).json()
+                        f"?name={_quote_url(cidade.strip())}&count=20&language=pt&format=json")
+            try:
+                _geo = rq_.get(_geo_url, timeout=10).json()
+            except Exception:
+                _geo = {}
+
+            _resultados = _geo.get("results", []) or []
+            # Só resultados do Brasil
+            _br = [r for r in _resultados if r.get("country_code") == "BR"]
             _match = None
-            for _res in _geo.get("results", []):
-                # Prioriza resultado no estado (UF) selecionado
-                if _res.get("admin1", "") and _uf_clima.lower() in _res.get("admin1", "").lower():
+            # 1º: cidade no Brasil E no estado (UF) selecionado
+            for _res in _br:
+                _adm = (_res.get("admin1", "") or "").lower()
+                if _uf_clima.lower() in _adm or _UFS_BR[_uf_clima].lower() in _adm:
                     _match = _res; break
-                if (_res.get("country_code", "") == "BR") and _match is None:
-                    _match = _res
-            if _match is None and _geo.get("results"):
-                _match = _geo["results"][0]
+            # 2º: qualquer cidade no Brasil
+            if _match is None and _br:
+                _match = _br[0]
+            # 3º: qualquer resultado (último recurso)
+            if _match is None and _resultados:
+                _match = _resultados[0]
 
             if not _match:
-                st.info(f"Cidade '{cidade}' não encontrada. Confira o nome e o estado.")
-                _match = None
+                st.warning(f"❌ Cidade '{cidade}' não encontrada. "
+                           f"Tente com acento (ex: Xanxerê) ou uma cidade maior próxima.")
             else:
                 _lat = _match["latitude"]; _lon = _match["longitude"]
                 _nome_local = _match.get("name", cidade)
+                _adm_local  = _match.get("admin1", "")
 
-                # ── 2) Clima atual + previsão 7 dias (Open-Meteo forecast) ──
+                # ── 2) Clima atual + previsão 7 dias ──
                 _fc_url = (
                     "https://api.open-meteo.com/v1/forecast"
                     f"?latitude={_lat}&longitude={_lon}"
                     "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
                     "precipitation,weather_code,wind_speed_10m,wind_direction_10m"
-                    "&hourly=relative_humidity_2m,precipitation,weather_code"
                     "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum"
                     "&timezone=America%2FSao_Paulo&forecast_days=7"
                 )
-                _fc = rq_.get(_fc_url, timeout=12).json()
+                try:
+                    _fc = rq_.get(_fc_url, timeout=12).json()
+                except Exception as _e_fc:
+                    _fc = {}
+                    st.warning(f"Não consegui buscar o clima agora. Tente de novo em instantes.")
 
-                if "current" not in _fc:
-                    st.info(f"Clima para '{cidade}' indisponível no momento. Tente novamente.")
-                else:
-                    st.caption(f"📡 Exibindo: **{_nome_local} — {_UFS_BR[_uf_clima]}** · "
-                               f"Atualizado às {datetime.now().strftime('%H:%M:%S')} · "
-                               f"fonte Open-Meteo · clique em 🔄 Atualizar")
+                if _fc and "current" in _fc:
+                    st.caption(f"📡 Exibindo: **{_nome_local}"
+                               f"{(' — ' + _adm_local) if _adm_local else ''}** · "
+                               f"Atualizado às {datetime.now().strftime('%H:%M:%S')} · fonte Open-Meteo")
 
                     # ── Mapeamento código WMO -> descrição PT + emoji ──
                     def _wmo(cod):
