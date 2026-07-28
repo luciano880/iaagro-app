@@ -133,8 +133,25 @@ def sb_carregar(url, api_key, token, user_id):
     return None
 
 
-def sb_salvar(url, api_key, token, user_id, session):
-    """Salva/atualiza todos os dados do usuário."""
+def sb_salvar(url, api_key, token, user_id, session, debug=False):
+    """
+    Salva/atualiza todos os dados do usuário via UPSERT.
+
+    Corrigido: a versão anterior podia retornar True sem gravar nada —
+    quando o PATCH atualizava zero linhas (RLS/token) ou quando o corpo da
+    resposta era lido de forma otimista. Agora só retorna True quando o
+    Supabase confirma explicitamente a linha gravada (corpo de resposta com
+    a linha), evitando o "✅ enganoso".
+
+    Usa UPSERT nativo do PostgREST (Prefer: resolution=merge-duplicates),
+    que insere se não existir e atualiza se já existir — sem o DELETE+INSERT
+    frágil que quebrava por causa da constraint única em user_id.
+
+    debug=True devolve (ok, detalhe) para diagnóstico.
+    """
+    def _r(ok, detalhe):
+        return (ok, detalhe) if debug else ok
+
     payload = {
         "user_id":                 user_id,
         "dados":                   json.dumps(session.get("dados", {}), ensure_ascii=False),
@@ -156,41 +173,37 @@ def sb_salvar(url, api_key, token, user_id, session):
         "segmento":                session.get("segmento", None),
         "atualizado_em":           datetime.now().isoformat(),
     }
-    headers_base = {
+    headers = {
         "apikey":        api_key,
         "Authorization": f"Bearer {token}",
         "Content-Type":  "application/json",
+        # UPSERT: se já existe linha com esse user_id, mescla (atualiza);
+        # senão insere. return=representation faz o corpo trazer a linha salva.
+        "Prefer":        "resolution=merge-duplicates,return=representation",
     }
-    payload_update = {k: v for k, v in payload.items() if k != "user_id"}
 
-    # 1. Tenta PATCH (update)
-    r = requests.patch(
-        f"{url}/rest/v1/iaagro_dados?user_id=eq.{user_id}",
-        headers={**headers_base, "Prefer": "return=representation"},
-        json=payload_update,
-        timeout=15
-    )
-    if r.status_code == 200:
-        # Verifica se realmente atualizou algo
+    try:
+        r = requests.post(
+            f"{url}/rest/v1/iaagro_dados?on_conflict=user_id",
+            headers=headers,
+            json=payload,
+            timeout=20,
+        )
+    except Exception as e:
+        return _r(False, f"erro de conexão: {e}")
+
+    # Só considera sucesso se o Supabase devolveu a linha gravada
+    if r.status_code in (200, 201):
         try:
-            if r.json():  # retornou rows = atualizou
-                return True
+            corpo = r.json()
+            if corpo and isinstance(corpo, list) and corpo[0].get("user_id"):
+                return _r(True, f"gravado ({r.status_code}), areas={len(corpo[0].get('areas','[]'))} chars")
         except Exception:
-            return True
+            pass
+        # 200/201 sem corpo confirmável = suspeito, trata como falha
+        return _r(False, f"status {r.status_code} mas sem linha confirmada: {r.text[:120]}")
 
-    # 2. Se não atualizou, faz DELETE + INSERT limpo
-    requests.delete(
-        f"{url}/rest/v1/iaagro_dados?user_id=eq.{user_id}",
-        headers=headers_base,
-        timeout=10
-    )
-    r2 = requests.post(
-        f"{url}/rest/v1/iaagro_dados",
-        headers={**headers_base, "Prefer": "return=minimal"},
-        json=payload,
-        timeout=15
-    )
-    return r2.status_code in (200, 201, 204)
+    return _r(False, f"HTTP {r.status_code}: {r.text[:150]}")
 
 
 def sb_plano(url, api_key, token, user_id, debug=False):
