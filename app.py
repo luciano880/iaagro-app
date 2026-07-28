@@ -8728,6 +8728,17 @@ if menu == "🌍 Inteligência":
                     _fc = {}
                     st.warning(f"Não consegui buscar o clima agora. Tente de novo em instantes.")
 
+                # ── DIAGNÓSTICO TEMPORÁRIO — remover depois ──
+                with st.expander("🔍 DEBUG clima (temporário)", expanded=True):
+                    st.write("Cidade encontrada:", _nome_local, "/", _adm_local)
+                    st.write("Coordenadas:", _lat, _lon)
+                    st.write("URL forecast:", _fc_url)
+                    st.write("Tem 'current'?", "current" in _fc if _fc else False)
+                    st.write("Chaves da resposta:", list(_fc.keys()) if _fc else "resposta vazia")
+                    if _fc and "error" in _fc:
+                        st.error(f"Erro da API: {_fc.get('reason', _fc)}")
+                    st.json(_fc if _fc else {"vazio": True})
+
                 if _fc and "current" in _fc:
                     st.caption(f"📡 Exibindo: **{_nome_local}"
                                f"{(' — ' + _adm_local) if _adm_local else ''}** · "
