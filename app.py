@@ -8680,28 +8680,42 @@ if menu == "🌍 Inteligência":
             import requests as rq_
             from urllib.parse import quote as _quote_url
 
-            # ── 1) Geocoding: cidade -> coordenadas (Open-Meteo, gratuito) ──
-            # Busca por várias grafias (com/sem acento resolve nomes como Xanxerê)
-            _geo_url = ("https://geocoding-api.open-meteo.com/v1/search"
-                        f"?name={_quote_url(cidade.strip())}&count=20&language=pt&format=json")
-            try:
-                _geo = rq_.get(_geo_url, timeout=10).json()
-            except Exception:
-                _geo = {}
+            # Cache de 30 min: evita estourar o limite diário do Open-Meteo
+            # (o IP é compartilhado entre todos os usuários do Streamlit)
+            @st.cache_data(ttl=1800, show_spinner=False)
+            def _buscar_geo(nome):
+                try:
+                    _u = ("https://geocoding-api.open-meteo.com/v1/search"
+                          f"?name={_quote_url(nome.strip())}&count=20&language=pt&format=json")
+                    return rq_.get(_u, timeout=10).json()
+                except Exception:
+                    return {}
 
+            @st.cache_data(ttl=1800, show_spinner=False)
+            def _buscar_clima(lat, lon):
+                try:
+                    _u = (
+                        "https://api.open-meteo.com/v1/forecast"
+                        f"?latitude={lat}&longitude={lon}"
+                        "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
+                        "precipitation,weather_code,wind_speed_10m,wind_direction_10m"
+                        "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum"
+                        "&timezone=America%2FSao_Paulo&forecast_days=7"
+                    )
+                    return rq_.get(_u, timeout=12).json()
+                except Exception:
+                    return {}
+
+            _geo = _buscar_geo(cidade)
             _resultados = _geo.get("results", []) or []
-            # Só resultados do Brasil
             _br = [r for r in _resultados if r.get("country_code") == "BR"]
             _match = None
-            # 1º: cidade no Brasil E no estado (UF) selecionado
             for _res in _br:
                 _adm = (_res.get("admin1", "") or "").lower()
                 if _uf_clima.lower() in _adm or _UFS_BR[_uf_clima].lower() in _adm:
                     _match = _res; break
-            # 2º: qualquer cidade no Brasil
             if _match is None and _br:
                 _match = _br[0]
-            # 3º: qualquer resultado (último recurso)
             if _match is None and _resultados:
                 _match = _resultados[0]
 
@@ -8713,33 +8727,20 @@ if menu == "🌍 Inteligência":
                 _nome_local = _match.get("name", cidade)
                 _adm_local  = _match.get("admin1", "")
 
-                # ── 2) Clima atual + previsão 7 dias ──
-                _fc_url = (
-                    "https://api.open-meteo.com/v1/forecast"
-                    f"?latitude={_lat}&longitude={_lon}"
-                    "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
-                    "precipitation,weather_code,wind_speed_10m,wind_direction_10m"
-                    "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum"
-                    "&timezone=America%2FSao_Paulo&forecast_days=7"
-                )
-                try:
-                    _fc = rq_.get(_fc_url, timeout=12).json()
-                except Exception as _e_fc:
-                    _fc = {}
-                    st.warning(f"Não consegui buscar o clima agora. Tente de novo em instantes.")
+                _fc = _buscar_clima(_lat, _lon)
 
-                # ── DIAGNÓSTICO TEMPORÁRIO — remover depois ──
-                with st.expander("🔍 DEBUG clima (temporário)", expanded=True):
-                    st.write("Cidade encontrada:", _nome_local, "/", _adm_local)
-                    st.write("Coordenadas:", _lat, _lon)
-                    st.write("URL forecast:", _fc_url)
-                    st.write("Tem 'current'?", "current" in _fc if _fc else False)
-                    st.write("Chaves da resposta:", list(_fc.keys()) if _fc else "resposta vazia")
-                    if _fc and "error" in _fc:
-                        st.error(f"Erro da API: {_fc.get('reason', _fc)}")
-                    st.json(_fc if _fc else {"vazio": True})
-
-                if _fc and "current" in _fc:
+                if _fc and _fc.get("error"):
+                    _motivo_api = str(_fc.get("reason", "")).lower()
+                    if "limit" in _motivo_api:
+                        st.warning(
+                            "⏳ O serviço de clima atingiu o limite de consultas por hoje. "
+                            "A cota é gratuita e compartilhada entre os usuários do app, "
+                            "e reseta automaticamente nas próximas horas. "
+                            "Evite clicar em Atualizar várias vezes seguidas para não esgotar a cota."
+                        )
+                    else:
+                        st.warning(f"Serviço de clima indisponível no momento. Tente novamente em instantes.")
+                elif _fc and "current" in _fc:
                     st.caption(f"📡 Exibindo: **{_nome_local}"
                                f"{(' — ' + _adm_local) if _adm_local else ''}** · "
                                f"Atualizado às {datetime.now().strftime('%H:%M:%S')} · fonte Open-Meteo")
