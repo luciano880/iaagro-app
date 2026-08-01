@@ -128,6 +128,8 @@ def sb_carregar(url, api_key, token, user_id):
             "contratos_troca":         json.loads(row.get("contratos_troca", "[]")),
             "corretivos_aplicados":    json.loads(row.get("corretivos_aplicados", "[]")),
             "planejamento_safras":     json.loads(row.get("planejamento_safras", "[]")),
+            "maquinas":                json.loads(row.get("maquinas", "[]")),
+            "maquinas_revisoes":       json.loads(row.get("maquinas_revisoes", "[]")),
             "segmento":                row.get("segmento", None),
         }
     return None
@@ -170,6 +172,8 @@ def sb_salvar(url, api_key, token, user_id, session, debug=False):
         "contratos_troca":         json.dumps(session.get("contratos_troca", []), ensure_ascii=False),
         "corretivos_aplicados":    json.dumps(session.get("corretivos_aplicados", []), ensure_ascii=False),
         "planejamento_safras":     json.dumps(session.get("planejamento_safras", []), ensure_ascii=False),
+        "maquinas":                json.dumps(session.get("maquinas", []), ensure_ascii=False),
+        "maquinas_revisoes":       json.dumps(session.get("maquinas_revisoes", []), ensure_ascii=False),
         "segmento":                session.get("segmento", None),
         "atualizado_em":           datetime.now().isoformat(),
     }
