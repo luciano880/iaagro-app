@@ -10199,7 +10199,7 @@ if menu == "🔧 Máquinas":
                 {'<br><span style="color:#64748b;font-size:12px;">' + _maq.get('obs','') + '</span>' if _maq.get('obs') else ''}
                 </div></div></div>""", unsafe_allow_html=True)
 
-                _ce1, _ce2, _ce3 = st.columns([1, 1, 4])
+                _ce1, _ce2, _ce3, _ce4 = st.columns([1, 1, 1.5, 2.5])
                 # Atualizar horímetro
                 _novo_h = _ce1.number_input("Atualizar horímetro", min_value=0.0, step=10.0,
                                             value=float(_maq.get("horimetro", 0)),
@@ -10209,10 +10209,55 @@ if menu == "🔧 Máquinas":
                     salvar_dados_iaagro()
                     success_box("Horímetro atualizado!")
                     st.rerun()
-                if _ce3.button("🗑️ Remover máquina", key=f"delm_{_maq.get('id', _mi)}"):
+                _mkey = _maq.get('id', _mi)
+                if _ce3.button("✏️ Editar", key=f"editm_{_mkey}"):
+                    st.session_state[f"edit_maq_{_mkey}"] = not st.session_state.get(f"edit_maq_{_mkey}", False)
+                    st.rerun()
+                if _ce4.button("🗑️ Remover máquina", key=f"delm_{_mkey}"):
                     st.session_state.maquinas.pop(_mi)
                     salvar_dados_iaagro()
                     st.rerun()
+
+                # ── Formulário de edição da máquina ──
+                if st.session_state.get(f"edit_maq_{_mkey}", False):
+                    with st.form(f"form_edit_maq_{_mkey}"):
+                        st.markdown("**✏️ Editando máquina**")
+                        _ec1, _ec2, _ec3 = st.columns(3)
+                        _e_nome  = _ec1.text_input("Nome / Apelido", value=_maq.get("nome",""))
+                        _cats_ed = _CATEGORIAS_MAQ
+                        _cat_idx = _cats_ed.index(_maq.get("categoria")) if _maq.get("categoria") in _cats_ed else 0
+                        _e_cat   = _ec2.selectbox("Categoria", _cats_ed, index=_cat_idx)
+                        _e_marca = _ec3.text_input("Marca", value=_maq.get("marca",""))
+                        _ec4, _ec5, _ec6 = st.columns(3)
+                        _e_modelo = _ec4.text_input("Modelo", value=_maq.get("modelo",""))
+                        _e_ano    = _ec5.number_input("Ano", min_value=1950, max_value=2030,
+                                                      value=int(_maq.get("ano", 2020)), step=1)
+                        _e_horim  = _ec6.number_input("Horímetro (h)", min_value=0.0, step=10.0,
+                                                      value=float(_maq.get("horimetro", 0)))
+                        _ec7, _ec8 = st.columns(2)
+                        _e_placa  = _ec7.text_input("Placa / Nº série", value=_maq.get("placa",""))
+                        _e_obs    = _ec8.text_input("Observações", value=_maq.get("obs",""))
+                        _eb1, _eb2 = st.columns(2)
+                        _e_salvar   = _eb1.form_submit_button("💾 Salvar alterações", use_container_width=True)
+                        _e_cancelar = _eb2.form_submit_button("✖️ Cancelar", use_container_width=True)
+
+                    if _e_salvar:
+                        if not _e_nome.strip():
+                            st.error("O nome não pode ficar vazio.")
+                        else:
+                            st.session_state.maquinas[_mi].update({
+                                "nome": _e_nome.strip(), "categoria": _e_cat,
+                                "marca": _e_marca.strip(), "modelo": _e_modelo.strip(),
+                                "ano": int(_e_ano), "horimetro": float(_e_horim),
+                                "placa": _e_placa.strip(), "obs": _e_obs.strip(),
+                            })
+                            st.session_state[f"edit_maq_{_mkey}"] = False
+                            salvar_dados_iaagro()
+                            success_box("✅ Máquina atualizada!")
+                            st.rerun()
+                    if _e_cancelar:
+                        st.session_state[f"edit_maq_{_mkey}"] = False
+                        st.rerun()
 
                 # ── Peças fixas da máquina (filtros, óleo — código + nome) ──
                 _pcs = _maq.get("pecas", [])
