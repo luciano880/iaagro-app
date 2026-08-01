@@ -628,6 +628,63 @@ def exportar_excel(dados_dict: dict):
 # ─────────────────────────────────────────────
 # BACKUP / RESTORE
 # ─────────────────────────────────────────────
+def gerar_pdf_lista_pecas(itens, titulo="Lista de Compras — Peças de Revisão"):
+    """
+    Gera um PDF simples de lista de compras de peças (código + nome + máquina),
+    pronto pra levar/imprimir e comprar na revenda.
+    itens = lista de dicts: {"maquina","codigo","nome","tipo_revisao"}
+    """
+    import io as _io_pdf
+    from reportlab.lib.units import cm
+    _buf = _io_pdf.BytesIO()
+    _doc = SimpleDocTemplate(_buf, pagesize=A4,
+                             topMargin=1.5*cm, bottomMargin=1.5*cm,
+                             leftMargin=1.5*cm, rightMargin=1.5*cm)
+    _sty = getSampleStyleSheet()
+    _el = []
+    _verde = colors.HexColor("#166534")
+    _verde_c = colors.HexColor("#dcfce7")
+
+    _el.append(Paragraph(f"<b>{titulo}</b>", _sty["Title"]))
+    _el.append(Paragraph(
+        f"IAAgro · Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}", _sty["Normal"]))
+    _el.append(Spacer(1, 0.5*cm))
+
+    if not itens:
+        _el.append(Paragraph("Nenhuma peça a comprar no momento.", _sty["Normal"]))
+    else:
+        _dados_tab = [["#", "Código", "Peça", "Máquina", "☐"]]
+        for _i, _it in enumerate(itens, 1):
+            _dados_tab.append([
+                str(_i),
+                _it.get("codigo", "—") or "—",
+                _it.get("nome", ""),
+                _it.get("maquina", ""),
+                "☐",
+            ])
+        _tab = Table(_dados_tab, colWidths=[1*cm, 3.5*cm, 6.5*cm, 5*cm, 1*cm])
+        _tab.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), _verde),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        _el.append(_tab)
+        _el.append(Spacer(1, 0.4*cm))
+        _el.append(Paragraph(
+            f"<i>Total de itens: {len(itens)}</i>", _sty["Normal"]))
+
+    _doc.build(_el)
+    _buf.seek(0)
+    return _buf.getvalue()
+
+
+
 def gerar_backup():
     dados = {
         "usuarios":  st.session_state.get("usuarios", {}),
@@ -1270,6 +1327,8 @@ def salvar_dados_iaagro():
         "planejamento_safras":     st.session_state.get("planejamento_safras", []),
         "plan_insumos":            st.session_state.get("plan_insumos", []),
         "corretivos_aplicados":    st.session_state.get("corretivos_aplicados", []),
+        "maquinas":                st.session_state.get("maquinas", []),
+        "maquinas_revisoes":       st.session_state.get("maquinas_revisoes", []),
     }
     # Lê variáveis globais dinamicamente (podem não existir quando função é definida)
     _sb_url    = st.secrets.get("SUPABASE_URL", "") if hasattr(st, 'secrets') else ""
@@ -2026,6 +2085,10 @@ if "calendario_eventos" not in st.session_state or (not st.session_state.get("ca
     st.session_state.calendario_eventos = dados_carregados.get("calendario_eventos", [])
 if "dre_registros" not in st.session_state or (not st.session_state.get("dre_registros") and dados_carregados.get("dre_registros")):
     st.session_state.dre_registros = dados_carregados.get("dre_registros", [])
+if "maquinas" not in st.session_state or (not st.session_state.get("maquinas") and dados_carregados.get("maquinas")):
+    st.session_state.maquinas = dados_carregados.get("maquinas", [])
+if "maquinas_revisoes" not in st.session_state or (not st.session_state.get("maquinas_revisoes") and dados_carregados.get("maquinas_revisoes")):
+    st.session_state.maquinas_revisoes = dados_carregados.get("maquinas_revisoes", [])
 
 # ── GPS session_states — inicialização segura ───────────────────
 if "_gps_lat"       not in st.session_state: st.session_state._gps_lat       = None
@@ -4092,6 +4155,7 @@ menu = st.sidebar.radio(
         "🧪 Solo & Adubação",
         "💰 Financeiro",
         "📦 Operacional",
+        "🔧 Máquinas",
         "🌍 Inteligência",
         "📅 Planejamento de Safras",
         "📄 Relatório Final",
@@ -10032,6 +10096,406 @@ if menu == "📅 Planejamento de Safras":
                 <span style='color:#fff;font-weight:700;font-size:12px;'>{_ico_r} {_rot_r}</span><br>
                 <span style='color:rgba(255,255,255,0.6);font-size:11px;'>{_desc_r}</span>
                 </div>""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# MENU: MÁQUINAS (Inventário + Revisões)
+# ─────────────────────────────────────────────
+elif menu == "🔧 Máquinas":
+    st.markdown("""
+    <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
+    padding:20px 24px;margin-bottom:16px;border:1px solid #22c55e33;'>
+    <h2 style='color:#6ee7b7;margin:0 0 4px;font-size:22px;'>🔧 Máquinas & Implementos</h2>
+    <p style='color:#94a3b8;margin:0;font-size:13px;'>
+    Inventário do maquinário e controle de revisões por data e horas de uso
+    </p></div>""", unsafe_allow_html=True)
+    _sub_maq = st.tabs(["🚜 Inventário", "🔧 Revisões & Alertas"])
+
+if menu == "🔧 Máquinas":
+  # ══════════════════════════════════════════════════════════════════════
+  # ABA 0 — INVENTÁRIO DE MÁQUINAS
+  # ══════════════════════════════════════════════════════════════════════
+  with _sub_maq[0]:
+    _CATEGORIAS_MAQ = [
+        "🚜 Trator", "🌾 Colheitadeira", "🌱 Plantadeira", "💧 Pulverizador",
+        "🚛 Caminhão", "🔩 Implemento", "⚙️ Distribuidor", "🔧 Outro",
+    ]
+    st.markdown("#### ➕ Cadastrar Máquina")
+    with st.form("form_maquina", clear_on_submit=True):
+        _mc1, _mc2, _mc3 = st.columns(3)
+        _m_nome  = _mc1.text_input("Nome / Apelido", placeholder="Ex: Trator John Deere do talhão 3")
+        _m_cat   = _mc2.selectbox("Categoria", _CATEGORIAS_MAQ)
+        _m_marca = _mc3.text_input("Marca", placeholder="John Deere, Massey, Case...")
+
+        _mc4, _mc5, _mc6 = st.columns(3)
+        _m_modelo = _mc4.text_input("Modelo", placeholder="6110J, MF 4707...")
+        _m_ano    = _mc5.number_input("Ano", min_value=1950, max_value=2030,
+                                      value=2020, step=1)
+        _m_horim  = _mc6.number_input("Horímetro atual (h)", min_value=0.0, step=10.0,
+                                      help="Horas de uso no horímetro da máquina")
+
+        _mc7, _mc8 = st.columns(2)
+        _m_placa  = _mc7.text_input("Placa / Nº série (opcional)", placeholder="ABC-1234 ou nº de série")
+        _m_obs    = _mc8.text_input("Observações (opcional)", placeholder="Cor, detalhes, etc.")
+
+        _m_add = st.form_submit_button("➕ Adicionar máquina", use_container_width=True)
+
+    if _m_add:
+        if not _m_nome.strip():
+            st.error("Dê um nome ou apelido para a máquina.")
+        else:
+            import uuid as _uuid_m
+            st.session_state.maquinas.append({
+                "id":        str(_uuid_m.uuid4())[:8],
+                "nome":      _m_nome.strip(),
+                "categoria": _m_cat,
+                "marca":     _m_marca.strip(),
+                "modelo":    _m_modelo.strip(),
+                "ano":       int(_m_ano),
+                "horimetro": float(_m_horim),
+                "placa":     _m_placa.strip(),
+                "obs":       _m_obs.strip(),
+                "cadastro":  datetime.now().strftime("%d/%m/%Y"),
+            })
+            salvar_dados_iaagro()
+            success_box(f"✅ {_m_nome} adicionada ao inventário!")
+            st.rerun()
+
+    st.divider()
+
+    # ── Lista do inventário ────────────────────────────────────────────
+    _maqs = st.session_state.get("maquinas", [])
+    if not _maqs:
+        st.info("Nenhuma máquina cadastrada ainda. Use o formulário acima para começar.")
+    else:
+        st.markdown(f"#### 🚜 Frota cadastrada ({len(_maqs)} máquina(s))")
+
+        # Métricas rápidas
+        _mm1, _mm2, _mm3 = st.columns(3)
+        _mm1.metric("Total de máquinas", len(_maqs))
+        _idade_media = 0
+        _anos = [m.get("ano", 0) for m in _maqs if m.get("ano", 0) > 0]
+        if _anos:
+            _idade_media = datetime.now().year - (sum(_anos) / len(_anos))
+        _mm2.metric("Idade média da frota", f"{_idade_media:.0f} anos")
+        _horas_tot = sum(m.get("horimetro", 0) for m in _maqs)
+        _mm3.metric("Horas totais (frota)", f"{_horas_tot:,.0f} h")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        for _mi, _maq in enumerate(_maqs):
+            _idade = datetime.now().year - _maq.get("ano", datetime.now().year)
+            with st.container():
+                st.markdown(f"""
+                <div style='background:#0f172a;border:1px solid #1e3a2f;border-left:4px solid #22c55e;
+                border-radius:10px;padding:12px 16px;margin:4px 0;'>
+                <div style='display:flex;justify-content:space-between;align-items:center;'>
+                <div>
+                <span style='color:#6ee7b7;font-size:16px;font-weight:800;'>{_maq.get('categoria','')} {_maq.get('nome','')}</span><br>
+                <span style='color:#cbd5e1;font-size:13px;'>
+                {_maq.get('marca','')} {_maq.get('modelo','')} · Ano {_maq.get('ano','—')}
+                ({_idade} anos) · {_maq.get('horimetro',0):,.0f} h
+                {' · ' + _maq.get('placa','') if _maq.get('placa') else ''}
+                </span>
+                {'<br><span style="color:#64748b;font-size:12px;">' + _maq.get('obs','') + '</span>' if _maq.get('obs') else ''}
+                </div></div></div>""", unsafe_allow_html=True)
+
+                _ce1, _ce2, _ce3 = st.columns([1, 1, 4])
+                # Atualizar horímetro
+                _novo_h = _ce1.number_input("Atualizar horímetro", min_value=0.0, step=10.0,
+                                            value=float(_maq.get("horimetro", 0)),
+                                            key=f"uph_{_maq.get('id', _mi)}")
+                if _ce2.button("💾 Salvar h", key=f"savh_{_maq.get('id', _mi)}"):
+                    st.session_state.maquinas[_mi]["horimetro"] = float(_novo_h)
+                    salvar_dados_iaagro()
+                    success_box("Horímetro atualizado!")
+                    st.rerun()
+                if _ce3.button("🗑️ Remover máquina", key=f"delm_{_maq.get('id', _mi)}"):
+                    st.session_state.maquinas.pop(_mi)
+                    salvar_dados_iaagro()
+                    st.rerun()
+
+                # ── Peças fixas da máquina (filtros, óleo — código + nome) ──
+                _pcs = _maq.get("pecas", [])
+                with st.expander(f"🔩 Peças de revisão desta máquina ({len(_pcs)})"):
+                    st.caption("Cadastre aqui os filtros, óleos e peças que esta máquina usa, "
+                               "com o código de cada um. Depois é só levar a lista pronta na revenda.")
+                    with st.form(f"form_peca_{_maq.get('id', _mi)}", clear_on_submit=True):
+                        _pp1, _pp2, _pp3 = st.columns([2, 3, 1])
+                        _p_cod  = _pp1.text_input("Código", placeholder="RE504836", key=f"pcod_{_maq.get('id', _mi)}")
+                        _p_nome = _pp2.text_input("Nome da peça", placeholder="Filtro de óleo do motor", key=f"pnom_{_maq.get('id', _mi)}")
+                        _p_add  = _pp3.form_submit_button("➕", use_container_width=True)
+                    if _p_add and _p_nome.strip():
+                        st.session_state.maquinas[_mi].setdefault("pecas", []).append({
+                            "codigo": _p_cod.strip(), "nome": _p_nome.strip(),
+                        })
+                        salvar_dados_iaagro()
+                        st.rerun()
+
+                    if _pcs:
+                        for _pi, _pc in enumerate(_pcs):
+                            _pl1, _pl2 = st.columns([6, 1])
+                            _cod_txt = f"<code style='background:#1e293b;color:#6ee7b7;padding:1px 6px;border-radius:4px;'>{_pc.get('codigo','—')}</code>" if _pc.get('codigo') else "<span style='color:#64748b;'>sem código</span>"
+                            _pl1.markdown(f"{_cod_txt} &nbsp; {_pc.get('nome','')}", unsafe_allow_html=True)
+                            if _pl2.button("🗑️", key=f"delpc_{_maq.get('id', _mi)}_{_pi}"):
+                                st.session_state.maquinas[_mi]["pecas"].pop(_pi)
+                                salvar_dados_iaagro()
+                                st.rerun()
+                    else:
+                        st.info("Nenhuma peça cadastrada para esta máquina ainda.")
+
+  # ══════════════════════════════════════════════════════════════════════
+  # ABA 1 — REVISÕES & ALERTAS
+  # ══════════════════════════════════════════════════════════════════════
+  with _sub_maq[1]:
+    _maqs_r = st.session_state.get("maquinas", [])
+    if not _maqs_r:
+        st.info("Cadastre máquinas na aba Inventário antes de programar revisões.")
+    else:
+        # ── Gerar lista de compras (PDF) das peças ──────────────────────
+        with st.expander("🛒 Gerar lista de compras de peças (PDF para a revenda)"):
+            _revs_pdf = st.session_state.get("maquinas_revisoes", [])
+            _hoje_pdf = datetime.now().date()
+
+            _opcao_lista = st.radio(
+                "O que incluir na lista?",
+                ["Só revisões vencidas/próximas", "Todas as máquinas (peças cadastradas)"],
+                key="opc_lista_pecas", horizontal=True
+            )
+
+            _itens_compra = []
+            if _opcao_lista == "Todas as máquinas (peças cadastradas)":
+                for _m in _maqs_r:
+                    for _p in _m.get("pecas", []):
+                        _itens_compra.append({
+                            "maquina": f"{_m.get('categoria','')} {_m.get('nome','')}".strip(),
+                            "codigo": _p.get("codigo", ""), "nome": _p.get("nome", ""),
+                        })
+            else:
+                # Só das revisões vencidas ou próximas (≤15 dias ou ≤30h)
+                for _rev in _revs_pdf:
+                    _maq_r = next((m for m in _maqs_r if m.get("id") == _rev.get("maq_id")), None)
+                    if not _maq_r:
+                        continue
+                    _venc = False
+                    if _rev.get("interv_dias", 0) > 0:
+                        try:
+                            _dtu = datetime.strptime(_rev["data_ultima"], "%Y-%m-%d").date()
+                            if (_dtu + timedelta(days=_rev["interv_dias"]) - _hoje_pdf).days <= 15:
+                                _venc = True
+                        except Exception:
+                            pass
+                    if _rev.get("interv_horas", 0) > 0:
+                        _hv = _rev.get("horim_ultima", 0) + _rev["interv_horas"]
+                        if (_hv - _maq_r.get("horimetro", 0)) <= 30:
+                            _venc = True
+                    if _venc:
+                        for _p in _maq_r.get("pecas", []):
+                            _itens_compra.append({
+                                "maquina": f"{_maq_r.get('categoria','')} {_maq_r.get('nome','')}".strip(),
+                                "codigo": _p.get("codigo", ""), "nome": _p.get("nome", ""),
+                            })
+
+            if _itens_compra:
+                st.markdown(f"**{len(_itens_compra)} peça(s)** na lista:")
+                for _ic in _itens_compra:
+                    _c_txt = f"`{_ic['codigo']}`" if _ic.get("codigo") else "*(sem código)*"
+                    st.markdown(f"- {_c_txt} {_ic['nome']} — {_ic['maquina']}")
+                try:
+                    _pdf_bytes = gerar_pdf_lista_pecas(_itens_compra)
+                    st.download_button(
+                        "📥 Baixar lista de compras (PDF)",
+                        data=_pdf_bytes,
+                        file_name=f"lista_pecas_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                except Exception as _e_pdf:
+                    st.error(f"Erro ao gerar PDF: {_e_pdf}")
+            else:
+                st.info("Nenhuma peça para listar. Cadastre peças nas máquinas (aba Inventário) "
+                        "e, se escolher 'vencidas/próximas', tenha revisões nesse status.")
+
+        st.markdown("#### ➕ Programar Revisão")
+        with st.form("form_revisao", clear_on_submit=True):
+            _rc1, _rc2 = st.columns(2)
+            _r_maq_nome = _rc1.selectbox(
+                "Máquina",
+                [f"{m.get('categoria','')} {m.get('nome','')}" for m in _maqs_r],
+                key="rev_maq_sel"
+            )
+            _r_tipo = _rc2.text_input("Tipo de revisão", placeholder="Troca de óleo, filtros, revisão geral...")
+
+            _rc3, _rc4, _rc5 = st.columns(3)
+            _r_data_ult = _rc3.date_input("Data da última revisão", value=datetime.now())
+            _r_interv_dias = _rc4.number_input("Revisar a cada (dias)", min_value=0, step=30,
+                                               value=180,
+                                               help="0 = não alertar por data")
+            _r_interv_horas = _rc5.number_input("Revisar a cada (horas)", min_value=0, step=50,
+                                                value=250,
+                                                help="0 = não alertar por horas de uso")
+
+            # Horímetro no momento da última revisão
+            _idx_maq = [f"{m.get('categoria','')} {m.get('nome','')}" for m in _maqs_r].index(_r_maq_nome)
+            _horim_atual = _maqs_r[_idx_maq].get("horimetro", 0)
+            _r_horim_ult = st.number_input(
+                "Horímetro na última revisão (h)", min_value=0.0, step=10.0,
+                value=float(_horim_atual),
+                help=f"Horímetro atual da máquina: {_horim_atual:,.0f} h"
+            )
+
+            _r_add = st.form_submit_button("➕ Programar revisão", use_container_width=True)
+
+        if _r_add:
+            if not _r_tipo.strip():
+                st.error("Descreva o tipo de revisão.")
+            else:
+                import uuid as _uuid_r
+                st.session_state.maquinas_revisoes.append({
+                    "id":          str(_uuid_r.uuid4())[:8],
+                    "maquina":     _r_maq_nome,
+                    "maq_id":      _maqs_r[_idx_maq].get("id", ""),
+                    "tipo":        _r_tipo.strip(),
+                    "data_ultima": _r_data_ult.strftime("%Y-%m-%d"),
+                    "interv_dias": int(_r_interv_dias),
+                    "interv_horas": int(_r_interv_horas),
+                    "horim_ultima": float(_r_horim_ult),
+                })
+                salvar_dados_iaagro()
+                success_box(f"✅ Revisão programada para {_r_maq_nome}!")
+                st.rerun()
+
+        st.divider()
+
+        # ── Painel de alertas ──────────────────────────────────────────
+        _revs = st.session_state.get("maquinas_revisoes", [])
+        if not _revs:
+            st.info("Nenhuma revisão programada ainda.")
+        else:
+            st.markdown("#### 🔔 Status das Revisões")
+
+            # Calcula status de cada revisão (o que vencer primeiro: data OU horas)
+            _hoje = datetime.now().date()
+            _linhas_rev = []
+            for _rev in _revs:
+                # Máquina atual (para pegar horímetro atualizado)
+                _maq_atual = next((m for m in _maqs_r if m.get("id") == _rev.get("maq_id")), None)
+                _horim_now = _maq_atual.get("horimetro", 0) if _maq_atual else 0
+
+                # Vencimento por DATA
+                _venc_data = None
+                _dias_rest = None
+                if _rev.get("interv_dias", 0) > 0:
+                    try:
+                        _dt_ult = datetime.strptime(_rev["data_ultima"], "%Y-%m-%d").date()
+                        _venc_data = _dt_ult + timedelta(days=_rev["interv_dias"])
+                        _dias_rest = (_venc_data - _hoje).days
+                    except Exception:
+                        pass
+
+                # Vencimento por HORAS
+                _horas_rest = None
+                if _rev.get("interv_horas", 0) > 0:
+                    _horim_venc = _rev.get("horim_ultima", 0) + _rev["interv_horas"]
+                    _horas_rest = _horim_venc - _horim_now
+
+                # Determina o status pelo que está mais crítico
+                _crit = "ok"
+                _msgs = []
+                if _dias_rest is not None:
+                    if _dias_rest < 0:
+                        _crit = "vencido"; _msgs.append(f"venceu há {abs(_dias_rest)} dias")
+                    elif _dias_rest <= 15:
+                        _crit = "proximo" if _crit != "vencido" else _crit
+                        _msgs.append(f"vence em {_dias_rest} dias")
+                    else:
+                        _msgs.append(f"faltam {_dias_rest} dias")
+                if _horas_rest is not None:
+                    if _horas_rest < 0:
+                        _crit = "vencido"; _msgs.append(f"passou {abs(_horas_rest):,.0f}h do limite")
+                    elif _horas_rest <= 30:
+                        if _crit != "vencido": _crit = "proximo"
+                        _msgs.append(f"faltam {_horas_rest:,.0f}h")
+                    else:
+                        _msgs.append(f"faltam {_horas_rest:,.0f}h")
+
+                _linhas_rev.append((_crit, _rev, _msgs, _horim_now))
+
+            # Ordena: vencidos primeiro, depois próximos, depois ok
+            _ordem = {"vencido": 0, "proximo": 1, "ok": 2}
+            _linhas_rev.sort(key=lambda x: _ordem.get(x[0], 3))
+
+            # Resumo no topo
+            _n_venc = sum(1 for l in _linhas_rev if l[0] == "vencido")
+            _n_prox = sum(1 for l in _linhas_rev if l[0] == "proximo")
+            _rs1, _rs2, _rs3 = st.columns(3)
+            _rs1.metric("🔴 Vencidas", _n_venc)
+            _rs2.metric("🟡 Próximas", _n_prox)
+            _rs3.metric("🟢 Em dia", len(_linhas_rev) - _n_venc - _n_prox)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            for _crit, _rev, _msgs, _horim_now in _linhas_rev:
+                if _crit == "vencido":
+                    _bg, _bd, _ico, _lbl = "#7f1d1d", "#ef4444", "🔴", "VENCIDA"
+                elif _crit == "proximo":
+                    _bg, _bd, _ico, _lbl = "#78350f", "#f59e0b", "🟡", "PRÓXIMA"
+                else:
+                    _bg, _bd, _ico, _lbl = "#14532d", "#22c55e", "🟢", "EM DIA"
+
+                _det = " · ".join(_msgs)
+                st.markdown(f"""
+                <div style='background:{_bg};border-radius:10px;padding:10px 16px;
+                border-left:4px solid {_bd};margin:4px 0;'>
+                <div style='display:flex;justify-content:space-between;align-items:center;'>
+                <div>
+                <span style='color:#fff;font-weight:700;font-size:14px;'>{_ico} {_rev.get('maquina','')}</span>
+                <span style='color:rgba(255,255,255,0.7);font-size:13px;'> — {_rev.get('tipo','')}</span><br>
+                <span style='color:rgba(255,255,255,0.6);font-size:12px;'>
+                Última: {_rev.get('data_ultima','')} · a cada {_rev.get('interv_dias',0)} dias / {_rev.get('interv_horas',0)}h · {_det}
+                </span>
+                </div>
+                <span style='color:{_bd};font-weight:800;font-size:12px;letter-spacing:1px;'>{_lbl}</span>
+                </div></div>""", unsafe_allow_html=True)
+
+                _re1, _re2, _re3 = st.columns([2, 2, 3])
+                if _re1.button("✅ Marcar como revisada hoje", key=f"revok_{_rev.get('id')}"):
+                    # Puxa as peças fixas da máquina para registrar no histórico desta revisão
+                    _maq_da_rev = next((m for m in _maqs_r if m.get("id") == _rev.get("maq_id")), None)
+                    _pecas_usadas = list(_maq_da_rev.get("pecas", [])) if _maq_da_rev else []
+                    for _r2 in st.session_state.maquinas_revisoes:
+                        if _r2.get("id") == _rev.get("id"):
+                            _r2["data_ultima"] = _hoje.strftime("%Y-%m-%d")
+                            _r2["horim_ultima"] = float(_horim_now)
+                            _r2.setdefault("historico", []).append({
+                                "data":  _hoje.strftime("%d/%m/%Y"),
+                                "horim": float(_horim_now),
+                                "pecas": _pecas_usadas,
+                            })
+                    salvar_dados_iaagro()
+                    success_box("✅ Revisão registrada! Ciclo reiniciado e peças salvas no histórico.")
+                    st.rerun()
+                if _re3.button("🗑️ Remover programação", key=f"revdel_{_rev.get('id')}"):
+                    st.session_state.maquinas_revisoes = [
+                        _r2 for _r2 in st.session_state.maquinas_revisoes
+                        if _r2.get("id") != _rev.get("id")
+                    ]
+                    salvar_dados_iaagro()
+                    st.rerun()
+
+                # ── Histórico de revisões feitas (com peças de cada uma) ──
+                _hist_rev = _rev.get("historico", [])
+                if _hist_rev:
+                    with st.expander(f"📋 Histórico de revisões feitas ({len(_hist_rev)})"):
+                        for _h in reversed(_hist_rev):
+                            _pcs_h = _h.get("pecas", [])
+                            _pcs_txt = ", ".join(
+                                f"{p.get('codigo','')} {p.get('nome','')}".strip() for p in _pcs_h
+                            ) if _pcs_h else "sem peças registradas"
+                            st.markdown(
+                                f"**{_h.get('data','')}** · {_h.get('horim',0):,.0f}h — {_pcs_txt}"
+                            )
+
+
 
 elif menu == "⚙️ Configurações":
     st.header("⚙️ Configurações do Sistema")
