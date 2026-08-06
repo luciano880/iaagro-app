@@ -8763,6 +8763,7 @@ if menu == "🌍 Inteligência":
                         f"?latitude={lat}&longitude={lon}"
                         "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
                         "precipitation,weather_code,wind_speed_10m,wind_direction_10m"
+                        "&hourly=precipitation,precipitation_probability"
                         "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum"
                         "&timezone=America%2FSao_Paulo&forecast_days=7"
                     )
@@ -8857,14 +8858,47 @@ if menu == "🌍 Inteligência":
                     _clima_card(_cc4,"🌧️","CHUVA",f"{_chuva_cur}mm","Agora","#818cf8")
                     _clima_card(_cc5,_cond_emoji,"CONDIÇÃO",_cond_pt,"","#6ee7b7")
 
+                    # (chuva das próximas horas é calculada abaixo, na janela)
+
                     st.markdown("<br>", unsafe_allow_html=True)
+
+                    # ── Chuva nas PRÓXIMAS horas (o que importa pra aplicar) ──────
+                    # A chuva "agora" pode ser 0 mas com temporal chegando em 1-2h.
+                    # Olha as próximas 6 horas: soma prevista + maior probabilidade.
+                    _chuva_prox6 = 0.0
+                    _prob_prox6  = 0
+                    try:
+                        _hr = _fc.get("hourly", {})
+                        _htimes = _hr.get("time", [])
+                        _hprec  = _hr.get("precipitation", [])
+                        _hprob  = _hr.get("precipitation_probability", [])
+                        # Acha o índice da hora atual
+                        _agora_iso = datetime.now().strftime("%Y-%m-%dT%H:00")
+                        _idx_now = next((i for i, t in enumerate(_htimes) if t >= _agora_iso), 0)
+                        for _j in range(_idx_now, min(_idx_now + 6, len(_hprec))):
+                            _chuva_prox6 += float(_hprec[_j] or 0)
+                            if _j < len(_hprob):
+                                _prob_prox6 = max(_prob_prox6, int(_hprob[_j] or 0))
+                    except Exception:
+                        pass
 
                     # ── Janela de aplicação — card grande ─────────────────────────
                     _ok_vento = _vento_kmh <= 15
                     _ok_umid  = 40 <= _umid <= 85
                     _ok_temp  = _temp_c <= 30
-                    _ok_chuva = _chuva_cur == 0
+                    # Chuva OK só se: não chove agora E pouca chuva prevista E prob. baixa
+                    _ok_chuva = (_chuva_cur == 0 and _chuva_prox6 < 1.0 and _prob_prox6 < 60)
                     _score    = sum([_ok_vento, _ok_umid, _ok_temp, _ok_chuva])
+
+                    # Texto do critério de chuva conforme o cenário
+                    if _chuva_cur > 0:
+                        _lbl_chuva = f"Chovendo agora ({_chuva_cur}mm)"
+                    elif _chuva_prox6 >= 1.0:
+                        _lbl_chuva = f"Chuva prevista {_chuva_prox6:.1f}mm/6h"
+                    elif _prob_prox6 >= 60:
+                        _lbl_chuva = f"Risco de chuva {_prob_prox6}% (6h)"
+                    else:
+                        _lbl_chuva = f"Sem chuva prevista (6h)"
 
                     if _score == 4:
                         _jan_cor = "#14532d"; _jan_borda = "#22c55e"
@@ -8898,7 +8932,7 @@ if menu == "🌍 Inteligência":
                             (_ok_vento, f"Vento {_vento_kmh}km/h ≤15"),
                             (_ok_umid,  f"Umidade {_umid}% 40-85%"),
                             (_ok_temp,  f"Temp {_temp_c}°C ≤30°C"),
-                            (_ok_chuva, "Sem chuva agora"),
+                            (_ok_chuva, _lbl_chuva),
                         ]
                     ])}
                     </div></div>
