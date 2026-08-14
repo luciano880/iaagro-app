@@ -10319,6 +10319,32 @@ if menu == "🔧 Máquinas":
                                 st.session_state.maquinas[_mi]["pecas"].pop(_pi)
                                 salvar_dados_iaagro()
                                 st.rerun()
+
+                        # ── PDF só desta máquina (pra levar na revenda) ──
+                        _nome_maq_pdf = f"{_maq.get('categoria','')} {_maq.get('nome','')}".strip()
+                        _itens_maq = [
+                            {"maquina": _nome_maq_pdf,
+                             "codigo": _p.get("codigo", ""), "nome": _p.get("nome", "")}
+                            for _p in _pcs
+                        ]
+                        try:
+                            _pdf_maq = gerar_pdf_lista_pecas(
+                                _itens_maq,
+                                titulo=f"Peças — {_maq.get('nome','Máquina')}"
+                            )
+                            _nome_arq = "".join(
+                                c if c.isalnum() else "_" for c in _maq.get("nome", "maquina")
+                            ).lower()
+                            st.download_button(
+                                "📥 Baixar/imprimir peças desta máquina (PDF)",
+                                data=_pdf_maq,
+                                file_name=f"pecas_{_nome_arq}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                key=f"pdfmaq_{_maq.get('id', _mi)}",
+                                use_container_width=True,
+                            )
+                        except Exception as _e_pm:
+                            st.error(f"Erro ao gerar PDF: {_e_pm}")
                     else:
                         st.info("Nenhuma peça cadastrada para esta máquina ainda.")
 
