@@ -630,54 +630,140 @@ def exportar_excel(dados_dict: dict):
 # ─────────────────────────────────────────────
 def gerar_pdf_lista_pecas(itens, titulo="Lista de Compras — Peças de Revisão"):
     """
-    Gera um PDF simples de lista de compras de peças (código + nome + máquina),
-    pronto pra levar/imprimir e comprar na revenda.
-    itens = lista de dicts: {"maquina","codigo","nome","tipo_revisao"}
+    Gera um PDF profissional de lista de compras de peças (código + nome + máquina),
+    com cabeçalho de marca IAAgro, pronto pra levar/imprimir e comprar na revenda.
+    itens = lista de dicts: {"maquina","codigo","nome"}
     """
     import io as _io_pdf
     from reportlab.lib.units import cm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+    from reportlab.platypus import HRFlowable
+
     _buf = _io_pdf.BytesIO()
     _doc = SimpleDocTemplate(_buf, pagesize=A4,
-                             topMargin=1.5*cm, bottomMargin=1.5*cm,
-                             leftMargin=1.5*cm, rightMargin=1.5*cm)
-    _sty = getSampleStyleSheet()
+                             topMargin=1.2*cm, bottomMargin=1.4*cm,
+                             leftMargin=1.5*cm, rightMargin=1.5*cm,
+                             title="IAAgro - Lista de Peças")
     _el = []
-    _verde = colors.HexColor("#166534")
-    _verde_c = colors.HexColor("#dcfce7")
 
-    _el.append(Paragraph(f"<b>{titulo}</b>", _sty["Title"]))
+    # Paleta da marca
+    _verde     = colors.HexColor("#166534")
+    _verde_esc = colors.HexColor("#14532d")
+    _verde_cl  = colors.HexColor("#dcfce7")
+    _cinza_cl  = colors.HexColor("#f1f5f9")
+    _cinza_bd  = colors.HexColor("#cbd5e1")
+    _texto     = colors.HexColor("#1e293b")
+    _sub       = colors.HexColor("#64748b")
+
+    # ── Estilos ──
+    _st_marca = ParagraphStyle("marca", fontName="Helvetica-Bold", fontSize=22,
+                               textColor=_verde, leading=24, spaceAfter=0)
+    _st_slogan = ParagraphStyle("slogan", fontName="Helvetica-Oblique", fontSize=8.5,
+                                textColor=_sub, leading=11)
+    _st_titulo = ParagraphStyle("tit", fontName="Helvetica-Bold", fontSize=14,
+                                textColor=_verde_esc, leading=17, spaceBefore=2)
+    _st_meta   = ParagraphStyle("meta", fontName="Helvetica", fontSize=9,
+                                textColor=_sub, leading=12)
+    _st_cel    = ParagraphStyle("cel", fontName="Helvetica", fontSize=9.5,
+                                textColor=_texto, leading=12)
+    _st_cod    = ParagraphStyle("cod", fontName="Courier-Bold", fontSize=9.5,
+                                textColor=_verde, leading=12)
+    _st_hdr    = ParagraphStyle("hdr", fontName="Helvetica-Bold", fontSize=9.5,
+                                textColor=colors.white, leading=12)
+
+    # ── CABEÇALHO: logo + marca ──
+    _logo_ok = os.path.exists("IAAgrologo.jpeg")
+    _marca_bloco = [
+        Paragraph("IAAgro", _st_marca),
+        Paragraph("Inteligência Agrícola de Precisão", _st_slogan),
+    ]
+    if _logo_ok:
+        try:
+            _logo_img = Image("IAAgrologo.jpeg", width=2.6*cm, height=2.6*cm)
+            _cab = Table([[_logo_img, _marca_bloco]], colWidths=[3*cm, 13.5*cm])
+            _cab.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("LEFTPADDING", (1, 0), (1, 0), 8),
+            ]))
+            _el.append(_cab)
+        except Exception:
+            _el.extend(_marca_bloco)
+    else:
+        _el.extend(_marca_bloco)
+
+    # Faixa verde separadora
+    _el.append(Spacer(1, 0.25*cm))
+    _el.append(HRFlowable(width="100%", thickness=2.5, color=_verde,
+                          spaceBefore=0, spaceAfter=8))
+
+    # ── Título do documento + data ──
+    _el.append(Paragraph(f"🔧 {titulo}", _st_titulo))
     _el.append(Paragraph(
-        f"IAAgro · Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}", _sty["Normal"]))
-    _el.append(Spacer(1, 0.5*cm))
+        f"Lista de compras · Gerada em {datetime.now().strftime('%d/%m/%Y às %H:%M')}",
+        _st_meta))
+    _el.append(Spacer(1, 0.45*cm))
 
     if not itens:
-        _el.append(Paragraph("Nenhuma peça a comprar no momento.", _sty["Normal"]))
+        _el.append(Paragraph("Nenhuma peça cadastrada nesta lista.", _st_cel))
     else:
-        _dados_tab = [["#", "Código", "Peça", "Máquina", "☐"]]
+        # Cabeçalho da tabela
+        _dados_tab = [[
+            Paragraph("#", _st_hdr),
+            Paragraph("CÓDIGO", _st_hdr),
+            Paragraph("PEÇA", _st_hdr),
+            Paragraph("MÁQUINA", _st_hdr),
+            Paragraph("✓", _st_hdr),
+        ]]
         for _i, _it in enumerate(itens, 1):
+            _cod = _it.get("codigo", "") or "—"
             _dados_tab.append([
-                str(_i),
-                _it.get("codigo", "—") or "—",
-                _it.get("nome", ""),
-                _it.get("maquina", ""),
-                "☐",
+                Paragraph(str(_i), _st_cel),
+                Paragraph(_cod, _st_cod if _cod != "—" else _st_cel),
+                Paragraph(_it.get("nome", ""), _st_cel),
+                Paragraph(_it.get("maquina", ""), _st_cel),
+                "",  # coluna do checkbox (desenhada como quadrado via BOX)
             ])
-        _tab = Table(_dados_tab, colWidths=[1*cm, 3.5*cm, 6.5*cm, 5*cm, 1*cm])
-        _tab.setStyle(TableStyle([
+        _tab = Table(_dados_tab, colWidths=[0.9*cm, 3.3*cm, 6.4*cm, 4.9*cm, 1*cm])
+        _estilo = [
             ("BACKGROUND", (0, 0), (-1, 0), _verde),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]),
+            ("TOPPADDING", (0, 0), (-1, 0), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
+            ("TOPPADDING", (0, 1), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.5, _cinza_bd),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _cinza_cl]),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ]))
+            ("ALIGN", (0, 0), (0, -1), "CENTER"),
+            ("ALIGN", (4, 0), (4, -1), "CENTER"),
+            ("LINEAFTER", (0, 0), (0, -1), 0.5, _cinza_bd),
+            # Desenha o quadrado do checkbox em cada linha de dados
+        ]
+        for _r in range(1, len(_dados_tab)):
+            _estilo.append(("BOX", (4, _r), (4, _r), 0.8, _sub))
+            _estilo.append(("TOPPADDING", (4, _r), (4, _r), 2))
+            _estilo.append(("BOTTOMPADDING", (4, _r), (4, _r), 2))
+        _tab.setStyle(TableStyle(_estilo))
         _el.append(_tab)
-        _el.append(Spacer(1, 0.4*cm))
-        _el.append(Paragraph(
-            f"<i>Total de itens: {len(itens)}</i>", _sty["Normal"]))
+
+        # Total
+        _el.append(Spacer(1, 0.35*cm))
+        _st_total = ParagraphStyle("tot", fontName="Helvetica-Bold", fontSize=10,
+                                   textColor=_verde_esc, alignment=TA_RIGHT)
+        _el.append(Paragraph(f"Total de itens: {len(itens)}", _st_total))
+
+    # ── RODAPÉ ──
+    _el.append(Spacer(1, 0.8*cm))
+    _el.append(HRFlowable(width="100%", thickness=0.7, color=_cinza_bd,
+                          spaceBefore=0, spaceAfter=6))
+    _st_rodape = ParagraphStyle("rod", fontName="Helvetica", fontSize=7.5,
+                                textColor=_sub, alignment=TA_CENTER, leading=10)
+    _el.append(Paragraph(
+        "Gerado pelo IAAgro · Inteligência Agrícola de Precisão · iaagropro.streamlit.app",
+        _st_rodape))
 
     _doc.build(_el)
     _buf.seek(0)
