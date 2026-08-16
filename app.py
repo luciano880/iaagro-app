@@ -1411,7 +1411,6 @@ def salvar_dados_iaagro():
         "fluxo_caixa":             st.session_state.get("fluxo_caixa", []),
         "contratos_troca":         st.session_state.get("contratos_troca", []),
         "planejamento_safras":     st.session_state.get("planejamento_safras", []),
-        "plan_insumos":            st.session_state.get("plan_insumos", []),
         "corretivos_aplicados":    st.session_state.get("corretivos_aplicados", []),
         "maquinas":                st.session_state.get("maquinas", []),
         "maquinas_revisoes":       st.session_state.get("maquinas_revisoes", []),
@@ -2155,8 +2154,6 @@ if "contratos_troca" not in st.session_state or (not st.session_state.get("contr
     st.session_state.contratos_troca = dados_carregados.get("contratos_troca", [])
 if "planejamento_safras" not in st.session_state or (not st.session_state.get("planejamento_safras") and dados_carregados.get("planejamento_safras")):
     st.session_state.planejamento_safras = dados_carregados.get("planejamento_safras", [])
-if "plan_insumos" not in st.session_state or (not st.session_state.get("plan_insumos") and dados_carregados.get("plan_insumos")):
-    st.session_state.plan_insumos = dados_carregados.get("plan_insumos", [])
 if "fluxo_caixa" not in st.session_state or (not st.session_state.get("fluxo_caixa") and dados_carregados.get("fluxo_caixa")):
     st.session_state.fluxo_caixa = dados_carregados.get("fluxo_caixa", [])
 if "harvest_historico" not in st.session_state or (not st.session_state.get("harvest_historico") and dados_carregados.get("harvest_historico")):
