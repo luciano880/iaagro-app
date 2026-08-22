@@ -3818,6 +3818,48 @@ def prioridade(nota):
     return "Baixa"
 
 
+# ─────────────────────────────────────────────
+# Balanço de nutrientes: absorção total × exportação no grão × resíduo
+# Coeficientes em kg de nutriente por TONELADA de grão produzido.
+# Fontes: EMBRAPA (Circulares Técnicas Soja/Milho), CQFS RS/SC 2016,
+# IAC Boletim 100. "absorve" = extração total pela planta;
+# "exporta" = o que sai no grão na colheita; a diferença fica no
+# resíduo (palhada) e retorna ao solo na decomposição.
+# ─────────────────────────────────────────────
+COEF_NUTRIENTES = {
+    # cultura: {nutriente: (absorve_kg_por_t, exporta_kg_por_t)}
+    "Soja":   {"N": (80, 51), "P2O5": (16, 14), "K2O": (38, 20)},
+    "Milho":  {"N": (22, 15), "P2O5": (9,  7),  "K2O": (19, 5)},
+    "Trigo":  {"N": (30, 21), "P2O5": (11, 9),  "K2O": (20, 6)},
+    "Feijão": {"N": (55, 36), "P2O5": (14, 11), "K2O": (40, 15)},
+    "Arroz":  {"N": (22, 12), "P2O5": (9,  6),  "K2O": (26, 4)},
+    "Canola": {"N": (48, 32), "P2O5": (18, 14), "K2O": (42, 10)},
+    "Aveia":  {"N": (25, 16), "P2O5": (10, 8),  "K2O": (22, 6)},
+}
+
+def balanco_nutrientes(cultura, produtividade_sc, peso_saca=60):
+    """
+    Calcula, para a produtividade esperada, quanto a lavoura:
+    - ABSORVE (extração total da planta)
+    - EXPORTA (sai no grão na colheita — o que precisa repor)
+    - RETORNA ao solo no resíduo/palhada (absorve - exporta)
+    Retorna dict por nutriente com as 3 parcelas em kg/ha, ou None.
+    """
+    cult = cultura_limpa(cultura) if cultura else "Soja"
+    coef = COEF_NUTRIENTES.get(cult)
+    if not coef:
+        return None
+    ton_ha = (produtividade_sc * peso_saca) / 1000.0  # t/ha de grão
+    res = {}
+    for nutri, (absorve_t, exporta_t) in coef.items():
+        absorve = round(absorve_t * ton_ha, 1)
+        exporta = round(exporta_t * ton_ha, 1)
+        res[nutri] = {"absorve": absorve, "exporta": exporta,
+                      "residuo": round(absorve - exporta, 1)}
+    res["_ton_ha"] = round(ton_ha, 2)
+    return res
+
+
 def estimar_producao(meta, nota):
     fator = nota / 100
     if   fator >= 0.85: return meta
@@ -6079,6 +6121,44 @@ if menu == "🧪 Solo & Adubação":
         col2.metric("KCl Total",   f"{total_kcl:.1f} kg")
         col3.metric("Ureia Total", f"{total_ureia:.1f} kg")
 
+        # ── Balanço de nutrientes: absorção × exportação × resíduo ──
+        st.divider()
+        st.subheader("🔬 Balanço de Nutrientes da Colheita")
+        _bal = balanco_nutrientes(cultura, produtividade_ajustada)
+        if _bal:
+            st.caption(
+                f"Para a meta de {produtividade_ajustada:.0f} sc/ha "
+                f"(~{_bal['_ton_ha']} t/ha de grão), veja quanto a lavoura "
+                f"absorve, quanto exporta no grão (o que precisa repor) e "
+                f"quanto retorna ao solo na palhada:"
+            )
+            _nomes = {"N": "Nitrogênio (N)", "P2O5": "Fósforo (P₂O₅)", "K2O": "Potássio (K₂O)"}
+            for _nut in ["N", "P2O5", "K2O"]:
+                _b = _bal[_nut]
+                st.markdown(f"""
+                <div style='background:#0f172a;border:1px solid #1e3a2f;border-left:4px solid #22c55e;
+                border-radius:10px;padding:10px 16px;margin:5px 0;'>
+                <div style='color:#6ee7b7;font-weight:800;font-size:14px;margin-bottom:6px;'>{_nomes[_nut]}</div>
+                <div style='display:flex;gap:24px;flex-wrap:wrap;'>
+                <div><span style='color:#94a3b8;font-size:12px;'>🌱 Absorve (planta toda)</span><br>
+                <span style='color:#f1f5f9;font-size:16px;font-weight:700;'>{_b['absorve']:.0f} kg/ha</span></div>
+                <div><span style='color:#fbbf24;font-size:12px;'>📤 Exporta (sai no grão)</span><br>
+                <span style='color:#fbbf24;font-size:16px;font-weight:700;'>{_b['exporta']:.0f} kg/ha</span></div>
+                <div><span style='color:#38bdf8;font-size:12px;'>♻️ Volta ao solo (palhada)</span><br>
+                <span style='color:#38bdf8;font-size:16px;font-weight:700;'>{_b['residuo']:.0f} kg/ha</span></div>
+                </div></div>""", unsafe_allow_html=True)
+
+            st.info(
+                "💡 **Como ler:** a adubação de reposição precisa cobrir o que é "
+                "**exportado no grão** (amarelo) — é o que sai da lavoura de vez. "
+                "O que volta na palhada (azul) fica no sistema e é reaproveitado "
+                "nas próximas safras (importante no plantio direto). A recomendação "
+                "acima já considera esse balanço junto com o teor atual do solo."
+            )
+        else:
+            st.caption("Balanço detalhado ainda não disponível para esta cultura.")
+
+        st.divider()
         st.subheader("🚜 Enviar Recomendação para Aplicação")
         if st.button("Gerar Aplicação com Recomendação IA", key="gerar_aplicacao_ia"):
             nova_aplicacao = {
@@ -9468,6 +9548,12 @@ if menu == "🌍 Inteligência":
                             "Para recomendações de adubação, siga as tabelas CQFS RS/SC 2016. "
                             "Para defensivos, cite apenas produtos registrados no MAPA. "
                             "Seja direto: dê doses, épocas e práticas concretas. "
+                            "IMPORTANTE: quando a pergunta envolver informação ATUAL — preços de "
+                            "commodities/insumos, cotações, produtos ou defensivos lançados recentemente, "
+                            "registros novos no MAPA, notícias de safra ou clima — USE a ferramenta de "
+                            "busca na web para trazer dados atualizados, e cite a fonte. "
+                            "Para conhecimento agronômico consolidado (manejo, doses, épocas), responda "
+                            "direto sem precisar buscar. "
                             f"Contexto da propriedade: {_ctx_ia}"
                         )
                         _resp_ia = _rq_ia.post(
@@ -9479,15 +9565,26 @@ if menu == "🌍 Inteligência":
                             },
                             json={
                                 "model":      "claude-sonnet-4-6",
-                                "max_tokens": 1024,
+                                "max_tokens": 1500,
                                 "system":     _system_ia,
                                 "messages":   _msgs_ia,
+                                "tools": [{
+                                    "type": "web_search_20250305",
+                                    "name": "web_search",
+                                    "max_uses": 3,
+                                }],
                             },
-                            timeout=45,
+                            timeout=60,
                         )
                         if _resp_ia.status_code == 200:
                             _data_ia = _resp_ia.json()
-                            _ans = (_data_ia.get("content") or [{}])[0].get("text","")
+                            # Com web search, a resposta vem em vários blocos —
+                            # concatena todos os blocos de texto na ordem
+                            _blocos = _data_ia.get("content") or []
+                            _ans = "".join(
+                                b.get("text", "") for b in _blocos
+                                if isinstance(b, dict) and b.get("type") == "text"
+                            ).strip()
                             if _ans:
                                 st.markdown(_ans)
                                 st.session_state.assistente_hist.append(
