@@ -628,6 +628,146 @@ def exportar_excel(dados_dict: dict):
 # ─────────────────────────────────────────────
 # BACKUP / RESTORE
 # ─────────────────────────────────────────────
+def gerar_pdf_conversa_assistente(historico):
+    """
+    Gera um PDF profissional da conversa com o Assistente IA, com cabeçalho de
+    marca IAAgro, mensagens estilizadas (usuário × assistente) e uma ressalva
+    técnica obrigatória no rodapé orientando procurar o responsável técnico.
+    historico = lista de {"role": "user"/"assistant", "content": str}
+    """
+    import io as _io_c
+    import re as _re_c
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.platypus import HRFlowable, KeepTogether
+
+    _buf = _io_c.BytesIO()
+    _doc = SimpleDocTemplate(_buf, pagesize=A4,
+                             topMargin=1.2*cm, bottomMargin=1.5*cm,
+                             leftMargin=1.6*cm, rightMargin=1.6*cm,
+                             title="IAAgro - Conversa com Assistente")
+    _el = []
+
+    _verde     = colors.HexColor("#166534")
+    _verde_esc = colors.HexColor("#14532d")
+    _verde_cl  = colors.HexColor("#dcfce7")
+    _azul_cl   = colors.HexColor("#e0f2fe")
+    _cinza_bd  = colors.HexColor("#cbd5e1")
+    _texto     = colors.HexColor("#1e293b")
+    _sub       = colors.HexColor("#64748b")
+
+    _st_marca  = ParagraphStyle("m", fontName="Helvetica-Bold", fontSize=22,
+                                textColor=_verde, leading=24)
+    _st_slogan = ParagraphStyle("s", fontName="Helvetica-Oblique", fontSize=8.5,
+                                textColor=_sub, leading=11)
+    _st_tit    = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=14,
+                                textColor=_verde_esc, leading=17)
+    _st_meta   = ParagraphStyle("me", fontName="Helvetica", fontSize=9,
+                                textColor=_sub, leading=12)
+    _st_user   = ParagraphStyle("u", fontName="Helvetica-Bold", fontSize=10,
+                                textColor=_verde_esc, leading=14)
+    _st_bot    = ParagraphStyle("b", fontName="Helvetica", fontSize=10,
+                                textColor=_texto, leading=14)
+    _st_rotulo = ParagraphStyle("r", fontName="Helvetica-Bold", fontSize=8.5,
+                                textColor=_verde, leading=11, spaceAfter=2)
+
+    def _limpa(txt):
+        # Remove markdown básico e caracteres que quebram o PDF
+        txt = _re_c.sub(r'\*\*(.+?)\*\*', r'\1', txt or "")
+        txt = _re_c.sub(r'\*(.+?)\*', r'\1', txt)
+        txt = _re_c.sub(r'#{1,6}\s*', '', txt)
+        txt = txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return txt.replace("\n", "<br/>")
+
+    # ── CABEÇALHO ──
+    _marca = [Paragraph("IAAgro", _st_marca),
+              Paragraph("Assistente Agrícola Inteligente", _st_slogan)]
+    if os.path.exists("IAAgrologo.jpeg"):
+        try:
+            _cab = Table([[Image("IAAgrologo.jpeg", width=2.4*cm, height=2.4*cm), _marca]],
+                         colWidths=[2.8*cm, 13.5*cm])
+            _cab.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                                      ("LEFTPADDING", (0,0), (0,0), 0),
+                                      ("LEFTPADDING", (1,0), (1,0), 8)]))
+            _el.append(_cab)
+        except Exception:
+            _el.extend(_marca)
+    else:
+        _el.extend(_marca)
+
+    _el.append(Spacer(1, 0.2*cm))
+    _el.append(HRFlowable(width="100%", thickness=2.5, color=_verde, spaceAfter=8))
+    _el.append(Paragraph("🤖 Registro de Conversa — Assistente IA", _st_tit))
+    _el.append(Paragraph(
+        f"Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')}", _st_meta))
+    _el.append(Spacer(1, 0.4*cm))
+
+    # ── MENSAGENS ──
+    for _m in historico:
+        _is_user = _m.get("role") == "user"
+        _rotulo = "👨‍🌾 VOCÊ PERGUNTOU" if _is_user else "🤖 IAAGRO RESPONDEU"
+        _bg = _verde_cl if _is_user else _azul_cl
+        _cont = [
+            Paragraph(_rotulo, _st_rotulo),
+            Paragraph(_limpa(_m.get("content", "")), _st_user if _is_user else _st_bot),
+        ]
+        _cel = Table([[_cont]], colWidths=[16.3*cm])
+        _cel.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), _bg),
+            ("BOX", (0,0), (-1,-1), 0.5, _cinza_bd),
+            ("LEFTPADDING", (0,0), (-1,-1), 10),
+            ("RIGHTPADDING", (0,0), (-1,-1), 10),
+            ("TOPPADDING", (0,0), (-1,-1), 8),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+        ]))
+        _el.append(_cel)
+        _el.append(Spacer(1, 0.25*cm))
+
+    # ── RESSALVA TÉCNICA (obrigatória) ──
+    _el.append(Spacer(1, 0.4*cm))
+    _st_aviso_tit = ParagraphStyle("at", fontName="Helvetica-Bold", fontSize=10,
+                                   textColor=colors.HexColor("#7f1d1d"), leading=13)
+    _st_aviso = ParagraphStyle("av", fontName="Helvetica", fontSize=9,
+                               textColor=_texto, leading=13)
+    _aviso = [
+        Paragraph("⚠️ AVISO IMPORTANTE", _st_aviso_tit),
+        Spacer(1, 0.15*cm),
+        Paragraph(
+            "As informações deste documento foram geradas por inteligência "
+            "artificial e têm caráter apenas orientativo. Antes de qualquer "
+            "aplicação de defensivos, fertilizantes ou correção de solo, "
+            "<b>consulte sempre o engenheiro agrônomo ou técnico responsável</b> "
+            "pela sua propriedade. O receituário agronômico é obrigatório por lei "
+            "para a aquisição e aplicação de agrotóxicos. O IAAgro não substitui "
+            "a avaliação técnica presencial nem se responsabiliza por decisões "
+            "tomadas sem acompanhamento profissional.", _st_aviso),
+    ]
+    _cx = Table([[_aviso]], colWidths=[16.3*cm])
+    _cx.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#fef2f2")),
+        ("BOX", (0,0), (-1,-1), 1, colors.HexColor("#ef4444")),
+        ("LEFTPADDING", (0,0), (-1,-1), 12),
+        ("RIGHTPADDING", (0,0), (-1,-1), 12),
+        ("TOPPADDING", (0,0), (-1,-1), 10),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+    ]))
+    _el.append(KeepTogether(_cx))
+
+    # ── RODAPÉ ──
+    _el.append(Spacer(1, 0.5*cm))
+    _st_rod = ParagraphStyle("rod", fontName="Helvetica", fontSize=7.5,
+                             textColor=_sub, alignment=TA_CENTER, leading=10)
+    _el.append(HRFlowable(width="100%", thickness=0.7, color=_cinza_bd, spaceAfter=6))
+    _el.append(Paragraph(
+        "IAAgro · Inteligência Agrícola de Precisão · iaagropro.streamlit.app",
+        _st_rod))
+
+    _doc.build(_el)
+    _buf.seek(0)
+    return _buf.getvalue()
+
+
 def gerar_pdf_lista_pecas(itens, titulo="Lista de Compras — Peças de Revisão"):
     """
     Gera um PDF profissional de lista de compras de peças (código + nome + máquina),
@@ -9615,15 +9755,17 @@ if menu == "🌍 Inteligência":
             key="btn_exp_conv_txt", use_container_width=True
         )
 
-        # Exportar como PDF simples (texto)
-        import json as _json_conv
-        _conv_json = _json_conv.dumps(st.session_state.assistente_hist,
-                                       ensure_ascii=False, indent=2).encode("utf-8")
-        _btn_col2.download_button(
-            "📋 Exportar JSON", _conv_json,
-            "conversa_iaagro.json", "application/json",
-            key="btn_exp_conv_json", use_container_width=True
-        )
+        # Exportar como PDF profissional
+        try:
+            _pdf_conv = gerar_pdf_conversa_assistente(st.session_state.assistente_hist)
+            _btn_col2.download_button(
+                "📄 Exportar PDF", _pdf_conv,
+                f"conversa_iaagro_{datetime.now().strftime('%Y%m%d')}.pdf",
+                "application/pdf",
+                key="btn_exp_conv_pdf", use_container_width=True
+            )
+        except Exception as _e_pdfc:
+            _btn_col2.error("Erro no PDF")
 
         if _btn_col3.button("🗑️ Limpar conversa", key="btn_limpar_assistente",
                             use_container_width=True):
