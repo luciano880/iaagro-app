@@ -673,27 +673,49 @@ def gerar_pdf_conversa_assistente(historico):
                                 textColor=_verde, leading=11, spaceAfter=2)
 
     def _limpa(txt):
-        # Remove markdown básico e caracteres que quebram o PDF
-        txt = _re_c.sub(r'\*\*(.+?)\*\*', r'\1', txt or "")
+        # Converte markdown para texto seguro no PDF, sem quebrar em nenhum caractere
+        txt = txt or ""
+        # Remove caracteres de controle invisíveis que quebram o reportlab
+        txt = "".join(ch for ch in txt if ch == "\n" or ch == "\t" or ord(ch) >= 32)
+        # Tabelas markdown: converte linhas "| a | b |" em texto legível
+        _linhas = []
+        for _ln in txt.split("\n"):
+            _s = _ln.strip()
+            # Pula linha separadora de tabela (|---|---|)
+            if _s.startswith("|") and set(_s.replace("|", "").replace(" ", "")) <= set("-:"):
+                continue
+            if _s.startswith("|") and _s.endswith("|"):
+                _celulas = [c.strip() for c in _s.strip("|").split("|")]
+                _linhas.append(" · ".join(c for c in _celulas if c))
+            else:
+                _linhas.append(_ln)
+        txt = "\n".join(_linhas)
+        # Remove markdown de ênfase e títulos
+        txt = _re_c.sub(r'\*\*(.+?)\*\*', r'\1', txt)
         txt = _re_c.sub(r'\*(.+?)\*', r'\1', txt)
+        txt = _re_c.sub(r'`(.+?)`', r'\1', txt)
         txt = _re_c.sub(r'#{1,6}\s*', '', txt)
+        txt = _re_c.sub(r'\[(.+?)\]\((.+?)\)', r'\1', txt)  # links markdown
+        # Escapa caracteres que o reportlab interpreta como XML
         txt = txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         return txt.replace("\n", "<br/>")
 
     # ── CABEÇALHO ──
     _marca = [Paragraph("IAAgro", _st_marca),
               Paragraph("Assistente Agrícola Inteligente", _st_slogan)]
+    _logo_ok = False
     if os.path.exists("IAAgrologo.jpeg"):
         try:
-            _cab = Table([[Image("IAAgrologo.jpeg", width=2.4*cm, height=2.4*cm), _marca]],
-                         colWidths=[2.8*cm, 13.5*cm])
+            _img_logo = Image("IAAgrologo.jpeg", width=2.4*cm, height=2.4*cm)
+            _cab = Table([[_img_logo, _marca]], colWidths=[2.8*cm, 13.5*cm])
             _cab.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"),
                                       ("LEFTPADDING", (0,0), (0,0), 0),
                                       ("LEFTPADDING", (1,0), (1,0), 8)]))
             _el.append(_cab)
+            _logo_ok = True
         except Exception:
-            _el.extend(_marca)
-    else:
+            pass
+    if not _logo_ok:
         _el.extend(_marca)
 
     _el.append(Spacer(1, 0.2*cm))
@@ -763,7 +785,24 @@ def gerar_pdf_conversa_assistente(historico):
         "IAAgro · Inteligência Agrícola de Precisão · iaagropro.streamlit.app",
         _st_rod))
 
-    _doc.build(_el)
+    try:
+        _doc.build(_el)
+    except Exception:
+        # Fallback: PDF só texto, sem estilos, se algo no layout falhar
+        _buf = _io_c.BytesIO()
+        _doc2 = SimpleDocTemplate(_buf, pagesize=A4)
+        _simples = [Paragraph("IAAgro - Conversa com Assistente", _st_tit), Spacer(1, 0.5*cm)]
+        for _m in historico:
+            _who = "Voce:" if _m.get("role") == "user" else "IAAgro:"
+            _safe = (_m.get("content", "") or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
+            _simples.append(Paragraph(f"<b>{_who}</b> {_safe}", _st_bot))
+            _simples.append(Spacer(1, 0.3*cm))
+        _simples.append(Spacer(1, 0.5*cm))
+        _simples.append(Paragraph(
+            "AVISO: Informacoes geradas por IA, apenas orientativas. "
+            "Consulte sempre o engenheiro agronomo ou tecnico responsavel "
+            "antes de qualquer aplicacao.", _st_bot))
+        _doc2.build(_simples)
     _buf.seek(0)
     return _buf.getvalue()
 
@@ -9689,9 +9728,13 @@ if menu == "🌍 Inteligência":
                             "Para defensivos, cite apenas produtos registrados no MAPA. "
                             "Seja direto: dê doses, épocas e práticas concretas. "
                             "IMPORTANTE: quando a pergunta envolver informação ATUAL — preços de "
-                            "commodities/insumos, cotações, produtos ou defensivos lançados recentemente, "
-                            "registros novos no MAPA, notícias de safra ou clima — USE a ferramenta de "
-                            "busca na web para trazer dados atualizados, e cite a fonte. "
+                            "commodities/insumos, cotações, produtos/defensivos e seus princípios "
+                            "ativos, lançamentos recentes, registros no MAPA, bulas, notícias de "
+                            "safra ou clima — USE a ferramenta de busca na web para trazer dados "
+                            "atualizados e completos, e cite a fonte. NUNCA liste defensivos ou "
+                            "princípios ativos apenas de memória: o mercado tem hoje uma gama muito "
+                            "ampla de ativos e misturas, então busque na web para dar opções atuais "
+                            "e abrangentes (vários grupos químicos e marcas), não apenas um exemplo. "
                             "Para conhecimento agronômico consolidado (manejo, doses, épocas), responda "
                             "direto sem precisar buscar. "
                             f"Contexto da propriedade: {_ctx_ia}"
@@ -9705,13 +9748,13 @@ if menu == "🌍 Inteligência":
                             },
                             json={
                                 "model":      "claude-sonnet-4-6",
-                                "max_tokens": 1500,
+                                "max_tokens": 2000,
                                 "system":     _system_ia,
                                 "messages":   _msgs_ia,
                                 "tools": [{
                                     "type": "web_search_20250305",
                                     "name": "web_search",
-                                    "max_uses": 3,
+                                    "max_uses": 5,
                                 }],
                             },
                             timeout=60,
@@ -9765,7 +9808,7 @@ if menu == "🌍 Inteligência":
                 key="btn_exp_conv_pdf", use_container_width=True
             )
         except Exception as _e_pdfc:
-            _btn_col2.error("Erro no PDF")
+            _btn_col2.warning(f"PDF indisponível: {str(_e_pdfc)[:60]}")
 
         if _btn_col3.button("🗑️ Limpar conversa", key="btn_limpar_assistente",
                             use_container_width=True):
