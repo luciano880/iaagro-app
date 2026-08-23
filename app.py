@@ -9781,7 +9781,7 @@ if menu == "🌍 Inteligência":
                             },
                             json={
                                 "model":      "claude-sonnet-4-6",
-                                "max_tokens": 2000,
+                                "max_tokens": 4000,
                                 "system":     _system_ia,
                                 "messages":   _msgs_ia,
                                 "tools": [{
