@@ -9043,10 +9043,26 @@ elif menu == "📄 Relatório Final":
 # MENU: INTELIGÊNCIA
 # ─────────────────────────────────────────────
 elif menu == "🌍 Inteligência":
-    _sub_int = st.tabs(["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","🤖 Assistente IA"])
+    _ROTULOS_INT = ["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","🤖 Assistente IA"]
+    st.markdown("""
+    <style>
+    div[role="radiogroup"] { gap: 6px; }
+    div[role="radiogroup"] label {
+        background:#0f3460; border:1px solid #1e4976; border-radius:10px;
+        padding:8px 16px; margin:0; transition:all 0.2s;
+    }
+    div[role="radiogroup"] label:hover { background:#1a4a73; }
+    div[role="radiogroup"] label[data-checked="true"],
+    div[role="radiogroup"] label:has(input:checked) {
+        background:#166534; border-color:#22c55e;
+    }
+    div[role="radiogroup"] label > div:first-child { display:none; }
+    </style>""", unsafe_allow_html=True)
+    _aba_int = st.radio("aba_int", _ROTULOS_INT, key="aba_intel_ativa",
+                        horizontal=True, label_visibility="collapsed")
 
 if menu == "🌍 Inteligência":
-  with _sub_int[0]:
+  if _aba_int == _ROTULOS_INT[0]:
     # Header profissional
     st.markdown("""
     <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
@@ -9379,7 +9395,7 @@ if menu == "🌍 Inteligência":
             st.info(f"Serviço de clima temporariamente indisponível. ({e})")
 
 if menu == "🌍 Inteligência":
-  with _sub_int[1]:
+  if _aba_int == _ROTULOS_INT[1]:
 
     # ── Header ────────────────────────────────────────────────────────────────
     st.markdown("""
@@ -9578,7 +9594,7 @@ if menu == "🌍 Inteligência":
     """, unsafe_allow_html=True)
 
 if menu == "🌍 Inteligência":
-  with _sub_int[2]:
+  if _aba_int == _ROTULOS_INT[2]:
     st.header("🗺️ Mapa de Colheita IA")
     st.markdown("""
     <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
@@ -9664,7 +9680,7 @@ if menu == "🌍 Inteligência":
 
 
 if menu == "🌍 Inteligência":
-  with _sub_int[3]:
+  if _aba_int == _ROTULOS_INT[3]:
     st.markdown("""
     <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
     padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
