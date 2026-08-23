@@ -9044,22 +9044,8 @@ elif menu == "📄 Relatório Final":
 # ─────────────────────────────────────────────
 elif menu == "🌍 Inteligência":
     _ROTULOS_INT = ["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","🤖 Assistente IA"]
-    st.markdown("""
-    <style>
-    div[role="radiogroup"] { gap: 6px; }
-    div[role="radiogroup"] label {
-        background:#0f3460; border:1px solid #1e4976; border-radius:10px;
-        padding:8px 16px; margin:0; transition:all 0.2s;
-    }
-    div[role="radiogroup"] label:hover { background:#1a4a73; }
-    div[role="radiogroup"] label[data-checked="true"],
-    div[role="radiogroup"] label:has(input:checked) {
-        background:#166534; border-color:#22c55e;
-    }
-    div[role="radiogroup"] label > div:first-child { display:none; }
-    </style>""", unsafe_allow_html=True)
-    _aba_int = st.radio("aba_int", _ROTULOS_INT, key="aba_intel_ativa",
-                        horizontal=True, label_visibility="collapsed")
+    _aba_int = st.radio("Seção:", _ROTULOS_INT, key="aba_intel_ativa",
+                        horizontal=True)
 
 if menu == "🌍 Inteligência":
   if _aba_int == _ROTULOS_INT[0]:
