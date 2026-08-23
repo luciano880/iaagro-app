@@ -630,16 +630,16 @@ def exportar_excel(dados_dict: dict):
 # ─────────────────────────────────────────────
 def gerar_pdf_conversa_assistente(historico):
     """
-    Gera um PDF profissional da conversa com o Assistente IA, com cabeçalho de
-    marca IAAgro, mensagens estilizadas (usuário × assistente) e uma ressalva
-    técnica obrigatória no rodapé orientando procurar o responsável técnico.
+    Gera um PDF profissional da conversa com o Assistente IA: cabeçalho de marca
+    IAAgro, cada troca em cartão colorido (pergunta verde à esquerda, resposta
+    azul), negrito preservado, e ressalva técnica obrigatória no fim.
     historico = lista de {"role": "user"/"assistant", "content": str}
     """
     import io as _io_c
     import re as _re_c
     from reportlab.lib.units import cm
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.lib.enums import TA_CENTER
     from reportlab.platypus import HRFlowable, KeepTogether
 
     _buf = _io_c.BytesIO()
@@ -652,7 +652,10 @@ def gerar_pdf_conversa_assistente(historico):
     _verde     = colors.HexColor("#166534")
     _verde_esc = colors.HexColor("#14532d")
     _verde_cl  = colors.HexColor("#dcfce7")
-    _azul_cl   = colors.HexColor("#e0f2fe")
+    _verde_brd = colors.HexColor("#22c55e")
+    _azul      = colors.HexColor("#0369a1")
+    _azul_cl   = colors.HexColor("#eff6ff")
+    _azul_brd  = colors.HexColor("#3b82f6")
     _cinza_bd  = colors.HexColor("#cbd5e1")
     _texto     = colors.HexColor("#1e293b")
     _sub       = colors.HexColor("#64748b")
@@ -665,39 +668,49 @@ def gerar_pdf_conversa_assistente(historico):
                                 textColor=_verde_esc, leading=17)
     _st_meta   = ParagraphStyle("me", fontName="Helvetica", fontSize=9,
                                 textColor=_sub, leading=12)
-    _st_user   = ParagraphStyle("u", fontName="Helvetica-Bold", fontSize=10,
-                                textColor=_verde_esc, leading=14)
+    _st_rot_u  = ParagraphStyle("ru", fontName="Helvetica-Bold", fontSize=8,
+                                textColor=_verde, leading=11, spaceAfter=3)
+    _st_rot_b  = ParagraphStyle("rb", fontName="Helvetica-Bold", fontSize=8,
+                                textColor=_azul, leading=11, spaceAfter=3)
+    _st_user   = ParagraphStyle("u", fontName="Helvetica", fontSize=10,
+                                textColor=_texto, leading=14)
     _st_bot    = ParagraphStyle("b", fontName="Helvetica", fontSize=10,
                                 textColor=_texto, leading=14)
-    _st_rotulo = ParagraphStyle("r", fontName="Helvetica-Bold", fontSize=8.5,
-                                textColor=_verde, leading=11, spaceAfter=2)
 
     def _limpa(txt):
-        # Converte markdown para texto seguro no PDF, sem quebrar em nenhum caractere
         txt = txt or ""
-        # Remove caracteres de controle invisíveis que quebram o reportlab
-        txt = "".join(ch for ch in txt if ch == "\n" or ch == "\t" or ord(ch) >= 32)
-        # Tabelas markdown: converte linhas "| a | b |" em texto legível
+        # Remove emojis e símbolos que a fonte do PDF não renderiza (viram quadrados)
+        txt = _re_c.sub(
+            "[" 
+            "\U0001F300-\U0001FAFF"  # emojis diversos
+            "\U00002600-\U000027BF"  # símbolos, setas decorativas
+            "\U0001F000-\U0001F0FF"
+            "\U00002190-\U000021FF"  # setas
+            "\U00002B00-\U00002BFF"
+            "\uFE0F\u200D"           # seletor de emoji e ZWJ
+            "]+", "", txt)
+        # Remove caracteres de controle invisíveis
+        txt = "".join(ch for ch in txt if ch in "\n\t" or ord(ch) >= 32)
+        # Tabelas markdown -> texto legível
         _linhas = []
         for _ln in txt.split("\n"):
             _s = _ln.strip()
-            # Pula linha separadora de tabela (|---|---|)
-            if _s.startswith("|") and set(_s.replace("|", "").replace(" ", "")) <= set("-:"):
+            if _s.startswith("|") and set(_s.replace("|","").replace(" ","")) <= set("-:"):
                 continue
             if _s.startswith("|") and _s.endswith("|"):
-                _celulas = [c.strip() for c in _s.strip("|").split("|")]
-                _linhas.append(" · ".join(c for c in _celulas if c))
+                _cels = [c.strip() for c in _s.strip("|").split("|")]
+                _linhas.append(" | ".join(c for c in _cels if c))
             else:
                 _linhas.append(_ln)
         txt = "\n".join(_linhas)
-        # Remove markdown de ênfase e títulos
-        txt = _re_c.sub(r'\*\*(.+?)\*\*', r'\1', txt)
-        txt = _re_c.sub(r'\*(.+?)\*', r'\1', txt)
-        txt = _re_c.sub(r'`(.+?)`', r'\1', txt)
-        txt = _re_c.sub(r'#{1,6}\s*', '', txt)
-        txt = _re_c.sub(r'\[(.+?)\]\((.+?)\)', r'\1', txt)  # links markdown
-        # Escapa caracteres que o reportlab interpreta como XML
+        # Escapa XML primeiro
         txt = txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # Converte **negrito** em tag do reportlab (depois do escape)
+        txt = _re_c.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', txt)
+        txt = _re_c.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', txt)
+        txt = _re_c.sub(r'`(.+?)`', r'\1', txt)
+        txt = _re_c.sub(r'^#{1,6}\s*', '', txt, flags=_re_c.M)
+        txt = _re_c.sub(r'\[(.+?)\]\((.+?)\)', r'\1', txt)
         return txt.replace("\n", "<br/>")
 
     # ── CABEÇALHO ──
@@ -706,13 +719,12 @@ def gerar_pdf_conversa_assistente(historico):
     _logo_ok = False
     if os.path.exists("IAAgrologo.jpeg"):
         try:
-            _img_logo = Image("IAAgrologo.jpeg", width=2.4*cm, height=2.4*cm)
-            _cab = Table([[_img_logo, _marca]], colWidths=[2.8*cm, 13.5*cm])
-            _cab.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-                                      ("LEFTPADDING", (0,0), (0,0), 0),
-                                      ("LEFTPADDING", (1,0), (1,0), 8)]))
-            _el.append(_cab)
-            _logo_ok = True
+            _cab = Table([[Image("IAAgrologo.jpeg", width=2.4*cm, height=2.4*cm), _marca]],
+                         colWidths=[2.8*cm, 13.5*cm])
+            _cab.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+                                      ("LEFTPADDING",(0,0),(0,0),0),
+                                      ("LEFTPADDING",(1,0),(1,0),8)]))
+            _el.append(_cab); _logo_ok = True
         except Exception:
             pass
     if not _logo_ok:
@@ -720,40 +732,42 @@ def gerar_pdf_conversa_assistente(historico):
 
     _el.append(Spacer(1, 0.2*cm))
     _el.append(HRFlowable(width="100%", thickness=2.5, color=_verde, spaceAfter=8))
-    _el.append(Paragraph("🤖 Registro de Conversa — Assistente IA", _st_tit))
-    _el.append(Paragraph(
-        f"Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')}", _st_meta))
+    _el.append(Paragraph("Registro de Conversa - Assistente IA", _st_tit))
+    _el.append(Paragraph(f"Gerado em {datetime.now().strftime('%d/%m/%Y as %H:%M')}", _st_meta))
     _el.append(Spacer(1, 0.4*cm))
 
-    # ── MENSAGENS ──
+    # ── CARTÕES DE MENSAGEM ──
     for _m in historico:
         _is_user = _m.get("role") == "user"
-        _rotulo = "👨‍🌾 VOCÊ PERGUNTOU" if _is_user else "🤖 IAAGRO RESPONDEU"
-        _bg = _verde_cl if _is_user else _azul_cl
-        _cont = [
-            Paragraph(_rotulo, _st_rotulo),
-            Paragraph(_limpa(_m.get("content", "")), _st_user if _is_user else _st_bot),
-        ]
-        _cel = Table([[_cont]], colWidths=[16.3*cm])
+        if _is_user:
+            _rot, _st_rot, _st_txt = "PERGUNTA DO PRODUTOR", _st_rot_u, _st_user
+            _bg, _brd = _verde_cl, _verde_brd
+        else:
+            _rot, _st_rot, _st_txt = "RESPOSTA DO ASSISTENTE IA", _st_rot_b, _st_bot
+            _bg, _brd = _azul_cl, _azul_brd
+        _conteudo = [Paragraph(_rot, _st_rot),
+                     Paragraph(_limpa(_m.get("content","")), _st_txt)]
+        _cel = Table([[_conteudo]], colWidths=[16.3*cm])
         _cel.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), _bg),
-            ("BOX", (0,0), (-1,-1), 0.5, _cinza_bd),
-            ("LEFTPADDING", (0,0), (-1,-1), 10),
-            ("RIGHTPADDING", (0,0), (-1,-1), 10),
-            ("TOPPADDING", (0,0), (-1,-1), 8),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+            ("BACKGROUND",(0,0),(-1,-1), _bg),
+            ("LINEBEFORE",(0,0),(-1,-1), 3, _brd),   # faixa colorida na lateral esquerda
+            ("BOX",(0,0),(-1,-1), 0.5, _cinza_bd),
+            ("LEFTPADDING",(0,0),(-1,-1), 12),
+            ("RIGHTPADDING",(0,0),(-1,-1), 12),
+            ("TOPPADDING",(0,0),(-1,-1), 8),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 8),
         ]))
         _el.append(_cel)
-        _el.append(Spacer(1, 0.25*cm))
+        _el.append(Spacer(1, 0.28*cm))
 
-    # ── RESSALVA TÉCNICA (obrigatória) ──
-    _el.append(Spacer(1, 0.4*cm))
-    _st_aviso_tit = ParagraphStyle("at", fontName="Helvetica-Bold", fontSize=10,
-                                   textColor=colors.HexColor("#7f1d1d"), leading=13)
-    _st_aviso = ParagraphStyle("av", fontName="Helvetica", fontSize=9,
-                               textColor=_texto, leading=13)
+    # ── RESSALVA TÉCNICA ──
+    _el.append(Spacer(1, 0.3*cm))
+    _st_av_t = ParagraphStyle("avt", fontName="Helvetica-Bold", fontSize=10,
+                              textColor=colors.HexColor("#7f1d1d"), leading=13)
+    _st_av   = ParagraphStyle("av", fontName="Helvetica", fontSize=9,
+                              textColor=_texto, leading=13)
     _aviso = [
-        Paragraph("⚠️ AVISO IMPORTANTE", _st_aviso_tit),
+        Paragraph("AVISO IMPORTANTE", _st_av_t),
         Spacer(1, 0.15*cm),
         Paragraph(
             "As informações deste documento foram geradas por inteligência "
@@ -763,16 +777,14 @@ def gerar_pdf_conversa_assistente(historico):
             "pela sua propriedade. O receituário agronômico é obrigatório por lei "
             "para a aquisição e aplicação de agrotóxicos. O IAAgro não substitui "
             "a avaliação técnica presencial nem se responsabiliza por decisões "
-            "tomadas sem acompanhamento profissional.", _st_aviso),
+            "tomadas sem acompanhamento profissional.", _st_av),
     ]
     _cx = Table([[_aviso]], colWidths=[16.3*cm])
     _cx.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#fef2f2")),
-        ("BOX", (0,0), (-1,-1), 1, colors.HexColor("#ef4444")),
-        ("LEFTPADDING", (0,0), (-1,-1), 12),
-        ("RIGHTPADDING", (0,0), (-1,-1), 12),
-        ("TOPPADDING", (0,0), (-1,-1), 10),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+        ("BACKGROUND",(0,0),(-1,-1), colors.HexColor("#fef2f2")),
+        ("BOX",(0,0),(-1,-1), 1, colors.HexColor("#ef4444")),
+        ("LEFTPADDING",(0,0),(-1,-1),12),("RIGHTPADDING",(0,0),(-1,-1),12),
+        ("TOPPADDING",(0,0),(-1,-1),10),("BOTTOMPADDING",(0,0),(-1,-1),10),
     ]))
     _el.append(KeepTogether(_cx))
 
@@ -782,27 +794,24 @@ def gerar_pdf_conversa_assistente(historico):
                              textColor=_sub, alignment=TA_CENTER, leading=10)
     _el.append(HRFlowable(width="100%", thickness=0.7, color=_cinza_bd, spaceAfter=6))
     _el.append(Paragraph(
-        "IAAgro · Inteligência Agrícola de Precisão · iaagropro.streamlit.app",
-        _st_rod))
+        "IAAgro - Inteligência Agrícola de Precisão - iaagropro.streamlit.app", _st_rod))
 
     try:
         _doc.build(_el)
     except Exception:
-        # Fallback: PDF só texto, sem estilos, se algo no layout falhar
         _buf = _io_c.BytesIO()
         _doc2 = SimpleDocTemplate(_buf, pagesize=A4)
-        _simples = [Paragraph("IAAgro - Conversa com Assistente", _st_tit), Spacer(1, 0.5*cm)]
+        _simp = [Paragraph("IAAgro - Conversa com Assistente", _st_tit), Spacer(1,0.5*cm)]
         for _m in historico:
-            _who = "Voce:" if _m.get("role") == "user" else "IAAgro:"
-            _safe = (_m.get("content", "") or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
-            _simples.append(Paragraph(f"<b>{_who}</b> {_safe}", _st_bot))
-            _simples.append(Spacer(1, 0.3*cm))
-        _simples.append(Spacer(1, 0.5*cm))
-        _simples.append(Paragraph(
-            "AVISO: Informacoes geradas por IA, apenas orientativas. "
-            "Consulte sempre o engenheiro agronomo ou tecnico responsavel "
-            "antes de qualquer aplicacao.", _st_bot))
-        _doc2.build(_simples)
+            _who = "Voce:" if _m.get("role")=="user" else "IAAgro:"
+            _safe = _limpa(_m.get("content",""))
+            _simp.append(Paragraph(f"<b>{_who}</b> {_safe}", _st_bot))
+            _simp.append(Spacer(1,0.3*cm))
+        _simp.append(Paragraph(
+            "AVISO: Informacoes geradas por IA, apenas orientativas. Consulte sempre "
+            "o engenheiro agronomo ou tecnico responsavel antes de qualquer aplicacao.",
+            _st_bot))
+        _doc2.build(_simp)
     _buf.seek(0)
     return _buf.getvalue()
 
