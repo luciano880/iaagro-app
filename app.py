@@ -3949,6 +3949,24 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
     return buf.read()
 
 
+def calcular_calcario_por_v(ctc, v_atual, area, prnt=75, v_desejado=70):
+    """
+    Calagem pelo método da SATURAÇÃO DE BASES (V%) — CQFS RS/SC 2016.
+    É o método mais preciso, usado quando se tem CTC e V% do laudo.
+    Fórmula: NC (t/ha) = CTC × (V2 - V1) / (10 × PRNT/100)
+      onde V2 = saturação desejada (%), V1 = saturação atual (%)
+    v_desejado: 70% é padrão para grãos (soja/milho); 60% para pastagem,
+                80% para culturas exigentes.
+    Retorna (dose_t_ha, total_t, detalhes).
+    """
+    if ctc <= 0 or v_atual >= v_desejado:
+        return 0.0, 0.0, "V% já adequado ou CTC não informada"
+    # NC (t/ha) = CTC × (V2 - V1) / 100 ÷ (PRNT/100)
+    nc = (ctc * (v_desejado - v_atual) / 100.0) / (prnt / 100.0)
+    dose = round(max(0.0, nc), 2)
+    return dose, round(dose * area, 2), f"V {v_atual:.0f}%→{v_desejado}%, CTC {ctc:.1f}, PRNT {prnt}%"
+
+
 def calcular_calcario_por_ph(ph, area):
     """
     Calagem pelo método SMP (CQFS RS/SC 2016) ou pH em água.
@@ -5843,7 +5861,24 @@ if menu == "🧪 Solo & Adubação":
         nota           = calcular_nota(d)
         score, classe_score, alertas_score = score_solo(d)
         prioridade_final = prioridade(nota)
-        dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"])
+
+        # Calagem: método V% (mais preciso) quando há CTC e V%; senão, por pH
+        _ctc_d = d.get("ctc", 0)
+        _v_d   = d.get("v_percent", 0)
+        _metodo_cal = "pH"
+        if _ctc_d > 0 and _v_d > 0:
+            dose_calcario, total_calcario, _det_cal = calcular_calcario_por_v(
+                _ctc_d, _v_d, d["area"], prnt=75, v_desejado=70)
+            _metodo_cal = "Saturação de Bases (V%)"
+            # Se o V% já está ok mas o pH está muito baixo, checa pelo pH também
+            _dose_ph, _tot_ph = calcular_calcario_por_ph(d["ph"], d["area"])
+            if dose_calcario == 0 and _dose_ph > 0:
+                dose_calcario, total_calcario = _dose_ph, _tot_ph
+                _metodo_cal = "pH (V% já adequado)"
+        else:
+            dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"])
+            _det_cal = f"Baseado no pH {d['ph']} (informe CTC e V% para cálculo mais preciso)"
+
         precisa_gesso, dose_gesso, total_gesso, motivos_gesso = calcular_gesso(d)
         producao_estimada = estimar_producao(d["produtividade"], nota)
 
@@ -5853,6 +5888,10 @@ if menu == "🧪 Solo & Adubação":
         col3.metric("Calcário",          f"{dose_calcario} t/ha")
         col4.metric("Gesso",             f"{dose_gesso} t/ha")
         col5.metric("Produção Estimada", f"{producao_estimada:.1f} sc/ha")
+
+        if dose_calcario > 0:
+            st.caption(f"🧮 Calagem calculada pelo método **{_metodo_cal}** — {_det_cal}. "
+                       f"Meta V% = 70% (padrão grãos). PRNT considerado: 75%.")
 
         st.subheader("🧠 Score Inteligente do Solo")
         col1, col2 = st.columns(2)
@@ -6395,6 +6434,15 @@ if menu == "🧪 Solo & Adubação":
             n_ha = max(0, n_ha - 10)
         if materia_organica >= 5.0:
             n_ha = max(0, n_ha - 20)
+
+        # Ajuste do P pela classe de argila (CQFS RS/SC): solos mais argilosos
+        # fixam mais fósforo, exigindo dose um pouco maior para o mesmo teor;
+        # solos arenosos fixam menos. Ajuste suave de ±15%.
+        if p2o5_ha > 0:
+            if   argila >= 60: p2o5_ha *= 1.15   # muito argiloso — fixa mais P
+            elif argila >= 40: p2o5_ha *= 1.07
+            elif argila <  20: p2o5_ha *= 0.88    # arenoso — fixa menos P
+            p2o5_ha = round(p2o5_ha, 1)
 
         # Aplicar fator de zona de produtividade
         n_ha    = round(n_ha    * fator_zona, 1)
