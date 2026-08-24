@@ -5629,7 +5629,7 @@ if menu == "🧪 Solo & Adubação":
             fosforo  = st.number_input("Fósforo P (mg/dm³ Mehlich-1)", min_value=0.0, value=float(st.session_state.dados.get("fosforo", 10.0)), key="num_f_sforo_p_3479")
             potassio = st.number_input("Potássio K (mg/dm³ Mehlich-1)", min_value=0.0, value=float(st.session_state.dados.get("potassio", 100.0)), key="num_pot_ssio_k_3480")
         with col2:
-            materia_organica = st.number_input("Matéria Orgânica MO (g/dm³)", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)), key="num_mat_ria_org_nic_3482", help="1% = 10 g/dm³")
+            materia_organica = st.number_input("Matéria Orgânica MO (%)", min_value=0.0, value=float(st.session_state.dados.get("materia_organica", 2.5)), key="num_mat_ria_org_nic_3482", help="Informe em porcentagem (ex.: 2.5 para 2,5%). Se seu laudo estiver em g/dm³, divida por 10.")
             calcio   = st.number_input("Cálcio Ca²⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("calcio", 3.0)), key="num_c_lcio_ca_3483")
             magnesio = st.number_input("Magnésio Mg²⁺ (cmolc/dm³)", min_value=0.0, value=float(st.session_state.dados.get("magnesio", 1.0)), key="num_magn_sio_mg_3484")
         with col3:
