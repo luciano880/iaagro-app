@@ -6839,46 +6839,65 @@ if menu == "💰 Financeiro":
                 warning_box(_av)
 
         if _det_insumos:
-            # Header
-            _hcols = st.columns([2.5, 2, 1.5, 1.5, 1.2, 1.2, 0.7])
-            for _h, _lbl in zip(_hcols, ["Aplicação","Produto","Tipo","Qtd","R$/un","Custo",""]): 
-                _h.markdown(f"<span style='color:#6ee7b7;font-size:11px;font-weight:800;'>{_lbl}</span>",
-                            unsafe_allow_html=True)
-            st.markdown("<hr style='margin:4px 0;border-color:#1e4976;'>", unsafe_allow_html=True)
-
-            _ap_indices_deletar = set()
-            for _li, _row in enumerate(_det_insumos):
-                _rc = st.columns([2.5, 2, 1.5, 1.5, 1.2, 1.2, 0.7])
-                _rc[0].markdown(f"<span style='color:#f1f5f9;font-size:12px;'>{_row['Aplicação']}</span>",
-                                unsafe_allow_html=True)
-                _rc[1].markdown(f"<span style='color:#6ee7b7;font-size:12px;font-weight:600;'>{_row['Produto']}</span>",
-                                unsafe_allow_html=True)
-                _rc[2].markdown(f"<span style='color:#94a3b8;font-size:11px;'>{_row['Tipo']}</span>",
-                                unsafe_allow_html=True)
-                _rc[3].markdown(f"<span style='color:#f1f5f9;font-size:12px;'>{_row['Qtd']}</span>",
-                                unsafe_allow_html=True)
-                _rc[4].markdown(f"<span style='color:#94a3b8;font-size:12px;'>{_row['R$ unit']}</span>",
-                                unsafe_allow_html=True)
-                _rc[5].markdown(f"<span style='color:#22c55e;font-size:12px;font-weight:700;'>{_row['Custo R$']}</span>",
-                                unsafe_allow_html=True)
-                if _rc[6].button("🗑️", key=f"del_insumo_{_li}_{_row['ap_idx']}",
-                                  help=f"Remover aplicação: {_row['Aplicação']}"):
-                    _ap_indices_deletar.add(_row["ap_idx"])
-
-            if _ap_indices_deletar:
-                st.session_state.aplicacoes = [
-                    a for i, a in enumerate(st.session_state.aplicacoes)
-                    if i not in _ap_indices_deletar
-                ]
-                salvar_dados_iaagro()
-                success_box(f"✅ {len(_ap_indices_deletar)} aplicação(ões) removida(s).")
-                st.rerun()
+            # Tabela compacta rolante (estilo do alerta de estoque)
+            _linhas_ins = []
+            for _li, _row in enumerate(_det_insumos, 1):
+                _cor_tipo = {
+                    "Semente":"#a855f7","Fertilizante":"#22c55e","Herbicida":"#f59e0b",
+                    "Fungicida":"#ef4444","Inseticida":"#3b82f6","Inoculante":"#14b8a6",
+                }.get((_row.get("Tipo","") or "").split()[0] if _row.get("Tipo") else "", "#64748b")
+                _linhas_ins.append(f"""
+                <tr style='border-bottom:1px solid #1e293b;'>
+                <td style='padding:5px 8px;color:#64748b;font-weight:700;text-align:center;width:28px;'>{_li}</td>
+                <td style='padding:5px 8px;color:#e2e8f0;font-size:11px;'>{_row['Aplicação']}</td>
+                <td style='padding:5px 8px;color:#6ee7b7;font-weight:600;'>{_row['Produto']}</td>
+                <td style='padding:5px 8px;text-align:center;'><span style='color:{_cor_tipo};font-size:10px;font-weight:700;'>{_row['Tipo']}</span></td>
+                <td style='padding:5px 8px;color:#cbd5e1;text-align:right;white-space:nowrap;'>{_row['Qtd']}</td>
+                <td style='padding:5px 8px;color:#94a3b8;text-align:right;white-space:nowrap;font-size:11px;'>{_row['R$ unit']}</td>
+                <td style='padding:5px 8px;color:#22c55e;font-weight:700;text-align:right;white-space:nowrap;'>{_row['Custo R$']}</td>
+                </tr>""")
+            st.markdown(f"""
+            <div style='background:#0f172a;border:1px solid #334155;border-radius:8px;
+            max-height:320px;overflow-y:auto;margin:2px 0;'>
+            <table style='width:100%;border-collapse:collapse;font-size:12px;'>
+            <thead>
+            <tr style='position:sticky;top:0;background:#1e293b;z-index:1;'>
+            <th style='padding:7px 8px;color:#94a3b8;font-size:10px;text-align:center;width:28px;'>#</th>
+            <th style='padding:7px 8px;color:#94a3b8;font-size:10px;text-align:left;'>APLICAÇÃO</th>
+            <th style='padding:7px 8px;color:#94a3b8;font-size:10px;text-align:left;'>PRODUTO</th>
+            <th style='padding:7px 8px;color:#94a3b8;font-size:10px;text-align:center;'>TIPO</th>
+            <th style='padding:7px 8px;color:#94a3b8;font-size:10px;text-align:right;'>QTD</th>
+            <th style='padding:7px 8px;color:#94a3b8;font-size:10px;text-align:right;'>R$/UN</th>
+            <th style='padding:7px 8px;color:#94a3b8;font-size:10px;text-align:right;'>CUSTO</th>
+            </tr>
+            </thead>
+            <tbody>{''.join(_linhas_ins)}</tbody>
+            </table>
+            </div>""", unsafe_allow_html=True)
 
             st.markdown(f"""
             <div style='background:#14532d;border-radius:10px;padding:10px 16px;margin-top:8px;'>
             <span style='color:#6ee7b7;font-size:13px;font-weight:700;'>
             💰 Total insumos (todas aplicações): R$ {_custo_insumos:,.2f}
             </span></div>""", unsafe_allow_html=True)
+
+            # Remover aplicação — seletor separado (botões não cabem na tabela HTML)
+            with st.expander("🗑️ Remover uma aplicação registrada"):
+                _opcoes_del = {
+                    f"{ap.get('Estádio', ap.get('Aplicação','Aplicação'))} — "
+                    f"{', '.join(p.get('Produto','') for p in ap.get('Produtos',[])[:3])}"
+                    f"{'...' if len(ap.get('Produtos',[]))>3 else ''}": _i
+                    for _i, ap in enumerate(st.session_state.aplicacoes)
+                }
+                if _opcoes_del:
+                    _sel_del = st.selectbox("Escolha a aplicação para remover:",
+                                            list(_opcoes_del.keys()), key="sel_del_aplic")
+                    if st.button("🗑️ Remover esta aplicação", key="btn_del_aplic_sel"):
+                        _idx_del = _opcoes_del[_sel_del]
+                        st.session_state.aplicacoes.pop(_idx_del)
+                        salvar_dados_iaagro()
+                        success_box("✅ Aplicação removida.")
+                        st.rerun()
         else:
             st.info("Nenhuma aplicação registrada ainda.")
 
