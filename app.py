@@ -6346,39 +6346,42 @@ if menu == "🧪 Solo & Adubação":
         st.subheader("Recomendação Base")
         # Recomendação base por cultura (EMBRAPA/IAPAR - Sul do Brasil)
         # N em kg/ha de N puro; P e K em kg/ha de P2O5 e K2O
+        # IMPORTANTE: fosforo e potassio vêm em mg/dm³ (Mehlich-1)
+        # Faixas de K (mg/dm³, CQFS RS/SC): <40 MtBaixo, 40-60 Baixo,
+        #   60-120 Médio, 120-180 Alto, >180 MtAlto
         if cultura == "Soja":
             # Soja fixa N biologicamente - adubação de base é P e K
             n_ha    = 0
             p2o5_ha = 120 if fosforo < 9 else (90 if fosforo < 18 else (60 if fosforo < 30 else 40))
-            k2o_ha  = 120 if potassio < 0.15 else (90 if potassio < 0.30 else (60 if potassio < 0.45 else 40))
+            k2o_ha  = 120 if potassio < 40 else (100 if potassio < 60 else (80 if potassio < 120 else (55 if potassio < 180 else 40)))
             # Ajuste por produtividade meta (sc/ha)
             if produtividade > 70: p2o5_ha += 20; k2o_ha += 20
         elif cultura == "Milho":
             # N parcelado: 1/3 base + 2/3 cobertura; aqui mostra total
             n_ha    = 30 if produtividade <= 80 else (40 if produtividade <= 120 else 50)  # N base
             p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else (40 if fosforo < 30 else 30))
-            k2o_ha  = 80 if potassio < 0.15 else (60 if potassio < 0.30 else (40 if potassio < 0.45 else 30))
+            k2o_ha  = 100 if potassio < 40 else (80 if potassio < 60 else (60 if potassio < 120 else (45 if potassio < 180 else 30)))
             if produtividade > 100: n_ha += 10; p2o5_ha += 20; k2o_ha += 20
         elif cultura == "Trigo":
             n_ha    = 30  # N base (30-40 kg/ha); cobertura separada
             p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else (40 if fosforo < 30 else 30))
-            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else (30 if potassio < 0.45 else 20))
+            k2o_ha  = 80 if potassio < 40 else (60 if potassio < 60 else (45 if potassio < 120 else (30 if potassio < 180 else 20)))
         elif cultura == "Feijão":
             n_ha    = 20  # N base
             p2o5_ha = 100 if fosforo < 9 else (80 if fosforo < 18 else (60 if fosforo < 30 else 40))
-            k2o_ha  = 80 if potassio < 0.15 else (60 if potassio < 0.30 else (40 if potassio < 0.45 else 30))
+            k2o_ha  = 100 if potassio < 40 else (80 if potassio < 60 else (60 if potassio < 120 else (45 if potassio < 180 else 30)))
         elif cultura == "Canola":
             n_ha    = 40
             p2o5_ha = 80 if fosforo < 9 else (60 if fosforo < 18 else 40)
-            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else 30)
+            k2o_ha  = 80 if potassio < 40 else (60 if potassio < 60 else (45 if potassio < 120 else 30))
         elif cultura == "Aveia":
             n_ha    = 20
             p2o5_ha = 60 if fosforo < 9 else (40 if fosforo < 18 else 30)
-            k2o_ha  = 40 if potassio < 0.15 else (30 if potassio < 0.30 else 20)
+            k2o_ha  = 60 if potassio < 40 else (45 if potassio < 60 else (30 if potassio < 120 else 20))
         else:
             n_ha    = 30
             p2o5_ha = 60 if fosforo < 9 else (40 if fosforo < 18 else 30)
-            k2o_ha  = 60 if potassio < 0.15 else (40 if potassio < 0.30 else 30)
+            k2o_ha  = 60 if potassio < 40 else (45 if potassio < 60 else (30 if potassio < 120 else 25))
 
         # Redução de N por matéria orgânica alta
         if materia_organica >= 3.5:
