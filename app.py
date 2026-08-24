@@ -4069,6 +4069,100 @@ def estimar_producao(meta, nota):
     return meta * 0.55
 
 
+def opcoes_adubacao(n_ha, p2o5_ha, k2o_ha):
+    """
+    Gera várias OPÇÕES de fontes de adubo para atingir o mesmo NPK recomendado
+    (kg/ha de N, P2O5, K2O). Retorna lista de dicts, cada um uma estratégia:
+    econômica (MAP+KCl+Ureia), formulados prontos e linhas tecnológicas
+    (Timac, Mosaic, Yara). O produtor escolhe conforme orçamento e objetivo.
+    Cada item traz os produtos (nome, teor, kg/ha calculado) e observações.
+    """
+    ops = []
+
+    def _kg(alvo, teor):
+        return round(alvo / (teor/100.0), 1) if alvo > 0 and teor > 0 else 0.0
+
+    # ── 1) ECONÔMICA — fontes simples (padrão do mercado) ──
+    itens = []
+    if p2o5_ha > 0: itens.append(("MAP 11-52-00", _kg(p2o5_ha, 52), "52% P₂O₅ + 11% N"))
+    if k2o_ha  > 0: itens.append(("KCl 00-00-60", _kg(k2o_ha, 60), "60% K₂O"))
+    # desconta o N que já veio no MAP (11%)
+    n_do_map = round(_kg(p2o5_ha, 52) * 0.11, 1) if p2o5_ha > 0 else 0
+    n_falta  = max(0, round(n_ha - n_do_map, 1))
+    if n_falta > 0: itens.append(("Ureia 45% N", _kg(n_falta, 45), "45% N"))
+    ops.append({
+        "nome": "Econômica (fontes simples)",
+        "tag": "Menor custo",
+        "cor": "#22c55e",
+        "itens": itens,
+        "obs": "Combinação tradicional e de menor custo por unidade de nutriente. "
+               "Exige mistura/aplicação separada e não traz enxofre nem tecnologia de eficiência.",
+    })
+
+    # ── 2) FORMULADO NPK PRONTO ──
+    # Escolhe um formulado típico conforme a relação P:K
+    itens_f = []
+    if p2o5_ha > 0 and k2o_ha > 0:
+        # base pela maior necessidade entre P e K
+        base_kg = round(max(p2o5_ha/0.20, k2o_ha/0.20), 1)  # formulado ~20% P e K
+        itens_f.append(("Formulado 02-20-20", base_kg, "2% N · 20% P₂O₅ · 20% K₂O"))
+        obs_f = ("Prático: um único produto no plantio com N, P e K juntos. "
+                 "Ajuste a dose conforme o formulado disponível na sua revenda "
+                 "(ex.: 04-20-20, 08-20-20, 05-25-25).")
+    elif p2o5_ha > 0:
+        itens_f.append(("Formulado 08-40-00 (tipo MAP+)", _kg(p2o5_ha, 40), "8% N · 40% P₂O₅"))
+        obs_f = "Formulado com foco em fósforo de plantio."
+    else:
+        itens_f.append(("KCl 00-00-60", _kg(k2o_ha, 60), "60% K₂O"))
+        obs_f = "Necessidade concentrada em potássio."
+    ops.append({
+        "nome": "Formulado NPK pronto",
+        "tag": "Praticidade",
+        "cor": "#3b82f6",
+        "itens": itens_f,
+        "obs": obs_f,
+    })
+
+    # ── 3) LINHA TECNOLÓGICA — fósforo protegido / eficiência ──
+    itens_t = []
+    if p2o5_ha > 0:
+        itens_t.append(("Timac Top-Phos ou Physiostart", _kg(p2o5_ha, 42),
+                        "P protegido (tecnologia CSP/Physio) — maior aproveitamento"))
+    if k2o_ha > 0:
+        itens_t.append(("KCl ou Polysulphato (Yara)", _kg(k2o_ha, 48),
+                        "K + enxofre/cálcio/magnésio (Polysulphato)"))
+    if n_falta > 0:
+        itens_t.append(("Ureia protegida (NBPT)", _kg(n_falta, 45),
+                        "menor perda por volatilização"))
+    ops.append({
+        "nome": "Tecnológica (alta eficiência)",
+        "tag": "Máximo aproveitamento",
+        "cor": "#eab308",
+        "itens": itens_t,
+        "obs": "Fontes com tecnologia de proteção/eficiência (Timac, Yara, Mosaic). "
+               "Custo por saco maior, mas melhor aproveitamento do nutriente, "
+               "menor perda e ganho logístico. Doses são aproximadas — confira o "
+               "teor exato do produto na revenda.",
+    })
+
+    # ── 4) ENXOFRE + MICROS (linha premium Mosaic) ──
+    if p2o5_ha > 0:
+        ops.append({
+            "nome": "Com enxofre e micros",
+            "tag": "P + S + Zn",
+            "cor": "#a855f7",
+            "itens": [
+                ("Mosaic MicroEssentials (MES)", _kg(p2o5_ha, 40),
+                 "P + N + enxofre + zinco no mesmo grânulo"),
+            ] + ([("KCl 00-00-60", _kg(k2o_ha, 60), "60% K₂O")] if k2o_ha > 0 else []),
+            "obs": "Tecnologia que entrega fósforo junto com enxofre e zinco, "
+                   "importante em solos deficientes nesses nutrientes. "
+                   "Reduz o número de produtos na operação.",
+        })
+
+    return ops
+
+
 def recomendacao_npk(cultura, produtividade, fosforo, potassio, materia_organica, argila=50, ph=5.5):
     # Remove ícone se presente
     cultura = cultura_limpa(cultura) if cultura else "Soja"
@@ -6307,13 +6401,53 @@ if menu == "🧪 Solo & Adubação":
         col3.metric("K₂O",       f"{k2o_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
         st.divider()
 
-        st.subheader("Produtos Recomendados")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("MAP 11-52-00", f"{map_ha:.1f} kg/ha")
-        col2.metric("KCl 00-00-60", f"{kcl_ha:.1f} kg/ha")
-        col3.metric("Ureia 45% N",  f"{ureia_ha:.1f} kg/ha")
+        st.subheader("🌱 Opções de Adubação — escolha a que melhor se encaixa")
+        st.caption(
+            "Todas as opções abaixo entregam aproximadamente o mesmo NPK recomendado "
+            f"(**N {n_ha:.0f} · P₂O₅ {p2o5_ha:.0f} · K₂O {k2o_ha:.0f}** kg/ha). "
+            "A diferença está no custo, na praticidade e na tecnologia. "
+            "As doses são calculadas pelo teor de cada fonte — confirme o teor exato "
+            "do produto na sua revenda."
+        )
 
-        st.subheader("Total para a Área")
+        _ops_adubo = opcoes_adubacao(n_ha, p2o5_ha, k2o_ha)
+        _cols_op = st.columns(len(_ops_adubo)) if len(_ops_adubo) <= 3 else st.columns(2)
+        for _i_op, _op in enumerate(_ops_adubo):
+            _col_alvo = _cols_op[_i_op % len(_cols_op)]
+            with _col_alvo:
+                _linhas_prod = ""
+                for _nome_p, _kg_p, _desc_p in _op["itens"]:
+                    _total_p = round(_kg_p * area, 0)
+                    _linhas_prod += (
+                        f"<div style='margin:6px 0;padding:8px;background:rgba(255,255,255,0.03);"
+                        f"border-radius:8px;'>"
+                        f"<div style='color:#f1f5f9;font-weight:700;font-size:13px;'>{_nome_p}</div>"
+                        f"<div style='color:{_op['cor']};font-weight:800;font-size:15px;'>{_kg_p:.0f} kg/ha"
+                        f" <span style='color:#94a3b8;font-weight:500;font-size:11px;'>"
+                        f"({_total_p:.0f} kg total)</span></div>"
+                        f"<div style='color:#64748b;font-size:10px;'>{_desc_p}</div></div>"
+                    )
+                st.markdown(f"""
+                <div style='background:linear-gradient(160deg,#0f2a1a,#0b1f13);
+                border:1px solid {_op['cor']}55;border-top:4px solid {_op['cor']};
+                border-radius:14px;padding:14px;margin-bottom:12px;min-height:60px;'>
+                <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
+                <span style='color:#fff;font-weight:800;font-size:14px;'>{_op['nome']}</span></div>
+                <span style='background:{_op['cor']};color:#04140b;font-weight:700;font-size:10px;
+                padding:2px 10px;border-radius:100px;text-transform:uppercase;'>{_op['tag']}</span>
+                {_linhas_prod}
+                <div style='color:#94a3b8;font-size:11px;margin-top:8px;line-height:1.4;'>{_op['obs']}</div>
+                </div>""", unsafe_allow_html=True)
+
+        st.info(
+            "💡 **Como escolher:** a opção econômica tem o menor custo por quilo de nutriente; "
+            "os formulados prontos economizam operação; as linhas tecnológicas (Timac, Mosaic, Yara) "
+            "custam mais por saco mas melhoram o aproveitamento e entregam enxofre/micros. "
+            "A melhor escolha depende do seu solo, orçamento e logística — confirme com seu agrônomo."
+        )
+
+        # Mantém os valores tradicionais para o restante do fluxo (PDF, estoque)
+        st.subheader("Total para a Área (base econômica)")
         total_map   = round(map_ha   * area, 1)
         total_kcl   = round(kcl_ha   * area, 1)
         total_ureia = round(ureia_ha  * area, 1)
