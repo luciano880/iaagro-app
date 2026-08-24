@@ -762,29 +762,29 @@ def gerar_pdf_conversa_assistente(historico):
 
     # ── RESSALVA TÉCNICA ──
     _el.append(Spacer(1, 0.3*cm))
-    _st_av_t = ParagraphStyle("avt", fontName="Helvetica-Bold", fontSize=10,
-                              textColor=colors.HexColor("#7f1d1d"), leading=13)
-    _st_av   = ParagraphStyle("av", fontName="Helvetica", fontSize=9,
-                              textColor=_texto, leading=13)
+    _st_av_t = ParagraphStyle("avt", fontName="Helvetica-Bold", fontSize=11,
+                              textColor=colors.HexColor("#7f1d1d"), leading=14)
+    _st_av   = ParagraphStyle("av", fontName="Helvetica-Bold", fontSize=9.5,
+                              textColor=colors.HexColor("#7f1d1d"), leading=14)
     _aviso = [
-        Paragraph("AVISO IMPORTANTE", _st_av_t),
+        Paragraph("⚠️ AVISO IMPORTANTE", _st_av_t),
         Spacer(1, 0.15*cm),
         Paragraph(
-            "As informações deste documento foram geradas por inteligência "
-            "artificial e têm caráter apenas orientativo. Antes de qualquer "
+            "<b>As informações deste documento foram geradas por inteligência "
+            "artificial e têm caráter APENAS ORIENTATIVO. Antes de qualquer "
             "aplicação de defensivos, fertilizantes ou correção de solo, "
-            "<b>consulte sempre o engenheiro agrônomo ou técnico responsável</b> "
+            "CONSULTE SEMPRE O ENGENHEIRO AGRÔNOMO OU TÉCNICO RESPONSÁVEL "
             "pela sua propriedade. O receituário agronômico é obrigatório por lei "
             "para a aquisição e aplicação de agrotóxicos. O IAAgro não substitui "
             "a avaliação técnica presencial nem se responsabiliza por decisões "
-            "tomadas sem acompanhamento profissional.", _st_av),
+            "tomadas sem acompanhamento profissional.</b>", _st_av),
     ]
     _cx = Table([[_aviso]], colWidths=[16.3*cm])
     _cx.setStyle(TableStyle([
         ("BACKGROUND",(0,0),(-1,-1), colors.HexColor("#fef2f2")),
-        ("BOX",(0,0),(-1,-1), 1, colors.HexColor("#ef4444")),
+        ("BOX",(0,0),(-1,-1), 1.5, colors.HexColor("#ef4444")),
         ("LEFTPADDING",(0,0),(-1,-1),12),("RIGHTPADDING",(0,0),(-1,-1),12),
-        ("TOPPADDING",(0,0),(-1,-1),10),("BOTTOMPADDING",(0,0),(-1,-1),10),
+        ("TOPPADDING",(0,0),(-1,-1),12),("BOTTOMPADDING",(0,0),(-1,-1),12),
     ]))
     _el.append(KeepTogether(_cx))
 
@@ -807,10 +807,23 @@ def gerar_pdf_conversa_assistente(historico):
             _safe = _limpa(_m.get("content",""))
             _simp.append(Paragraph(f"<b>{_who}</b> {_safe}", _st_bot))
             _simp.append(Spacer(1,0.3*cm))
-        _simp.append(Paragraph(
-            "AVISO: Informacoes geradas por IA, apenas orientativas. Consulte sempre "
-            "o engenheiro agronomo ou tecnico responsavel antes de qualquer aplicacao.",
-            _st_bot))
+        _simp.append(Spacer(1,0.3*cm))
+        _st_av_fb = ParagraphStyle("avfb", fontName="Helvetica-Bold", fontSize=10.5,
+                                   textColor=colors.HexColor("#7f1d1d"), leading=15)
+        _aviso_fb = Paragraph(
+            "<b>⚠️ AVISO IMPORTANTE: As informações acima foram geradas por "
+            "inteligência artificial e têm caráter APENAS ORIENTATIVO. "
+            "CONSULTE SEMPRE O ENGENHEIRO AGRÔNOMO OU TÉCNICO RESPONSÁVEL "
+            "antes de qualquer aplicação. O receituário agronômico é "
+            "obrigatório por lei.</b>", _st_av_fb)
+        _cx_fb = Table([[_aviso_fb]], colWidths=[16.5*cm])
+        _cx_fb.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,-1), colors.HexColor("#fef2f2")),
+            ("BOX",(0,0),(-1,-1), 1.5, colors.HexColor("#ef4444")),
+            ("LEFTPADDING",(0,0),(-1,-1),12),("RIGHTPADDING",(0,0),(-1,-1),12),
+            ("TOPPADDING",(0,0),(-1,-1),12),("BOTTOMPADDING",(0,0),(-1,-1),12),
+        ]))
+        _simp.append(_cx_fb)
         _doc2.build(_simp)
     _buf.seek(0)
     return _buf.getvalue()
