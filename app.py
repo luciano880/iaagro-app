@@ -4577,6 +4577,7 @@ menu = st.sidebar.radio(
         "📦 Operacional",
         "🔧 Máquinas",
         "🌍 Inteligência",
+        "🤖 Assistente IA",
         "📅 Planejamento de Safras",
         "📄 Relatório Final",
         "⚙️ Configurações"
@@ -6771,9 +6772,9 @@ elif menu == "💰 Financeiro":
         "🌾 Custos da Lavoura",
         "🔧 Custos Complementares",
         "🤝 Contratos de Troca",
+        "🧾 Imposto de Renda Rural",
         "📊 Evolução por Safra",
         "💹 Dashboard",
-        "🧾 Imposto de Renda Rural",
     ])
 
 # ── ABA 0: CUSTOS DA LAVOURA ─────────────────────────────────────────────
@@ -7085,7 +7086,7 @@ if menu == "💰 Financeiro":
 
 # ── ABA 3: EVOLUÇÃO POR SAFRA ─────────────────────────────────────────────
 if menu == "💰 Financeiro":
-  with _sub_fin[3]:
+  with _sub_fin[4]:
     st.header("📊 Evolução por Safra")
 
     _todos_regs = st.session_state.get("dre_registros", [])
@@ -7154,7 +7155,7 @@ if menu == "💰 Financeiro":
 
 # ── ABA 4: DASHBOARD ─────────────────────────────────────────────────────
 if menu == "💰 Financeiro":
-  with _sub_fin[4]:
+  with _sub_fin[5]:
     st.header("💹 Dashboard Financeiro")
 
     _todos = st.session_state.get("dre_registros", [])
@@ -7204,7 +7205,7 @@ if menu == "💰 Financeiro":
 
 # ── ABA 5: IR RURAL ──────────────────────────────────────────────────────
 if menu == "💰 Financeiro":
-  with _sub_fin[5]:
+  with _sub_fin[3]:
     st.markdown("""
     <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
     padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
@@ -9190,7 +9191,7 @@ elif menu == "📄 Relatório Final":
 # MENU: INTELIGÊNCIA
 # ─────────────────────────────────────────────
 elif menu == "🌍 Inteligência":
-    _ROTULOS_INT = ["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA","🤖 Assistente IA"]
+    _ROTULOS_INT = ["🌤️ Clima & Alertas","💰 Preços de Mercado","🗺️ Mapa de Colheita IA"]
     _aba_int = st.radio("Seção:", _ROTULOS_INT, key="aba_intel_ativa",
                         horizontal=True)
 
@@ -9812,8 +9813,7 @@ if menu == "🌍 Inteligência":
         st.info("Faça o upload do mapa de colheita para análise.")
 
 
-if menu == "🌍 Inteligência":
-  if _aba_int == _ROTULOS_INT[3]:
+elif menu == "🤖 Assistente IA":
     st.markdown("""
     <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
     padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
