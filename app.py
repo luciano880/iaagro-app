@@ -4400,6 +4400,8 @@ def score_solo(d, cultura="Soja"):
     enxofre          = d.get("enxofre", 0)
     zinco            = d.get("zinco", 0)
     boro             = d.get("boro", 0)
+    manganes         = d.get("manganes", 0)
+    cobre            = d.get("cobre", 0)
 
     # pH ideal por cultura (EMBRAPA/CQFS)
     ph_ideais = {
@@ -4460,12 +4462,17 @@ def score_solo(d, cultura="Soja"):
         elif materia_organica > 6.0: alertas.append("MO alta — reduzir N mineral")
 
     # Micronutrientes (quando disponíveis)
-    if enxofre > 0 and enxofre < 5:
-        score -= 8; alertas.append(f"Enxofre baixo (<5 mg/dm³) — usar fertilizante com S")
+    if enxofre > 0:
+        if   enxofre < 5:  score -= 8; alertas.append("Enxofre baixo (<5 mg/dm³) — usar fertilizante com S")
+        elif enxofre < 10: score -= 3; alertas.append("Enxofre médio (5-10 mg/dm³) — atenção em culturas exigentes")
     if zinco > 0 and zinco < 0.6:
         score -= 5; alertas.append(f"Zinco baixo (<0,6 mg/dm³)")
     if boro > 0 and boro < 0.2:
         score -= 5; alertas.append(f"Boro baixo (<0,2 mg/dm³) — importante para soja/café")
+    if manganes > 0 and manganes < 1.2:
+        score -= 4; alertas.append(f"Manganês baixo (<1,2 mg/dm³)")
+    if cobre > 0 and cobre < 0.2:
+        score -= 4; alertas.append(f"Cobre baixo (<0,2 mg/dm³)")
 
     score = max(0, min(100, score))
     if   score >= 85: classe = "Excelente"
