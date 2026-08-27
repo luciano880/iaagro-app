@@ -6323,6 +6323,7 @@ if menu == "🧪 Solo & Adubação":
         potassio     = d.get("potassio", 0)
         ph           = d.get("ph", 0)
         materia_organica = d.get("materia_organica", 0)
+        argila       = d.get("argila", 35)
         # Guarda de segurança: garante que nunca dê NameError no botão de
         # recomendação, mesmo que algum caminho pule os cálculos abaixo.
         n_ha = p2o5_ha = k2o_ha = 0.0
