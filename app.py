@@ -1883,6 +1883,10 @@ def tela_login():
             with st.form("form_login_sb", clear_on_submit=False):
                 email_l = st.text_input("E-mail", placeholder="seu@email.com", key="sb_email_login")
                 senha_l = st.text_input("Senha", type="password", key="sb_senha_login")
+                manter_l = st.checkbox("🔒 Manter conectado neste dispositivo", value=True,
+                                       key="sb_manter_login",
+                                       help="Deixe marcado no seu celular/computador pessoal. "
+                                            "Desmarque em dispositivos compartilhados.")
                 btn_l   = st.form_submit_button("Entrar", use_container_width=True)
             if btn_l:
                 if not email_l or not senha_l:
@@ -1910,21 +1914,20 @@ def tela_login():
                         elif st.session_state.get("_seg_novo_usuario"):
                             st.session_state.segmento = st.session_state.pop("_seg_novo_usuario")
                         # Salva refresh info nos query_params para auto-login após reload
-                        try:
-                            import hashlib as _hl
-                            _nome_url = (res["nome"] or res["email"]).replace(" ", "_")[:20]
-                            # Salva token completo — query_params suporta strings longas
-                            _tk_full = res["token"]
-                            st.query_params["_u"] = res["user_id"]
-                            st.query_params["_p"] = st.session_state.sb_plano
-                            st.query_params["_n"] = _nome_url
-                            # Divide token em partes para query_params
-                            st.query_params["_t1"] = _tk_full[:200]
-                            st.query_params["_t2"] = _tk_full[200:400]
-                            st.query_params["_t3"] = _tk_full[400:]
-                            st.query_params["_rf"]  = res.get("refresh_token","")[:200]
-                        except Exception:
-                            pass
+                        # SÓ se o usuário marcou "Manter conectado"
+                        if st.session_state.get("sb_manter_login", True):
+                            try:
+                                _nome_url = (res["nome"] or res["email"]).replace(" ", "_")[:20]
+                                _tk_full = res["token"]
+                                st.query_params["_u"] = res["user_id"]
+                                st.query_params["_p"] = st.session_state.sb_plano
+                                st.query_params["_n"] = _nome_url
+                                st.query_params["_t1"] = _tk_full[:200]
+                                st.query_params["_t2"] = _tk_full[200:400]
+                                st.query_params["_t3"] = _tk_full[400:]
+                                st.query_params["_rf"]  = res.get("refresh_token","")[:200]
+                            except Exception:
+                                pass
                         st.success(f"✅ Bem-vindo, {st.session_state.usuario_atual}!")
                         st.rerun()
                     else:
