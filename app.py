@@ -9371,6 +9371,32 @@ if menu == "🌍 Inteligência":
                 except Exception:
                     return {}
 
+            # Fallback: Nominatim (OpenStreetMap) conhece distritos e
+            # comunidades rurais que o Open-Meteo não tem. Usado só quando
+            # a busca principal falha.
+            @st.cache_data(ttl=1800, show_spinner=False)
+            def _buscar_geo_osm(nome, uf_nome):
+                try:
+                    _q = f"{nome.strip()}, {uf_nome}, Brasil"
+                    _u = ("https://nominatim.openstreetmap.org/search"
+                          f"?q={_quote_url(_q)}&format=json&limit=5&accept-language=pt-BR")
+                    _r = rq_.get(_u, timeout=10,
+                                 headers={"User-Agent": "IAAgro/1.0 (agro app)"})
+                    _dados = _r.json()
+                    # Converte formato Nominatim para o formato do Open-Meteo
+                    _out = []
+                    for _d in _dados:
+                        _out.append({
+                            "name": (_d.get("display_name","").split(",")[0] or nome),
+                            "latitude": float(_d["lat"]),
+                            "longitude": float(_d["lon"]),
+                            "admin1": uf_nome,
+                            "country_code": "BR",
+                        })
+                    return {"results": _out}
+                except Exception:
+                    return {}
+
             @st.cache_data(ttl=1800, show_spinner=False)
             def _buscar_clima(lat, lon):
                 try:
@@ -9400,9 +9426,18 @@ if menu == "🌍 Inteligência":
             if _match is None and _resultados:
                 _match = _resultados[0]
 
+            # Fallback: se não achou, tenta o Nominatim (conhece localidades pequenas)
+            if _match is None:
+                _geo_osm = _buscar_geo_osm(cidade, _UFS_BR[_uf_clima])
+                _res_osm = _geo_osm.get("results", []) or []
+                if _res_osm:
+                    _match = _res_osm[0]
+
             if not _match:
-                st.warning(f"❌ Cidade '{cidade}' não encontrada. "
-                           f"Tente com acento (ex: Xanxerê) ou uma cidade maior próxima.")
+                st.warning(f"❌ Não encontrei '{cidade}'. Dicas: verifique o acento "
+                           f"(ex: Xanxerê), confira se o estado selecionado está certo, "
+                           f"ou use o município maior mais próximo — o clima da região é "
+                           f"praticamente o mesmo para fins de aplicação.")
             else:
                 _lat = _match["latitude"]; _lon = _match["longitude"]
                 _nome_local = _match.get("name", cidade)
@@ -9997,7 +10032,19 @@ elif menu == "🧠 Assistente IA":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo...")
+        # Upload de documento para análise (PDF, imagem, planilha)
+        with st.expander("📎 Anexar documento para análise (PDF, imagem, planilha)"):
+            _doc_ia = st.file_uploader(
+                "Anexe uma nota fiscal, laudo, planilha de estoque, receituário...",
+                type=["pdf","jpg","jpeg","png","xlsx","csv"],
+                key="upload_doc_assistente",
+                help="O documento será enviado junto com sua próxima pergunta. "
+                     "Ex.: anexe uma nota fiscal e pergunte 'quais produtos tem nessa nota?'"
+            )
+            if _doc_ia:
+                st.success(f"✅ {_doc_ia.name} anexado — faça sua pergunta abaixo que eu analiso.")
+
+        _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo... ou anexe um documento acima")
 
         if _prompt_ia:
             st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
@@ -10007,11 +10054,49 @@ elif menu == "🧠 Assistente IA":
                 with st.spinner("🌾 Consultando especialista agrícola..."):
                     try:
                         import requests as _rq_ia
+                        import base64 as _b64_ia
                         # Monta histórico limitado a 10 mensagens para não exceder tokens
                         _msgs_ia = [
                             {"role": m["role"], "content": m["content"]}
                             for m in st.session_state.assistente_hist[-10:]
                         ]
+
+                        # Se há documento anexado, injeta no ÚLTIMO turno do usuário
+                        _doc_anexo = st.session_state.get("upload_doc_assistente")
+                        _texto_extra_doc = ""
+                        if _doc_anexo is not None and _msgs_ia:
+                            try:
+                                _doc_anexo.seek(0)
+                                _tipo_doc = _doc_anexo.type or ""
+                                _conteudo_msg = []
+                                if _tipo_doc.startswith("image"):
+                                    _b64d = _b64_ia.b64encode(_doc_anexo.read()).decode()
+                                    _extd = "jpeg" if "jp" in _tipo_doc else "png"
+                                    _conteudo_msg.append({"type":"image","source":{
+                                        "type":"base64","media_type":f"image/{_extd}","data":_b64d}})
+                                elif _tipo_doc == "application/pdf":
+                                    _b64d = _b64_ia.b64encode(_doc_anexo.read()).decode()
+                                    _conteudo_msg.append({"type":"document","source":{
+                                        "type":"base64","media_type":"application/pdf","data":_b64d}})
+                                elif _doc_anexo.name.lower().endswith((".xlsx",".csv")):
+                                    # Planilha: extrai texto e anexa como contexto
+                                    import pandas as _pd_doc
+                                    if _doc_anexo.name.lower().endswith(".csv"):
+                                        _df_doc = _pd_doc.read_csv(_doc_anexo)
+                                    else:
+                                        _df_doc = _pd_doc.read_excel(_doc_anexo)
+                                    _texto_extra_doc = (f"\n\n[Planilha anexada '{_doc_anexo.name}':\n"
+                                                        f"{_df_doc.to_string()[:4000]}]")
+                                # Monta o último turno com documento + texto
+                                if _conteudo_msg:
+                                    _conteudo_msg.append({"type":"text","text":_prompt_ia})
+                                    _msgs_ia[-1] = {"role":"user","content":_conteudo_msg}
+                                elif _texto_extra_doc:
+                                    _msgs_ia[-1] = {"role":"user",
+                                                    "content":_prompt_ia + _texto_extra_doc}
+                            except Exception as _edoc:
+                                st.caption(f"⚠️ Não consegui ler o documento: {_edoc}")
+
                         _system_ia = (
                             "Você é um agrônomo especialista brasileiro com foco no Sul do Brasil (PR, SC, RS). "
                             "Responda SEMPRE em português, de forma prática e objetiva para produtores rurais. "
@@ -10051,6 +10136,12 @@ elif menu == "🧠 Assistente IA":
                             "(4) Ao analisar um programa do produtor, aponte pontos de atenção sem alarmismo "
                             "e SEMPRE reforce que a decisão final é do engenheiro agrônomo responsável, que "
                             "conhece o histórico da área. "
+                            "ANÁLISE DE DOCUMENTOS: o produtor pode anexar documentos (notas fiscais, "
+                            "laudos, planilhas de estoque, receituários, bulas). Quando houver documento "
+                            "anexado, analise-o com atenção: identifique produtos, quantidades, valores, "
+                            "princípios ativos e datas. Para notas fiscais e estoque, ajude a organizar, "
+                            "conferir e sugerir uso. Para planilhas de estoque, aponte itens em falta, "
+                            "vencimentos, ou sugestões de compra conforme o manejo. Seja prático. "
                             f"Contexto da propriedade: {_ctx_ia}"
                         )
                         _resp_ia = _rq_ia.post(
@@ -10058,6 +10149,7 @@ elif menu == "🧠 Assistente IA":
                             headers={
                                 "x-api-key":         _api_key_ia,
                                 "anthropic-version": "2023-06-01",
+                                "anthropic-beta":    "pdfs-2024-09-25",
                                 "content-type":      "application/json",
                             },
                             json={
