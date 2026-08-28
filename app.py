@@ -5667,14 +5667,20 @@ if menu == "🧪 Solo & Adubação":
     }
     </style>
     """, unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("📄 Upload análise de solo", type=["xlsx","csv"], key="upl___upload_an_lis_3464")
+    uploaded_file = st.file_uploader("📄 Upload análise de solo (XLSX, CSV ou PDF)", type=["xlsx","csv","pdf"], key="upl___upload_an_lis_3464")
     if uploaded_file is not None:
-        if uploaded_file.name.endswith(".csv"):
+        if uploaded_file.name.lower().endswith(".pdf"):
+            st.info("📑 Laudo em PDF detectado! Para PDFs, use a aba **'📄 OCR Laudo de Solo'** "
+                    "(aqui do lado) — ela lê o PDF, extrai os valores e preenche a análise "
+                    "automaticamente. O upload de planilha aqui é apenas para arquivos XLSX/CSV.")
+        elif uploaded_file.name.lower().endswith(".csv"):
             df_upload = pd.read_csv(uploaded_file)
+            success_box("✅ Análise carregada com sucesso!")
+            st.dataframe(df_upload)
         else:
             df_upload = pd.read_excel(uploaded_file)
-        success_box("✅ Análise carregada com sucesso!")
-        st.dataframe(df_upload)
+            success_box("✅ Análise carregada com sucesso!")
+            st.dataframe(df_upload)
 
     if not st.session_state.area_selecionada:
         warning_box("Cadastre ou carregue uma área primeiro.")
