@@ -340,6 +340,30 @@ div[data-testid="stMetricLabel"] {
     font-weight: 600 !important;
     font-size: 14px !important;
 }
+/* Mais respiro entre os itens do menu (melhor toque no celular) */
+[data-testid="stSidebar"] .stRadio [role="radiogroup"] > label {
+    padding: 7px 8px !important;
+    margin: 2px 0 !important;
+    border-radius: 8px !important;
+    transition: background .15s !important;
+}
+[data-testid="stSidebar"] .stRadio [role="radiogroup"] > label:hover {
+    background: rgba(34,197,94,0.10) !important;
+}
+/* Destaque especial para o item Assistente IA (4º item após os 3 primeiros
+   grupos) — fundo e borda diferenciados para chamar atenção */
+[data-testid="stSidebar"] .stRadio [role="radiogroup"] > label:nth-of-type(9) {
+    background: linear-gradient(90deg, rgba(234,179,8,0.15), rgba(34,197,94,0.10)) !important;
+    border: 1px solid rgba(234,179,8,0.4) !important;
+    box-shadow: 0 0 12px rgba(234,179,8,0.15) !important;
+}
+[data-testid="stSidebar"] .stRadio [role="radiogroup"] > label:nth-of-type(9):hover {
+    background: linear-gradient(90deg, rgba(234,179,8,0.25), rgba(34,197,94,0.15)) !important;
+}
+[data-testid="stSidebar"] .stRadio [role="radiogroup"] > label:nth-of-type(9) p {
+    color: #fde68a !important;
+    font-weight: 800 !important;
+}
 
 /* ── PROGRESS BAR ── */
 .stProgress > div > div {
@@ -3580,10 +3604,14 @@ def atualizar_area_atual():
     for i, area in enumerate(st.session_state.areas):
         if area.get("ID") == id_area:
             st.session_state.areas[i]["Dados"] = st.session_state.dados.copy()
-            st.session_state.areas[i]["Aplicacoes"] = [
-                app for app in st.session_state.aplicacoes
-                if app.get("ID Área", id_area) == id_area
-            ]
+            # Sincroniza as aplicações da área SEM descartar nenhuma:
+            # adota as órfãs (sem ID) para a área atual e mantém todas as
+            # que já estão em memória. Nunca remove aplicações aqui — isso
+            # evita perda de dados ao salvar estoque/dados com contexto trocado.
+            for _app in st.session_state.aplicacoes:
+                if _app.get("ID Área", "") in ("", None):
+                    _app["ID Área"] = id_area
+            st.session_state.areas[i]["Aplicacoes"] = list(st.session_state.aplicacoes)
             st.session_state.areas[i]["Estoque"] = st.session_state.estoque.copy()
             break
     salvar_dados_iaagro()
@@ -4602,7 +4630,7 @@ menu = st.sidebar.radio(
         "📦 Operacional",
         "🔧 Máquinas",
         "🌍 Inteligência",
-        "🤖 Assistente IA",
+        "🤖 Assistente IA ✨",
         "📅 Planejamento de Safras",
         "📄 Relatório Final",
         "⚙️ Configurações"
@@ -7772,7 +7800,7 @@ if menu == "📦 Operacional":
                             "Lote": _lote_cat, "Estoque Mínimo": _estmin_cat,
                         })
                         success_box(f"✅ {_prod_sel['nome']} — {_qtd_cat} {_unid_cat} adicionado!")
-                    salvar_dados_iaagro()
+                    atualizar_area_atual()  # sincroniza área (preserva aplicações)
                     st.rerun()
                 else:
                     warning_box("Informe a quantidade.")
@@ -7821,7 +7849,7 @@ if menu == "📦 Operacional":
                         "Lote": lote_usar, "Estoque Mínimo": estmin_usar,
                     })
                     success_box(f"✅ {nome_usar} adicionado ao estoque.")
-                salvar_dados_iaagro()
+                atualizar_area_atual()  # sincroniza área (preserva aplicações)
                 st.rerun()
             else:
                 warning_box("Informe nome e quantidade.")
@@ -9891,7 +9919,7 @@ if menu == "🌍 Inteligência":
         st.info("Faça o upload do mapa de colheita para análise.")
 
 
-elif menu == "🤖 Assistente IA":
+elif menu == "🤖 Assistente IA ✨":
     st.markdown("""
     <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
     padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
