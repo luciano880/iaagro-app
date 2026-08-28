@@ -9848,15 +9848,17 @@ if menu == "🌍 Inteligência":
     st.markdown("""
     <div style='background:#0f3460;border-radius:10px;padding:12px 16px;
     border-left:5px solid #22c55e;margin-bottom:12px;'>
-    <b style='color:#22c55e;'>🛰️ Análise de Mapa de Colheita</b><br>
+    <b style='color:#22c55e;'>🛰️ Análise de Mapas de Precisão</b><br>
     <span style='color:#f1f5f9;font-size:13px;'>
-    Faça upload do mapa de colheita (imagem ou PDF) e a IA irá identificar
-    zonas de produtividade, variabilidade e recomendar manejo por zonas.
+    Faça upload de um mapa (imagem ou PDF) e a IA irá analisá-lo por zonas.
+    Funciona com <b>mapas de colheita</b> (produtividade), <b>mapas de aplicação
+    a taxa variável</b> (prescrição de adubo/calcário por zona) e mapas de
+    fertilidade. A IA identifica zonas, variabilidade e recomenda manejo.
     </span></div>
     """, unsafe_allow_html=True)
 
     _arquivo_mapa = st.file_uploader(
-        "📂 Upload do mapa de colheita (JPG, PNG, PDF)",
+        "📂 Upload do mapa (JPG, PNG, PDF)",
         type=["jpg","jpeg","png","pdf"],
         key="upload_mapa_colheita"
     )
@@ -9881,13 +9883,17 @@ if menu == "🌍 Inteligência":
                     import requests as _rq_mapa, base64 as _b64_mapa
                     _api_key_mapa = st.secrets.get("ANTHROPIC_API_KEY","")
 
-                    _txt_mapa = (f"Analise este mapa de colheita agrícola. "
-                                 f"Cultura: {cultura_limpa(_cultura_mc)}, Área: {_area_mc} ha. "
+                    _txt_mapa = (f"Analise este mapa de precisão agrícola (pode ser mapa de "
+                                 f"colheita/produtividade OU mapa de aplicação a taxa variável de "
+                                 f"insumos). Cultura: {cultura_limpa(_cultura_mc)}, Área: {_area_mc} ha. "
                                  f"Obs: {_obs_mc}. "
-                                 "Identifique: 1) Zonas de alta e baixa produtividade, "
-                                 "2) Variabilidade espacial, "
-                                 "3) Possíveis causas das variações, "
-                                 "4) Recomendações de manejo por zonas. "
+                                 "Primeiro identifique que tipo de mapa é. Depois analise: "
+                                 "1) Zonas de alta e baixa (produtividade ou dose aplicada), "
+                                 "2) Variabilidade espacial dentro do talhão, "
+                                 "3) Possíveis causas das variações (fertilidade, textura, relevo, compactação), "
+                                 "4) Recomendações práticas de manejo por zonas. "
+                                 "Se houver dados numéricos (taxa média, faixas, área por zona), "
+                                 "use-os na análise. "
                                  "Responda em português, de forma prática para o produtor.")
 
                     _content_mapa = []
