@@ -4633,7 +4633,7 @@ menu = st.sidebar.radio(
         "📦 Operacional",
         "🔧 Máquinas",
         "🌍 Inteligência",
-        "🤖 Assistente IA ✨",
+        "🧠 Assistente IA",
         "📅 Planejamento de Safras",
         "📄 Relatório Final",
         "⚙️ Configurações"
@@ -9857,7 +9857,7 @@ if menu == "🌍 Inteligência":
 
     if _arquivo_mapa:
         if _arquivo_mapa.type.startswith("image"):
-            st.image(_arquivo_mapa, caption="Mapa carregado", use_column_width=True)
+            st.image(_arquivo_mapa, caption="Mapa carregado", use_container_width=True)
         else:
             st.info(f"Arquivo PDF carregado: {_arquivo_mapa.name}")
 
@@ -9885,13 +9885,20 @@ if menu == "🌍 Inteligência":
                                  "Responda em português, de forma prática para o produtor.")
 
                     _content_mapa = []
-                    # Adiciona imagem se for imagem
+                    # Adiciona imagem OU PDF conforme o tipo do arquivo
+                    _arquivo_mapa.seek(0)
                     if _arquivo_mapa.type.startswith("image"):
                         _img_b64 = _b64_mapa.b64encode(_arquivo_mapa.read()).decode()
                         _ext = "jpeg" if "jpg" in _arquivo_mapa.type else "png"
                         _content_mapa.append({
                             "type": "image",
                             "source": {"type": "base64", "media_type": f"image/{_ext}", "data": _img_b64}
+                        })
+                    elif _arquivo_mapa.type == "application/pdf":
+                        _pdf_b64 = _b64_mapa.b64encode(_arquivo_mapa.read()).decode()
+                        _content_mapa.append({
+                            "type": "document",
+                            "source": {"type": "base64", "media_type": "application/pdf", "data": _pdf_b64}
                         })
                     _content_mapa.append({"type": "text", "text": _txt_mapa})
 
@@ -9900,17 +9907,23 @@ if menu == "🌍 Inteligência":
                         headers={
                             "x-api-key": _api_key_mapa,
                             "anthropic-version": "2023-06-01",
+                            "anthropic-beta": "pdfs-2024-09-25",
                             "content-type": "application/json",
                         },
                         json={
                             "model": "claude-sonnet-4-6",
-                            "max_tokens": 1500,
+                            "max_tokens": 2500,
                             "messages": [{"role":"user","content":_content_mapa}],
                         },
                         timeout=60
                     )
-                    _analise = _resp_mapa.json().get("content",[{}])[0].get("text","Sem resposta.")
-                    st.session_state["_analise_mapa"] = _analise
+                    _json_mapa = _resp_mapa.json()
+                    if "content" in _json_mapa and _json_mapa["content"]:
+                        _analise = _json_mapa["content"][0].get("text","Sem resposta.")
+                        st.session_state["_analise_mapa"] = _analise
+                    else:
+                        _erro_api = _json_mapa.get("error",{}).get("message","resposta inesperada da IA")
+                        st.error(f"Não foi possível analisar: {_erro_api}")
                 except Exception as e:
                     st.error(f"Erro na análise: {e}")
 
@@ -9922,7 +9935,7 @@ if menu == "🌍 Inteligência":
         st.info("Faça o upload do mapa de colheita para análise.")
 
 
-elif menu == "🤖 Assistente IA ✨":
+elif menu == "🧠 Assistente IA":
     st.markdown("""
     <div style='background:linear-gradient(135deg,#0f3460,#1a4a73);border-radius:16px;
     padding:20px 24px;margin-bottom:20px;border:1px solid #22c55e33;'>
