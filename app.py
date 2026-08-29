@@ -1751,6 +1751,11 @@ def carregar_area_por_id(id_area):
             st.session_state.dados = area.get("Dados", {}).copy()
             st.session_state.aplicacoes = area.get("Aplicacoes", []).copy()
             st.session_state.estoque = area.get("Estoque", []).copy()
+            # Recupera o desenho/croqui vinculado à área, se houver
+            if area.get("desenho"):
+                st.session_state.dados["desenho_talhao"] = area["desenho"]
+                if area.get("area_calculada_ha"):
+                    st.session_state.dados["area_calculada_ha"] = area["area_calculada_ha"]
             return True
     return False
 
@@ -5585,6 +5590,30 @@ if menu == "🌾 Lavoura":
         folium.Marker(location=[latitude, longitude], popup="Minha localização",
                       tooltip="Local atual", icon=folium.Icon(color="darkgreen", icon="leaf")
         ).add_to(mapa_folium)
+
+        # Se a área atual já tem um croqui salvo, mostra ele no mapa
+        _desenho_salvo = st.session_state.dados.get("desenho_talhao")
+        if _desenho_salvo and _desenho_salvo.get("geometry"):
+            try:
+                folium.GeoJson(
+                    _desenho_salvo,
+                    name="Croqui salvo",
+                    style_function=lambda x: {
+                        "fillColor": "#22c55e", "color": "#15803d",
+                        "weight": 3, "fillOpacity": 0.25,
+                    },
+                    tooltip="Talhão salvo",
+                ).add_to(mapa_folium)
+                # Centraliza o mapa no croqui salvo
+                _coords_salvas = _desenho_salvo["geometry"]["coordinates"][0]
+                _lats = [c[1] for c in _coords_salvas]
+                _lons = [c[0] for c in _coords_salvas]
+                mapa_folium.fit_bounds([[min(_lats), min(_lons)], [max(_lats), max(_lons)]])
+                st.success("📍 Esta área já tem um croqui salvo (mostrado em verde). "
+                           "Desenhe um novo apenas se quiser substituí-lo.")
+            except Exception:
+                pass
+
         dados_mapa_folium = st_folium(mapa_folium, width=900, height=500)
         st.subheader("💾 Salvar Desenho do Talhão")
 
