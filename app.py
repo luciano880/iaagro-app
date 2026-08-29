@@ -1674,6 +1674,11 @@ def salvar_dados_iaagro():
                                 st.query_params["_t1"] = _tk[:200]
                                 st.query_params["_t2"] = _tk[200:400]
                                 st.query_params["_t3"] = _tk[400:]
+                                _rfn = _novo.get("refresh_token","")
+                                if _rfn and st.session_state.get("sb_manter_login", True):
+                                    st.query_params["_rf1"] = _rfn[:200]
+                                    st.query_params["_rf2"] = _rfn[200:400]
+                                    st.query_params["_rf3"] = _rfn[400:]
                             except Exception:
                                 pass
                             ok2 = sb_salvar(_sb_url, _sb_key, _novo["token"], _sb_uid, dados_salvos)
@@ -1793,7 +1798,9 @@ def _tentar_autologin():
         _uid = params.get("_u", "")
         _pl  = params.get("_p", "free")
         _nm  = params.get("_n", "")
-        _rf  = params.get("_rf", "")
+        # Refresh token completo (3 partes). Compatível com formato antigo (_rf)
+        _rf  = (params.get("_rf1", "") + params.get("_rf2", "") + params.get("_rf3", "")) \
+               or params.get("_rf", "")
         if _tk and _uid and not st.session_state.get("logado"):
             # Tenta renovar token com refresh antes de carregar
             if _rf and _SUPABASE_ATIVO:
@@ -1830,7 +1837,9 @@ def _tentar_autologin():
                     st.query_params["_t2"] = _tk[200:400]
                     st.query_params["_t3"] = _tk[400:]
                     if _rf:
-                        st.query_params["_rf"] = _rf[:200]
+                        st.query_params["_rf1"] = _rf[:200]
+                        st.query_params["_rf2"] = _rf[200:400]
+                        st.query_params["_rf3"] = _rf[400:]
                 except Exception:
                     pass
                 return True
@@ -1919,13 +1928,17 @@ def tela_login():
                             try:
                                 _nome_url = (res["nome"] or res["email"]).replace(" ", "_")[:20]
                                 _tk_full = res["token"]
+                                _rf_full = res.get("refresh_token","")
                                 st.query_params["_u"] = res["user_id"]
                                 st.query_params["_p"] = st.session_state.sb_plano
                                 st.query_params["_n"] = _nome_url
                                 st.query_params["_t1"] = _tk_full[:200]
                                 st.query_params["_t2"] = _tk_full[200:400]
                                 st.query_params["_t3"] = _tk_full[400:]
-                                st.query_params["_rf"]  = res.get("refresh_token","")[:200]
+                                # Refresh token completo (pode passar de 200 chars)
+                                st.query_params["_rf1"] = _rf_full[:200]
+                                st.query_params["_rf2"] = _rf_full[200:400]
+                                st.query_params["_rf3"] = _rf_full[400:]
                             except Exception:
                                 pass
                         st.success(f"✅ Bem-vindo, {st.session_state.usuario_atual}!")
@@ -11738,7 +11751,8 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── Persiste token nos query_params e sessionStorage para sobreviver reload ──
-if st.session_state.get("sb_token") and st.session_state.get("sb_user_id"):
+if (st.session_state.get("sb_token") and st.session_state.get("sb_user_id")
+        and st.session_state.get("sb_manter_login", True)):
     _tk  = st.session_state.sb_token
     _uid = st.session_state.sb_user_id
     _pl  = st.session_state.get("sb_plano","free")
@@ -11753,7 +11767,9 @@ if st.session_state.get("sb_token") and st.session_state.get("sb_user_id"):
         st.query_params["_t2"] = _tk[200:400]
         st.query_params["_t3"] = _tk[400:]
         if _rf:
-            st.query_params["_rf"] = _rf[:200]
+            st.query_params["_rf1"] = _rf[:200]
+            st.query_params["_rf2"] = _rf[200:400]
+            st.query_params["_rf3"] = _rf[400:]
     except Exception:
         pass
     st.markdown(f"""
