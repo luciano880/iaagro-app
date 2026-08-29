@@ -1008,6 +1008,13 @@ def gerar_backup():
         "carencia_registros": st.session_state.get("carencia_registros", []),
         "dre_registros":      st.session_state.get("dre_registros", []),
         "calendario_eventos": st.session_state.get("calendario_eventos", []),
+        "harvest_historico":  st.session_state.get("harvest_historico", []),
+        "receituarios":       st.session_state.get("receituarios", []),
+        "safrinha_registros": st.session_state.get("safrinha_registros", []),
+        "fluxo_caixa":        st.session_state.get("fluxo_caixa", []),
+        "corretivos_aplicados": st.session_state.get("corretivos_aplicados", []),
+        "contratos_troca":    st.session_state.get("contratos_troca", []),
+        "segmento":           st.session_state.get("segmento", None),
         "email_config":       st.session_state.get("email_config", {}),
         "backup_data": str(datetime.now())
     }
@@ -1038,6 +1045,9 @@ def restaurar_backup(arquivo):
         st.session_state.harvest_historico   = dados.get("harvest_historico", [])
         st.session_state.receituarios        = dados.get("receituarios", [])
         st.session_state.safrinha_registros  = dados.get("safrinha_registros", [])
+        st.session_state.fluxo_caixa         = dados.get("fluxo_caixa", [])
+        st.session_state.corretivos_aplicados = dados.get("corretivos_aplicados", [])
+        st.session_state.contratos_troca     = dados.get("contratos_troca", [])
         st.session_state.segmento            = dados.get("segmento", None)
         if dados.get("email_config"):
             st.session_state.email_config = dados["email_config"]
