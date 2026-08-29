@@ -1014,6 +1014,9 @@ def gerar_backup():
         "fluxo_caixa":        st.session_state.get("fluxo_caixa", []),
         "corretivos_aplicados": st.session_state.get("corretivos_aplicados", []),
         "contratos_troca":    st.session_state.get("contratos_troca", []),
+        "planejamento_safras": st.session_state.get("planejamento_safras", []),
+        "maquinas":           st.session_state.get("maquinas", []),
+        "maquinas_revisoes":  st.session_state.get("maquinas_revisoes", []),
         "segmento":           st.session_state.get("segmento", None),
         "email_config":       st.session_state.get("email_config", {}),
         "backup_data": str(datetime.now())
@@ -1048,6 +1051,9 @@ def restaurar_backup(arquivo):
         st.session_state.fluxo_caixa         = dados.get("fluxo_caixa", [])
         st.session_state.corretivos_aplicados = dados.get("corretivos_aplicados", [])
         st.session_state.contratos_troca     = dados.get("contratos_troca", [])
+        st.session_state.planejamento_safras = dados.get("planejamento_safras", [])
+        st.session_state.maquinas            = dados.get("maquinas", [])
+        st.session_state.maquinas_revisoes   = dados.get("maquinas_revisoes", [])
         st.session_state.segmento            = dados.get("segmento", None)
         if dados.get("email_config"):
             st.session_state.email_config = dados["email_config"]
