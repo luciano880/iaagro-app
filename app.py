@@ -9163,6 +9163,8 @@ if menu == "📦 Operacional":
                         st.markdown("**✏️ Editar Aplicação**")
 
                         # ── REMOVER PRODUTO INDIVIDUAL (fora do form, botões diretos) ──
+                        if st.session_state.get("_msg_del_prod"):
+                            st.info(f"🔍 Última remoção: {st.session_state['_msg_del_prod']}")
                         _prods_atuais = aplic.get("Produtos", [])
                         if _prods_atuais:
                             st.markdown("**🧪 Produtos desta aplicação** — clique em 🗑️ para remover:")
@@ -9175,18 +9177,26 @@ if menu == "📦 Operacional":
                                     f"</div>", unsafe_allow_html=True)
                                 if _rc2.button("🗑️", key=f"btn_del_prod_{idx_a}_{_pi}",
                                                help="Remover este produto"):
-                                    # Localiza a aplicação real e remove só este produto (por índice)
-                                    _idx_orig_p = next((i for i,a in enumerate(st.session_state.aplicacoes)
-                                                       if a.get("Data") == aplic.get("Data") and
-                                                       a.get("Aplicação") == aplic.get("Aplicação")), None)
-                                    if _idx_orig_p is not None:
-                                        _lista_p = st.session_state.aplicacoes[_idx_orig_p].get("Produtos", [])
-                                        if 0 <= _pi < len(_lista_p):
-                                            _removido = _lista_p.pop(_pi)
-                                            st.session_state.aplicacoes[_idx_orig_p]["Produtos"] = _lista_p
-                                            salvar_dados_iaagro()
-                                            success_box(f"✅ Produto removido: {_removido.get('Produto','')}")
-                                            st.rerun()
+                                    # Remove pelo objeto real (aplic é o mesmo dict de session_state)
+                                    _lista_real = aplic.get("Produtos", [])
+                                    _antes = len(_lista_real)
+                                    if 0 <= _pi < len(_lista_real):
+                                        _removido = _lista_real.pop(_pi)  # muta a lista in-place
+                                        aplic["Produtos"] = _lista_real
+                                        # Reflete na área ativa também (as aplicações vivem lá dentro)
+                                        _idw = st.session_state.dados.get("id_area")
+                                        if _idw:
+                                            for _ar in st.session_state.areas:
+                                                if _ar.get("ID") == _idw:
+                                                    _ar["Aplicacoes"] = list(st.session_state.aplicacoes)
+                                                    break
+                                        salvar_dados_iaagro()
+                                        _depois = len(aplic.get("Produtos", []))
+                                        st.session_state["_msg_del_prod"] = (
+                                            f"Removido '{_removido.get('Produto','')}' — "
+                                            f"produtos: {_antes} → {_depois}"
+                                        )
+                                        st.rerun()
                             st.markdown("---")
 
                         with st.form(key=f"form_edit_aplic_{idx_a}"):
