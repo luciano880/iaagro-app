@@ -38,7 +38,8 @@ if platform.system() == "Windows":
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from reportlab.platypus import PageBreak
-from streamlit_js_eval import get_geolocation, streamlit_js_eval
+from streamlit_js_eval import (get_geolocation, streamlit_js_eval,
+                               set_local_storage, get_local_storage, remove_local_storage)
 from streamlit_folium import st_folium
 from folium.plugins import Draw
 from io import BytesIO
@@ -1829,11 +1830,8 @@ def _salvar_sessao_local(uid, plano, nome, token, refresh):
         import json as _json_ls
         _payload = _json_ls.dumps({
             "u": uid, "p": plano, "n": nome, "t": token, "rf": refresh
-        }).replace("\\", "\\\\").replace('"', '\\"')
-        streamlit_js_eval(
-            js_expressions=f'localStorage.setItem("iaagro_sessao", "{_payload}")',
-            key="ls_save_sessao"
-        )
+        })
+        set_local_storage("iaagro_sessao", _payload, component_key="ls_save_sessao")
     except Exception:
         pass
 
@@ -1841,10 +1839,7 @@ def _salvar_sessao_local(uid, plano, nome, token, refresh):
 def _limpar_sessao_local():
     """Remove a sessão do localStorage (usado no logout)."""
     try:
-        streamlit_js_eval(
-            js_expressions='localStorage.removeItem("iaagro_sessao")',
-            key="ls_clear_sessao"
-        )
+        remove_local_storage("iaagro_sessao", component_key="ls_clear_sessao")
     except Exception:
         pass
 
@@ -1868,22 +1863,25 @@ def _tentar_autologin():
         if not (_tk and _uid):
             try:
                 import json as _json_ls2
-                _raw = streamlit_js_eval(
-                    js_expressions='localStorage.getItem("iaagro_sessao")',
-                    key="ls_read_sessao"
-                )
+                _raw = get_local_storage("iaagro_sessao", component_key="ls_read_sessao")
                 # O componente é assíncrono: na 1ª passada retorna None enquanto carrega.
-                # Damos até 2 reruns pra ele responder antes de desistir.
+                # Damos até 3 reruns pra ele responder antes de desistir.
                 if _raw is None:
                     _tentativas = st.session_state.get("_ls_tentativas", 0)
-                    if _tentativas < 2:
+                    if _tentativas < 3:
                         st.session_state["_ls_tentativas"] = _tentativas + 1
                         import time as _time_ls
-                        _time_ls.sleep(0.3)
+                        _time_ls.sleep(0.4)
                         st.rerun()
                 if _raw:
                     st.session_state["_ls_tentativas"] = 0
-                    _sess = _json_ls2.loads(_raw)
+                    # get_local_storage já devolve o valor; pode vir como dict ou string JSON
+                    if isinstance(_raw, str):
+                        _sess = _json_ls2.loads(_raw)
+                    elif isinstance(_raw, dict):
+                        _sess = _raw
+                    else:
+                        _sess = {}
                     _tk  = _sess.get("t", "")
                     _uid = _sess.get("u", "")
                     _pl  = _sess.get("p", "free")
@@ -2377,6 +2375,7 @@ if st.sidebar.button("Sair", key="botao_sair"):
     st.session_state.sb_token      = ""
     st.session_state.sb_user_id    = ""
     st.session_state.sb_plano      = "free"
+    st.session_state["_ls_persistido"] = False
     try:
         st.query_params.clear()
     except Exception:
@@ -12022,4 +12021,9 @@ if (st.session_state.get("sb_token") and st.session_state.get("sb_user_id")
     }} catch(e) {{}}
     </script>
     """, unsafe_allow_html=True)
+    # Persiste também no localStorage (sobrevive ao fechamento do navegador),
+    # mas só uma vez por sessão pra não recriar o componente a cada render.
+    if not st.session_state.get("_ls_persistido"):
+        _salvar_sessao_local(_uid, _pl, _nm, _tk, _rf)
+        st.session_state["_ls_persistido"] = True
 
