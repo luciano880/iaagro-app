@@ -5089,20 +5089,20 @@ if menu == "🌾 Lavoura":
     else:
         tabela_areas = pd.DataFrame([
             {
-                "ID":               a["ID"],
-                "Fazenda":          a["Fazenda"],
-                "Talhão":          a["Talhão"],
+                "ID":               a.get("ID", "—"),
+                "Fazenda":          a.get("Fazenda", ""),
+                "Talhão":          a.get("Talhão", ""),
                 "Matricula":        a.get("Matricula", ""),
-                "Cidade/Estado":    a["Cidade/Estado"],
-                "Hectares":         a["Hectares"],
-                "Cultura":          a["Cultura"],
-                "Meta Produtividade": a["Meta Produtividade"]
+                "Cidade/Estado":    a.get("Cidade/Estado", ""),
+                "Hectares":         a.get("Hectares", 0),
+                "Cultura":          a.get("Cultura", ""),
+                "Meta Produtividade": a.get("Meta Produtividade", 0)
             }
             for a in st.session_state.areas
         ])
         st.dataframe(tabela_areas, use_container_width=True)
 
-        opcoes = [f"{area['ID']} - {area['Talhão']} - {area['Cultura']}" for area in st.session_state.areas]
+        opcoes = [f"{area.get('ID','—')} - {area.get('Talhão','')} - {area.get('Cultura','')}" for area in st.session_state.areas]
         escolha = st.selectbox("Selecionar área para trabalhar", opcoes, key="sel_selecionar__rea_2910")
 
         if st.button("Carregar Área Selecionada"):
@@ -5130,15 +5130,64 @@ if menu == "🌾 Lavoura":
             st.rerun()
 
         st.divider()
+        # ── EDITAR DADOS DE UMA ÁREA CADASTRADA ──
+        with st.expander("✏️ Editar dados de uma área cadastrada"):
+            st.caption("Corrija fazenda, talhão, matrícula, cidade, hectares, cultura ou meta "
+                       "sem precisar excluir e recadastrar. Os dados de solo e aplicações são preservados.")
+            _op_edit = [f"{area.get('ID','—')} - {area.get('Talhão','')} - {area.get('Cultura','')}"
+                        for area in st.session_state.areas]
+            _sel_edit = st.selectbox("Escolha a área para editar", _op_edit, key="sel_editar_area")
+            _idx_edit = _op_edit.index(_sel_edit)
+            _area_e = st.session_state.areas[_idx_edit]
+
+            with st.form(key="form_editar_area"):
+                _ce1, _ce2, _ce3 = st.columns(3)
+                _e_fazenda = _ce1.text_input("Fazenda", value=_area_e.get("Fazenda",""), key="edit_area_fazenda")
+                _e_talhao  = _ce2.text_input("Talhão", value=_area_e.get("Talhão",""), key="edit_area_talhao")
+                _e_matric  = _ce3.text_input("Matrícula", value=_area_e.get("Matricula",""), key="edit_area_matric")
+
+                _ce4, _ce5, _ce6 = st.columns(3)
+                _e_cidade  = _ce4.text_input("Cidade/Estado", value=_area_e.get("Cidade/Estado",""), key="edit_area_cidade")
+                _e_hectares= _ce5.number_input("Hectares", min_value=0.0,
+                    value=float(_area_e.get("Hectares",0) or 0), step=0.1, key="edit_area_hectares")
+                _culturas_op = ["Soja","Milho","Trigo","Feijão","Arroz","Algodão","Café","Cana","Pastagem","Outro"]
+                _cult_atual = _area_e.get("Cultura","Soja")
+                _cult_idx = _culturas_op.index(_cult_atual) if _cult_atual in _culturas_op else 0
+                _e_cultura = _ce6.selectbox("Cultura", _culturas_op, index=_cult_idx, key="edit_area_cultura")
+
+                _e_meta = st.number_input("Meta de Produtividade (sc/ha)", min_value=0.0,
+                    value=float(_area_e.get("Meta Produtividade",0) or 0), step=1.0, key="edit_area_meta")
+
+                _salvar_area = st.form_submit_button("💾 Salvar alterações da área", type="primary", use_container_width=True)
+                if _salvar_area:
+                    _area_e["Fazenda"]            = _e_fazenda
+                    _area_e["Talhão"]            = _e_talhao
+                    _area_e["Matricula"]          = _e_matric
+                    _area_e["Cidade/Estado"]      = _e_cidade
+                    _area_e["Hectares"]           = _e_hectares
+                    _area_e["Cultura"]            = _e_cultura
+                    _area_e["Meta Produtividade"] = _e_meta
+                    # Se for a área ativa, atualiza também os dados de trabalho
+                    if st.session_state.get("area_selecionada") == _area_e.get("ID"):
+                        st.session_state.dados.update({
+                            "fazenda": _e_fazenda, "talhao": _e_talhao, "cidade": _e_cidade,
+                            "area": _e_hectares, "cultura": _e_cultura, "produtividade": _e_meta,
+                        })
+                        _area_e["Dados"] = st.session_state.dados.copy()
+                    salvar_dados_iaagro()
+                    success_box(f"✅ Área {_area_e.get('ID','')} atualizada!")
+                    st.rerun()
+
+        st.divider()
         st.subheader("Excluir Área Individual")
         opcao_excluir = st.selectbox(
             "Escolha a área para excluir",
-            [f"{area['ID']} - {area['Talhão']} - {area['Cultura']}" for area in st.session_state.areas],
+            [f"{area.get('ID','—')} - {area.get('Talhão','')} - {area.get('Cultura','')}" for area in st.session_state.areas],
             key="excluir_area_select"
         )
         if st.button("Excluir Área Selecionada", key="excluir_area_btn"):
             indice_excluir = [
-                f"{area['ID']} - {area['Talhão']} - {area['Cultura']}"
+                f"{area.get('ID','—')} - {area.get('Talhão','')} - {area.get('Cultura','')}"
                 for area in st.session_state.areas
             ].index(opcao_excluir)
             area_excluida = st.session_state.areas[indice_excluir]["ID"]
