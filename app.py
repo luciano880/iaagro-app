@@ -8900,29 +8900,62 @@ if menu == "📦 Operacional":
         if st.session_state.aplicacoes:
             # Filtra por cultura ativa se houver
             _cult_pdf = st.session_state.get("aplic_cultura_ativa","")
-            _aplic_pdf = [a for a in st.session_state.aplicacoes
-                          if a.get("Cultura","") == _cult_pdf] if _cult_pdf else st.session_state.aplicacoes
+            _aplic_base = [a for a in st.session_state.aplicacoes
+                          if a.get("Cultura","") == _cult_pdf] if _cult_pdf else list(st.session_state.aplicacoes)
+
+            # ── Seleção de quais aplicações entram no PDF ──
+            st.markdown("**Selecione as aplicações que quer no PDF:**")
+            _modo_sel = st.radio(
+                "O que imprimir?",
+                ["Todas as aplicações", "Escolher aplicações específicas"],
+                key="radio_modo_pdf_aplic", horizontal=True, label_visibility="collapsed"
+            )
+
+            _aplic_pdf = _aplic_base
+            if _modo_sel == "Escolher aplicações específicas":
+                # Monta rótulos únicos com índice, estádio, data e produtos
+                _labels_pdf = {}
+                for _ipa, _ap in enumerate(_aplic_base):
+                    _est = _ap.get("Estádio", _ap.get("Aplicação", "Aplicação"))
+                    _dt  = _ap.get("Data", "")
+                    _prods = ", ".join(p.get("Produto","") for p in _ap.get("Produtos",[])[:2])
+                    _mais = "..." if len(_ap.get("Produtos",[])) > 2 else ""
+                    _lbl = f"[{_ipa+1}] {_est}"
+                    if _dt:   _lbl += f" — {_dt}"
+                    if _prods: _lbl += f" | {_prods}{_mais}"
+                    _labels_pdf[_lbl] = _ipa
+                _escolhidas = st.multiselect(
+                    "Marque as aplicações:",
+                    list(_labels_pdf.keys()),
+                    default=list(_labels_pdf.keys()),  # começa com todas marcadas
+                    key="multi_sel_pdf_aplic"
+                )
+                _aplic_pdf = [_aplic_base[_labels_pdf[_l]] for _l in _escolhidas]
+                st.caption(f"✅ {len(_aplic_pdf)} de {len(_aplic_base)} aplicação(ões) selecionada(s).")
 
             _pc_pdf1, _pc_pdf2 = st.columns(2)
             if _pc_pdf1.button(
-                f"📄 Gerar PDF — {_cult_pdf.split(' ',1)[-1] if _cult_pdf else 'Todas as Culturas'}",
+                f"📄 Gerar PDF ({len(_aplic_pdf)} aplicação(ões))",
                 key="btn_gerar_pdf_aplic", use_container_width=True, type="primary"):
-                try:
-                    _d = st.session_state.dados
-                    _cult_nome = _cult_pdf.split(" ",1)[-1] if _cult_pdf else cultura_limpa(_d.get("cultura",""))
-                    _ha_pdf = st.session_state.get("aplic_ha_ativo", _d.get("area",0))
-                    _pdf_bytes = gerar_pdf_programacao_aplicacoes(
-                        aplicacoes = _aplic_pdf,
-                        fazenda    = _d.get("fazenda",""),
-                        talhao     = _d.get("talhao",""),
-                        cultura    = _cult_nome,
-                        area_ha    = _ha_pdf,
-                        operador   = _d.get("operador",""),
-                    )
-                    st.session_state["_pdf_aplic"] = _pdf_bytes
-                    st.success(f"✅ PDF gerado! {len(_aplic_pdf)} aplicação(ões).")
-                except Exception as e:
-                    st.error(f"Erro ao gerar PDF: {e}")
+                if not _aplic_pdf:
+                    st.warning("⚠️ Selecione ao menos uma aplicação para gerar o PDF.")
+                else:
+                    try:
+                        _d = st.session_state.dados
+                        _cult_nome = _cult_pdf.split(" ",1)[-1] if _cult_pdf else cultura_limpa(_d.get("cultura",""))
+                        _ha_pdf = st.session_state.get("aplic_ha_ativo", _d.get("area",0))
+                        _pdf_bytes = gerar_pdf_programacao_aplicacoes(
+                            aplicacoes = _aplic_pdf,
+                            fazenda    = _d.get("fazenda",""),
+                            talhao     = _d.get("talhao",""),
+                            cultura    = _cult_nome,
+                            area_ha    = _ha_pdf,
+                            operador   = _d.get("operador",""),
+                        )
+                        st.session_state["_pdf_aplic"] = _pdf_bytes
+                        st.success(f"✅ PDF gerado! {len(_aplic_pdf)} aplicação(ões).")
+                    except Exception as e:
+                        st.error(f"Erro ao gerar PDF: {e}")
 
             if _pc_pdf2.button("🔄 Nova Cultura / Limpar seleção",
                                key="btn_pdf_nova_cultura", use_container_width=True):
@@ -8931,7 +8964,7 @@ if menu == "📦 Operacional":
                 st.rerun()
 
             if st.session_state.get("_pdf_aplic"):
-                _nome_pdf = (_cult_pdf.split(" ",1)[-1].replace(" ","_") if _cult_pdf else "todas")
+                _nome_pdf = (_cult_pdf.split(" ",1)[-1].replace(" ","_") if _cult_pdf else "aplicacoes")
                 st.download_button(
                     label="⬇️ Baixar PDF",
                     data=st.session_state["_pdf_aplic"],
@@ -9163,8 +9196,6 @@ if menu == "📦 Operacional":
                         st.markdown("**✏️ Editar Aplicação**")
 
                         # ── REMOVER PRODUTO INDIVIDUAL (fora do form, botões diretos) ──
-                        if st.session_state.get("_msg_del_prod"):
-                            st.info(f"🔍 Última remoção: {st.session_state['_msg_del_prod']}")
                         _prods_atuais = aplic.get("Produtos", [])
                         if _prods_atuais:
                             st.markdown("**🧪 Produtos desta aplicação** — clique em 🗑️ para remover:")
@@ -9179,7 +9210,6 @@ if menu == "📦 Operacional":
                                                help="Remover este produto"):
                                     # Remove pelo objeto real (aplic é o mesmo dict de session_state)
                                     _lista_real = aplic.get("Produtos", [])
-                                    _antes = len(_lista_real)
                                     if 0 <= _pi < len(_lista_real):
                                         _removido = _lista_real.pop(_pi)  # muta a lista in-place
                                         aplic["Produtos"] = _lista_real
@@ -9191,11 +9221,7 @@ if menu == "📦 Operacional":
                                                     _ar["Aplicacoes"] = list(st.session_state.aplicacoes)
                                                     break
                                         salvar_dados_iaagro()
-                                        _depois = len(aplic.get("Produtos", []))
-                                        st.session_state["_msg_del_prod"] = (
-                                            f"Removido '{_removido.get('Produto','')}' — "
-                                            f"produtos: {_antes} → {_depois}"
-                                        )
+                                        success_box(f"✅ Produto removido: {_removido.get('Produto','')}")
                                         st.rerun()
                             st.markdown("---")
 
