@@ -124,6 +124,21 @@ html, body, [data-testid="stAppViewContainer"],
     background: linear-gradient(160deg, #0d2137 0%, #123354 50%, #1a4a73 100%) !important;
 }
 
+/* ── Esconde os iframes invisíveis do streamlit_js_eval (localStorage/geolocation) ──
+   Eles não têm conteúdo visual mas ocupam espaço e criam uma faixa escura. */
+iframe[title="streamlit_js_eval.streamlit_js_eval"],
+[data-testid="stIFrame"][title*="streamlit_js_eval"],
+.element-container:has(iframe[title*="streamlit_js_eval"]) {
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    display: block !important;
+    visibility: hidden !important;
+}
+
 /* ── TEXTO GERAL ── */
 p, span, div, li, label,
 .stMarkdown p, .stMarkdown li,
@@ -1857,7 +1872,17 @@ def _tentar_autologin():
                     js_expressions='localStorage.getItem("iaagro_sessao")',
                     key="ls_read_sessao"
                 )
+                # O componente é assíncrono: na 1ª passada retorna None enquanto carrega.
+                # Damos até 2 reruns pra ele responder antes de desistir.
+                if _raw is None:
+                    _tentativas = st.session_state.get("_ls_tentativas", 0)
+                    if _tentativas < 2:
+                        st.session_state["_ls_tentativas"] = _tentativas + 1
+                        import time as _time_ls
+                        _time_ls.sleep(0.3)
+                        st.rerun()
                 if _raw:
+                    st.session_state["_ls_tentativas"] = 0
                     _sess = _json_ls2.loads(_raw)
                     _tk  = _sess.get("t", "")
                     _uid = _sess.get("u", "")
