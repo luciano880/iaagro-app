@@ -8898,47 +8898,36 @@ if menu == "📦 Operacional":
         st.divider()
         st.subheader("📋 Histórico de Aplicações")
         if st.session_state.aplicacoes:
-            # Filtra por cultura ativa se houver
-            _cult_pdf = st.session_state.get("aplic_cultura_ativa","")
-            _aplic_base = [a for a in st.session_state.aplicacoes
-                          if a.get("Cultura","") == _cult_pdf] if _cult_pdf else list(st.session_state.aplicacoes)
+            # ── Filtro por cultura para o PDF ──
+            # Lista de culturas presentes nas aplicações
+            _culturas_disp = list(dict.fromkeys(
+                a.get("Cultura","") for a in st.session_state.aplicacoes if a.get("Cultura","")
+            ))
+            _opcoes_cult_pdf = ["Todas as culturas"] + _culturas_disp
 
-            # ── Seleção de quais aplicações entram no PDF ──
-            st.markdown("**Selecione as aplicações que quer no PDF:**")
-            _modo_sel = st.radio(
-                "O que imprimir?",
-                ["Todas as aplicações", "Escolher aplicações específicas"],
-                key="radio_modo_pdf_aplic", horizontal=True, label_visibility="collapsed"
+            st.markdown("**Filtrar por cultura para imprimir:**")
+            _cult_escolhida = st.selectbox(
+                "Cultura",
+                _opcoes_cult_pdf,
+                key="sel_cult_pdf_aplic",
+                label_visibility="collapsed"
             )
 
-            _aplic_pdf = _aplic_base
-            if _modo_sel == "Escolher aplicações específicas":
-                # Monta rótulos únicos com índice, estádio, data e produtos
-                _labels_pdf = {}
-                for _ipa, _ap in enumerate(_aplic_base):
-                    _est = _ap.get("Estádio", _ap.get("Aplicação", "Aplicação"))
-                    _dt  = _ap.get("Data", "")
-                    _prods = ", ".join(p.get("Produto","") for p in _ap.get("Produtos",[])[:2])
-                    _mais = "..." if len(_ap.get("Produtos",[])) > 2 else ""
-                    _lbl = f"[{_ipa+1}] {_est}"
-                    if _dt:   _lbl += f" — {_dt}"
-                    if _prods: _lbl += f" | {_prods}{_mais}"
-                    _labels_pdf[_lbl] = _ipa
-                _escolhidas = st.multiselect(
-                    "Marque as aplicações:",
-                    list(_labels_pdf.keys()),
-                    default=list(_labels_pdf.keys()),  # começa com todas marcadas
-                    key="multi_sel_pdf_aplic"
-                )
-                _aplic_pdf = [_aplic_base[_labels_pdf[_l]] for _l in _escolhidas]
-                st.caption(f"✅ {len(_aplic_pdf)} de {len(_aplic_base)} aplicação(ões) selecionada(s).")
+            if _cult_escolhida == "Todas as culturas":
+                _aplic_pdf = list(st.session_state.aplicacoes)
+                _cult_pdf = ""
+            else:
+                _aplic_pdf = [a for a in st.session_state.aplicacoes
+                              if a.get("Cultura","") == _cult_escolhida]
+                _cult_pdf = _cult_escolhida
+            st.caption(f"✅ {len(_aplic_pdf)} aplicação(ões) nesta seleção.")
 
             _pc_pdf1, _pc_pdf2 = st.columns(2)
             if _pc_pdf1.button(
                 f"📄 Gerar PDF ({len(_aplic_pdf)} aplicação(ões))",
                 key="btn_gerar_pdf_aplic", use_container_width=True, type="primary"):
                 if not _aplic_pdf:
-                    st.warning("⚠️ Selecione ao menos uma aplicação para gerar o PDF.")
+                    st.warning("⚠️ Não há aplicações para essa cultura.")
                 else:
                     try:
                         _d = st.session_state.dados
@@ -8964,7 +8953,7 @@ if menu == "📦 Operacional":
                 st.rerun()
 
             if st.session_state.get("_pdf_aplic"):
-                _nome_pdf = (_cult_pdf.split(" ",1)[-1].replace(" ","_") if _cult_pdf else "aplicacoes")
+                _nome_pdf = (_cult_pdf.split(" ",1)[-1].replace(" ","_") if _cult_pdf else "todas_culturas")
                 st.download_button(
                     label="⬇️ Baixar PDF",
                     data=st.session_state["_pdf_aplic"],
