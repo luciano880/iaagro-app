@@ -38,7 +38,7 @@ if platform.system() == "Windows":
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from reportlab.platypus import PageBreak
-from streamlit_js_eval import get_geolocation
+from streamlit_js_eval import get_geolocation, streamlit_js_eval
 from streamlit_folium import st_folium
 from folium.plugins import Draw
 from io import BytesIO
@@ -1808,6 +1808,32 @@ _SUPABASE_ATIVO = bool(_SB_URL and _SB_KEY and _SB_DISPONIVEL)
 # Quando usuário recarrega a página, o token
 # salvo nos query_params restaura a sessão
 # ─────────────────────────────────────────────
+def _salvar_sessao_local(uid, plano, nome, token, refresh):
+    """Salva a sessão no localStorage do navegador (persiste entre aberturas)."""
+    try:
+        import json as _json_ls
+        _payload = _json_ls.dumps({
+            "u": uid, "p": plano, "n": nome, "t": token, "rf": refresh
+        }).replace("\\", "\\\\").replace('"', '\\"')
+        streamlit_js_eval(
+            js_expressions=f'localStorage.setItem("iaagro_sessao", "{_payload}")',
+            key="ls_save_sessao"
+        )
+    except Exception:
+        pass
+
+
+def _limpar_sessao_local():
+    """Remove a sessão do localStorage (usado no logout)."""
+    try:
+        streamlit_js_eval(
+            js_expressions='localStorage.removeItem("iaagro_sessao")',
+            key="ls_clear_sessao"
+        )
+    except Exception:
+        pass
+
+
 def _tentar_autologin():
     """Tenta restaurar sessão via query_params após reload."""
     try:
@@ -1822,6 +1848,24 @@ def _tentar_autologin():
         # Refresh token completo (3 partes). Compatível com formato antigo (_rf)
         _rf  = (params.get("_rf1", "") + params.get("_rf2", "") + params.get("_rf3", "")) \
                or params.get("_rf", "")
+
+        # Se não achou na URL, tenta o localStorage do navegador (mais persistente)
+        if not (_tk and _uid):
+            try:
+                import json as _json_ls2
+                _raw = streamlit_js_eval(
+                    js_expressions='localStorage.getItem("iaagro_sessao")',
+                    key="ls_read_sessao"
+                )
+                if _raw:
+                    _sess = _json_ls2.loads(_raw)
+                    _tk  = _sess.get("t", "")
+                    _uid = _sess.get("u", "")
+                    _pl  = _sess.get("p", "free")
+                    _nm  = _sess.get("n", "")
+                    _rf  = _sess.get("rf", "")
+            except Exception:
+                pass
         if _tk and _uid and not st.session_state.get("logado"):
             # Tenta renovar token com refresh antes de carregar
             if _rf and _SUPABASE_ATIVO:
@@ -1863,6 +1907,10 @@ def _tentar_autologin():
                         st.query_params["_rf3"] = _rf[400:]
                 except Exception:
                     pass
+                # Renova também no localStorage (persistência real)
+                if st.session_state.get("sb_manter_login", True):
+                    _salvar_sessao_local(_uid, st.session_state.sb_plano,
+                                         (_nm or "Usuário"), _tk, _rf)
                 return True
     except Exception:
         pass
@@ -1960,6 +2008,9 @@ def tela_login():
                                 st.query_params["_rf1"] = _rf_full[:200]
                                 st.query_params["_rf2"] = _rf_full[200:400]
                                 st.query_params["_rf3"] = _rf_full[400:]
+                                # Salva também no localStorage do navegador (persistência real)
+                                _salvar_sessao_local(res["user_id"], st.session_state.sb_plano,
+                                                     _nome_url, _tk_full, _rf_full)
                             except Exception:
                                 pass
                         st.success(f"✅ Bem-vindo, {st.session_state.usuario_atual}!")
@@ -2305,6 +2356,7 @@ if st.sidebar.button("Sair", key="botao_sair"):
         st.query_params.clear()
     except Exception:
         pass
+    _limpar_sessao_local()
     st.rerun()
 
 # Status do último salvamento (debug)
@@ -7036,13 +7088,21 @@ if menu == "💰 Financeiro":
             </span></div>""", unsafe_allow_html=True)
 
             # Remover aplicação — seletor separado (botões não cabem na tabela HTML)
-            with st.expander("🗑️ Remover uma aplicação registrada"):
-                _opcoes_del = {
-                    f"{ap.get('Estádio', ap.get('Aplicação','Aplicação'))} — "
-                    f"{', '.join(p.get('Produto','') for p in ap.get('Produtos',[])[:3])}"
-                    f"{'...' if len(ap.get('Produtos',[]))>3 else ''}": _i
-                    for _i, ap in enumerate(st.session_state.aplicacoes)
-                }
+            with st.expander("🗑️ Remover uma aplicação registrada", expanded=False):
+                st.caption("Se você registrou uma aplicação duplicada por engano, remova aqui. "
+                           "A data e os produtos ajudam a identificar qual remover.")
+                _opcoes_del = {}
+                for _i, ap in enumerate(st.session_state.aplicacoes):
+                    _est = ap.get('Estádio', ap.get('Aplicação', 'Aplicação'))
+                    _dt  = ap.get('Data', ap.get('data', ''))
+                    _prods = ', '.join(p.get('Produto','') for p in ap.get('Produtos',[])[:3])
+                    _reticencias = '...' if len(ap.get('Produtos',[])) > 3 else ''
+                    _label = f"[{_i+1}] {_est}"
+                    if _dt:
+                        _label += f" — {_dt}"
+                    if _prods:
+                        _label += f" | {_prods}{_reticencias}"
+                    _opcoes_del[_label] = _i
                 if _opcoes_del:
                     _sel_del = st.selectbox("Escolha a aplicação para remover:",
                                             list(_opcoes_del.keys()), key="sel_del_aplic")
@@ -8651,10 +8711,17 @@ if menu == "📦 Operacional":
 
         produtos_aplic = []
         _custo_total_aplic = 0.0
+        # Opção de digitar um produto que não está no estoque
+        _opcoes_prod = _nomes_estoque + ["✏️ Outro (digitar manualmente)"]
         for i in range(n_produtos):
             st.markdown(f"**Produto {i+1}**")
             col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([3,2,1,1,2])
-            _prod  = col_p1.selectbox("Produto",   _nomes_estoque, key=f"sel_prod_aplic_{i}")
+            _prod_sel = col_p1.selectbox("Produto", _opcoes_prod, key=f"sel_prod_aplic_{i}")
+            if _prod_sel == "✏️ Outro (digitar manualmente)":
+                _prod = col_p1.text_input("Digite o nome do produto", key=f"txt_prod_manual_{i}",
+                                          placeholder="Ex: HERB. PAXEO 880GR")
+            else:
+                _prod = _prod_sel
             _tipo_p= col_p2.selectbox("Tipo",       TIPOS_PRODUTO,  key=f"sel_tipo_prod_{i}")
             _dose  = col_p3.number_input("Dose/ha", min_value=0.0,  key=f"num_dose_aplic_{i}")
             _unid  = col_p4.selectbox("Un.", ["L/ha","mL/ha","kg/ha","g/ha"], key=f"sel_unid_aplic_{i}")
