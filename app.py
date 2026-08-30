@@ -9087,6 +9087,34 @@ if menu == "📦 Operacional":
                     if st.session_state[_edit_key]:
                         st.markdown("---")
                         st.markdown("**✏️ Editar Aplicação**")
+
+                        # ── REMOVER PRODUTO INDIVIDUAL (fora do form, botões diretos) ──
+                        _prods_atuais = aplic.get("Produtos", [])
+                        if _prods_atuais:
+                            st.markdown("**🧪 Produtos desta aplicação** — clique em 🗑️ para remover:")
+                            for _pi, _p in enumerate(list(_prods_atuais)):
+                                _rc1, _rc2 = st.columns([5, 1])
+                                _rc1.markdown(
+                                    f"<div style='padding:6px 0;color:#cbd5e1;font-size:13px;'>"
+                                    f"<b>{_p.get('Produto','—')}</b> — "
+                                    f"{_p.get('Dose por ha',0)} {_p.get('Unidade','')}"
+                                    f"</div>", unsafe_allow_html=True)
+                                if _rc2.button("🗑️", key=f"btn_del_prod_{idx_a}_{_pi}",
+                                               help="Remover este produto"):
+                                    # Localiza a aplicação real e remove só este produto (por índice)
+                                    _idx_orig_p = next((i for i,a in enumerate(st.session_state.aplicacoes)
+                                                       if a.get("Data") == aplic.get("Data") and
+                                                       a.get("Aplicação") == aplic.get("Aplicação")), None)
+                                    if _idx_orig_p is not None:
+                                        _lista_p = st.session_state.aplicacoes[_idx_orig_p].get("Produtos", [])
+                                        if 0 <= _pi < len(_lista_p):
+                                            _removido = _lista_p.pop(_pi)
+                                            st.session_state.aplicacoes[_idx_orig_p]["Produtos"] = _lista_p
+                                            salvar_dados_iaagro()
+                                            success_box(f"✅ Produto removido: {_removido.get('Produto','')}")
+                                            st.rerun()
+                            st.markdown("---")
+
                         with st.form(key=f"form_edit_aplic_{idx_a}"):
                             _e1, _e2, _e3 = st.columns(3)
                             _edt_data     = _e1.text_input("Data (dd/mm/aaaa)", value=aplic.get("Data",""), key=f"edt_data_{idx_a}")
@@ -9103,14 +9131,13 @@ if menu == "📦 Operacional":
 
                             _edt_clima = st.text_input("Clima na aplicação", value=aplic.get("Clima aplicação",""), key=f"edt_clima_{idx_a}")
 
-                            # Produtos
+                            # Produtos — edição dos valores (a remoção fica nos botões acima)
                             _produtos_orig = aplic.get("Produtos",[])
                             _edt_produtos = []
-                            _algum_removido = False
                             if _produtos_orig:
-                                st.markdown("**🧪 Produtos:** _(marque 🗑️ para remover um produto ao salvar)_")
+                                st.markdown("**🧪 Editar valores dos produtos:**")
                                 for _pi, _p in enumerate(_produtos_orig):
-                                    _pc1, _pc2, _pc3, _pc4, _pc5 = st.columns([2,1,1,1,1])
+                                    _pc1, _pc2, _pc3, _pc4 = st.columns([2,1,1,1])
                                     _p_nome = _pc1.text_input("Produto", value=_p.get("Produto",""),
                                         key=f"edt_prod_nome_{idx_a}_{_pi}")
                                     _p_dose = _pc2.number_input("Dose/ha", min_value=0.0,
@@ -9119,21 +9146,16 @@ if menu == "📦 Operacional":
                                         key=f"edt_prod_unid_{idx_a}_{_pi}")
                                     _p_preco = _pc4.number_input("R$ unit.", min_value=0.0,
                                         value=float(_p.get("Preço Unitário R$",0) or 0), key=f"edt_prod_preco_{idx_a}_{_pi}")
-                                    _p_remover = _pc5.checkbox("🗑️ Remover", key=f"edt_prod_del_{idx_a}_{_pi}")
-                                    # Sempre cria os widgets; só decide no fim se inclui ou não
                                     _p_total_novo = round(_p_dose * _edt_area, 3)
                                     _u_low = (_p_unid or "").lower()
                                     _p_qtd_base = _p_total_novo/1000 if ("ml" in _u_low or _u_low in ("g","g/ha")) else _p_total_novo
-                                    if _p_remover:
-                                        _algum_removido = True
-                                    else:
-                                        _edt_produtos.append({
-                                            **_p,
-                                            "Produto": _p_nome, "Dose por ha": _p_dose, "Unidade": _p_unid,
-                                            "Total usado": _p_total_novo,
-                                            "Preço Unitário R$": _p_preco,
-                                            "Custo Total R$": round(_p_qtd_base * _p_preco, 2),
-                                        })
+                                    _edt_produtos.append({
+                                        **_p,
+                                        "Produto": _p_nome, "Dose por ha": _p_dose, "Unidade": _p_unid,
+                                        "Total usado": _p_total_novo,
+                                        "Preço Unitário R$": _p_preco,
+                                        "Custo Total R$": round(_p_qtd_base * _p_preco, 2),
+                                    })
 
                             # Variedades de sementes (plantio)
                             _vars_orig = aplic.get("Dados Plantio", {}).get("variedades", [])
@@ -9180,10 +9202,7 @@ if menu == "📦 Operacional":
                                         _reg["Dados Plantio"]["variedades"] = _edt_variedades
                                     salvar_dados_iaagro()
                                     st.session_state[_edit_key] = False
-                                    if _algum_removido:
-                                        success_box("✅ Produto(s) removido(s) e aplicação atualizada!")
-                                    else:
-                                        success_box("✅ Aplicação atualizada!")
+                                    success_box("✅ Aplicação atualizada!")
                                     st.rerun()
                                 else:
                                     error_box("Não foi possível localizar a aplicação original para salvar a edição.")
