@@ -5124,6 +5124,11 @@ if menu == "🌾 Lavoura":
             })
             st.session_state.aplicacoes = area.get("Aplicacoes", []).copy()
             st.session_state.estoque    = area.get("Estoque", []).copy()
+            # Restaura o croqui/desenho vinculado à área, se houver
+            if area.get("desenho"):
+                st.session_state.dados["desenho_talhao"] = area["desenho"]
+                if area.get("area_calculada_ha"):
+                    st.session_state.dados["area_calculada_ha"] = area["area_calculada_ha"]
             salvar_dados_iaagro()
             success_box(f"✅ Área {area['ID']} carregada! {('Análise de solo disponível ✅' if 'ph' in st.session_state.dados else 'Sem análise de solo ainda.')}")
             st.rerun()
@@ -5778,7 +5783,8 @@ if menu == "🌾 Lavoura":
             success_box(f"Área calculada automaticamente: {area_calculada:.2f} ha")
 
             # Seleção da área para vincular o desenho
-            areas_disp = [f"{a.get('Fazenda','')} — {a.get('Talhão','')}" for a in st.session_state.areas]
+            areas_disp = [f"{a.get('Fazenda','')} — {a.get('Talhão','')} [{a.get('ID','')}]"
+                          for a in st.session_state.areas]
             area_vincular = st.selectbox("Vincular desenho à área:", ["— Não vincular —"] + areas_disp, key="sel_area_croqui")
 
             if st.button("Salvar desenho no talhão", key="salvar_desenho_talhao"):
@@ -5790,7 +5796,8 @@ if menu == "🌾 Lavoura":
                 # Salva no session_state global
                 st.session_state.dados["desenho_talhao"] = desenho
 
-                # Salva também na área específica se selecionada
+                # Salva também na área específica se selecionada (o [ID] no rótulo
+                # garante que vincula na área certa mesmo com nomes repetidos)
                 if area_vincular != "— Não vincular —":
                     idx_area = areas_disp.index(area_vincular)
                     st.session_state.areas[idx_area]["desenho"] = desenho
@@ -8170,7 +8177,7 @@ if menu == "📦 Operacional":
                                     "Estoque Mínimo": 5.0,
                                 })
                             _importados += 1
-                        salvar_dados_iaagro()
+                        atualizar_area_atual()  # vincula estoque importado à área (preserva aplicações)
                         success_box(f"✅ {_importados} produto(s) importado(s) da NF-e para o estoque!")
                         st.rerun()
                 else:
@@ -8274,12 +8281,12 @@ if menu == "📦 Operacional":
                     _item_edit["Quantidade"] = _nova_qtd
                     _item_edit["Estoque Mínimo"] = _novo_min
                     _item_edit["Valor Total R$"] = round(_nova_qtd * float(_item_edit.get("Valor Unitário R$",0)), 2)
-                    salvar_dados_iaagro()
+                    atualizar_area_atual()  # vincula à área (preserva aplicações)
                     success_box(f"✅ {_prod_edit} atualizado: {_nova_qtd} {_item_edit.get('Unidade','')}")
                     st.rerun()
                 if col_btn2.button("🗑️ Excluir produto", key="btn_excluir_est", use_container_width=True):
                     st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != _prod_edit]
-                    salvar_dados_iaagro()
+                    atualizar_area_atual()  # vincula à área (preserva aplicações)
                     success_box(f"{_prod_edit} removido.")
                     st.rerun()
     else:
