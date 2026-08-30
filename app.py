@@ -9107,9 +9107,9 @@ if menu == "📦 Operacional":
                             _produtos_orig = aplic.get("Produtos",[])
                             _edt_produtos = []
                             if _produtos_orig:
-                                st.markdown("**🧪 Produtos:**")
+                                st.markdown("**🧪 Produtos:** _(marque 🗑️ para remover um produto ao salvar)_")
                                 for _pi, _p in enumerate(_produtos_orig):
-                                    _pc1, _pc2, _pc3, _pc4 = st.columns([2,1,1,1])
+                                    _pc1, _pc2, _pc3, _pc4, _pc5 = st.columns([2,1,1,1,1])
                                     _p_nome = _pc1.text_input("Produto", value=_p.get("Produto",""),
                                         key=f"edt_prod_nome_{idx_a}_{_pi}")
                                     _p_dose = _pc2.number_input("Dose/ha", min_value=0.0,
@@ -9118,6 +9118,9 @@ if menu == "📦 Operacional":
                                         key=f"edt_prod_unid_{idx_a}_{_pi}")
                                     _p_preco = _pc4.number_input("R$ unit.", min_value=0.0,
                                         value=float(_p.get("Preço Unitário R$",0) or 0), key=f"edt_prod_preco_{idx_a}_{_pi}")
+                                    _p_remover = _pc5.checkbox("🗑️ Remover", key=f"edt_prod_del_{idx_a}_{_pi}")
+                                    if _p_remover:
+                                        continue  # pula este produto — não entra na lista salva
                                     _p_total_novo = round(_p_dose * _edt_area, 3)
                                     _u_low = (_p_unid or "").lower()
                                     _p_qtd_base = _p_total_novo/1000 if ("ml" in _u_low or _u_low in ("g","g/ha")) else _p_total_novo
