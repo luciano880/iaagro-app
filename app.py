@@ -9106,6 +9106,7 @@ if menu == "📦 Operacional":
                             # Produtos
                             _produtos_orig = aplic.get("Produtos",[])
                             _edt_produtos = []
+                            _algum_removido = False
                             if _produtos_orig:
                                 st.markdown("**🧪 Produtos:** _(marque 🗑️ para remover um produto ao salvar)_")
                                 for _pi, _p in enumerate(_produtos_orig):
@@ -9119,18 +9120,20 @@ if menu == "📦 Operacional":
                                     _p_preco = _pc4.number_input("R$ unit.", min_value=0.0,
                                         value=float(_p.get("Preço Unitário R$",0) or 0), key=f"edt_prod_preco_{idx_a}_{_pi}")
                                     _p_remover = _pc5.checkbox("🗑️ Remover", key=f"edt_prod_del_{idx_a}_{_pi}")
-                                    if _p_remover:
-                                        continue  # pula este produto — não entra na lista salva
+                                    # Sempre cria os widgets; só decide no fim se inclui ou não
                                     _p_total_novo = round(_p_dose * _edt_area, 3)
                                     _u_low = (_p_unid or "").lower()
                                     _p_qtd_base = _p_total_novo/1000 if ("ml" in _u_low or _u_low in ("g","g/ha")) else _p_total_novo
-                                    _edt_produtos.append({
-                                        **_p,
-                                        "Produto": _p_nome, "Dose por ha": _p_dose, "Unidade": _p_unid,
-                                        "Total usado": _p_total_novo,
-                                        "Preço Unitário R$": _p_preco,
-                                        "Custo Total R$": round(_p_qtd_base * _p_preco, 2),
-                                    })
+                                    if _p_remover:
+                                        _algum_removido = True
+                                    else:
+                                        _edt_produtos.append({
+                                            **_p,
+                                            "Produto": _p_nome, "Dose por ha": _p_dose, "Unidade": _p_unid,
+                                            "Total usado": _p_total_novo,
+                                            "Preço Unitário R$": _p_preco,
+                                            "Custo Total R$": round(_p_qtd_base * _p_preco, 2),
+                                        })
 
                             # Variedades de sementes (plantio)
                             _vars_orig = aplic.get("Dados Plantio", {}).get("variedades", [])
@@ -9168,15 +9171,19 @@ if menu == "📦 Operacional":
                                     _reg["Área aplicada ha"]  = _edt_area
                                     _reg["Volume calda L/ha"] = _edt_calda
                                     _reg["Clima aplicação"]   = _edt_clima
+                                    # Atualiza a lista de produtos (já sem os que foram marcados para remover)
                                     if _produtos_orig:
-                                        _reg["Produtos"] = _edt_produtos
+                                        _reg["Produtos"] = list(_edt_produtos)
                                     if _vars_orig:
                                         if "Dados Plantio" not in _reg:
                                             _reg["Dados Plantio"] = {}
                                         _reg["Dados Plantio"]["variedades"] = _edt_variedades
                                     salvar_dados_iaagro()
                                     st.session_state[_edit_key] = False
-                                    success_box("✅ Aplicação atualizada!")
+                                    if _algum_removido:
+                                        success_box("✅ Produto(s) removido(s) e aplicação atualizada!")
+                                    else:
+                                        success_box("✅ Aplicação atualizada!")
                                     st.rerun()
                                 else:
                                     error_box("Não foi possível localizar a aplicação original para salvar a edição.")
