@@ -5772,12 +5772,32 @@ if menu == "🌾 Lavoura":
                 return lower[:-1] + upper[:-1]
 
             def calcular_area_ha(coords):
-                area_val = 0
-                for i in range(len(coords) - 1):
-                    x1, y1 = coords[i][0], coords[i][1]
-                    x2, y2 = coords[i+1][0], coords[i+1][1]
+                # Área geodésica pelo método de Gauss (shoelace), convertendo
+                # graus para metros. IMPORTANTE: 1 grau de longitude vale menos
+                # metros conforme nos afastamos do equador — por isso a longitude
+                # é corrigida pelo cosseno da latitude média. Sem isso, a área
+                # fica superestimada (~12% em Santa Catarina).
+                import math as _math_area
+                if not coords or len(coords) < 3:
+                    return 0.0
+                # Garante o polígono FECHADO (último ponto = primeiro). Sem isso,
+                # o shoelace ignora o último lado e o resultado fica absurdo.
+                _pts = list(coords)
+                if _pts[0] != _pts[-1]:
+                    _pts = _pts + [_pts[0]]
+                _lats = [c[1] for c in _pts]
+                _lat_media = sum(_lats) / len(_lats)
+                _cos_lat = _math_area.cos(_math_area.radians(_lat_media))
+                _m_lat = 111132.0                    # metros por grau de latitude
+                _m_lon = 111320.0 * _cos_lat         # metros por grau de longitude (corrigido)
+                area_val = 0.0
+                for i in range(len(_pts) - 1):
+                    x1 = _pts[i][0]   * _m_lon
+                    y1 = _pts[i][1]   * _m_lat
+                    x2 = _pts[i+1][0] * _m_lon
+                    y2 = _pts[i+1][1] * _m_lat
                     area_val += (x1 * y2) - (x2 * y1)
-                return abs(area_val) / 2 * 111139 * 111139 / 10000
+                return abs(area_val) / 2 / 10000     # m² → hectares
 
             area_calculada = calcular_area_ha(coords)
             success_box(f"Área calculada automaticamente: {area_calculada:.2f} ha")
