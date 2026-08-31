@@ -1073,7 +1073,11 @@ def restaurar_backup(arquivo):
         st.session_state.segmento            = dados.get("segmento", None)
         if dados.get("email_config"):
             st.session_state.email_config = dados["email_config"]
+        # Restauração de backup é ação explícita — libera salvar mesmo se vier vazio
+        st.session_state["_dados_prontos"] = True
+        st.session_state["_permite_salvar_vazio"] = True
         salvar_dados_iaagro()
+        st.session_state["_permite_salvar_vazio"] = False
         salvar_usuarios(st.session_state.usuarios)
         n_areas   = len(st.session_state.areas)
         n_estoque = len(st.session_state.estoque)
@@ -1651,6 +1655,25 @@ def carregar_dados_iaagro():
     return _vazio
 
 def salvar_dados_iaagro():
+    # ── SALVAGUARDA ANTI-PERDA ──
+    # Não salvar se o carregamento inicial ainda não confirmou os dados.
+    # Isso evita que um estado transitório vazio (durante autologin/reruns
+    # do localStorage) sobrescreva no Supabase os dados reais do usuário.
+    if not st.session_state.get("_dados_prontos", False):
+        st.session_state["_ultimo_save"] = "⏳ Aguardando carregamento — não salvou"
+        return
+
+    # Proteção extra: se TUDO está vazio, provavelmente é um reset acidental.
+    # Só permite salvar o estado totalmente vazio se o usuário confirmou que
+    # realmente zerou (flag _permite_salvar_vazio), evitando apagar o banco.
+    _tudo_vazio = (not st.session_state.get("areas") and
+                   not st.session_state.get("estoque") and
+                   not st.session_state.get("aplicacoes") and
+                   not st.session_state.get("dre_registros"))
+    if _tudo_vazio and not st.session_state.get("_permite_salvar_vazio", False):
+        st.session_state["_ultimo_save"] = "🛡️ Estado vazio — salvamento bloqueado (proteção)"
+        return
+
     dados_salvos = {
         "dados":                   st.session_state.dados,
         "areas":                   st.session_state.areas,
@@ -2510,6 +2533,28 @@ if "maquinas" not in st.session_state or (not st.session_state.get("maquinas") a
     st.session_state.maquinas = dados_carregados.get("maquinas", [])
 if "maquinas_revisoes" not in st.session_state or (not st.session_state.get("maquinas_revisoes") and dados_carregados.get("maquinas_revisoes")):
     st.session_state.maquinas_revisoes = dados_carregados.get("maquinas_revisoes", [])
+
+# ── LIBERA O SALVAMENTO (salvaguarda anti-perda) ──
+# Só marca "dados prontos" quando o carregamento inicial terminou de fato.
+# Enquanto o autologin ainda faz reruns (localStorage assíncrono), sb_token
+# pode não estar pronto e dados_carregados vem vazio — nesse caso NÃO liberamos
+# o salvamento, pra não gravar um estado vazio por cima dos dados reais.
+_carregamento_teve_dados = bool(
+    dados_carregados.get("areas") or dados_carregados.get("estoque") or
+    dados_carregados.get("aplicacoes") or dados_carregados.get("dre_registros") or
+    dados_carregados.get("dados")
+)
+_sessao_ja_tem_dados = bool(
+    st.session_state.get("areas") or st.session_state.get("estoque") or
+    st.session_state.get("aplicacoes")
+)
+# Libera salvar se: (a) o banco trouxe dados, ou (b) a sessão já tem dados de
+# uma edição em andamento, ou (c) confirmadamente é usuário novo sem token pendente.
+if _carregamento_teve_dados or _sessao_ja_tem_dados:
+    st.session_state["_dados_prontos"] = True
+elif st.session_state.get("sb_user_id") and not st.session_state.get("_ls_tentativas"):
+    # Logado, sem dados em lugar nenhum e sem autologin pendente = usuário novo real
+    st.session_state["_dados_prontos"] = True
 
 # ── GPS session_states — inicialização segura ───────────────────
 if "_gps_lat"       not in st.session_state: st.session_state._gps_lat       = None
@@ -5199,7 +5244,9 @@ if menu == "🌾 Lavoura":
             if st.session_state.area_selecionada == area_excluida:
                 st.session_state.area_selecionada = None
                 st.session_state.dados = {}
+            st.session_state["_permite_salvar_vazio"] = True  # exclusão legítima
             salvar_dados_iaagro()
+            st.session_state["_permite_salvar_vazio"] = False
             success_box(f"Área {area_excluida} excluída com sucesso.")
             st.rerun()
 
@@ -5207,7 +5254,9 @@ if menu == "🌾 Lavoura":
             st.session_state.areas = []
             st.session_state.dados = {}
             st.session_state.area_selecionada = None
+            st.session_state["_permite_salvar_vazio"] = True  # ação explícita do usuário
             salvar_dados_iaagro()
+            st.session_state["_permite_salvar_vazio"] = False
             warning_box("Todas as áreas foram apagadas.")
 
 # ─────────────────────────────────────────────
@@ -7718,42 +7767,91 @@ if menu == "💰 Financeiro":
     st.divider()
     _rec_total  = sum(st.session_state.ir_receitas.values()) + _auto_rec_total
     _desp_total = sum(st.session_state.ir_despesas.values()) + _auto_desp_total
-    _resultado  = _rec_total - _desp_total
-    _ISENCAO    = 142798.50
-    _BASE       = max(_resultado, 0.0)
 
-    _tabela_ir = [
-        (27110.40, 0.000, 0.00),
-        (33919.80, 0.075, 2033.28),
-        (45012.60, 0.150, 4576.08),
-        (55976.16, 0.225, 7947.24),
-        (float("inf"), 0.275, 10752.00),
-    ]
+    # ── Regime de apuração ──
+    # Livro Caixa (real): resultado = receitas - despesas comprovadas
+    # Simplificado (presumido): resultado tributável = 20% da receita bruta
+    #   (usado por quem não escritura Livro Caixa; a Receita presume 20%)
+    st.markdown("#### ⚖️ Regime de Apuração do Resultado")
+    _regime = st.radio(
+        "Como apurar o resultado tributável?",
+        ["📒 Livro Caixa (receitas − despesas reais)",
+         "📊 Simplificado (20% da receita bruta)"],
+        key="ir_regime", horizontal=False,
+        help="Livro Caixa: usa suas despesas reais (melhor quando os custos são altos). "
+             "Simplificado: a Receita presume que o lucro é 20% da receita bruta, "
+             "ignorando os custos (melhor só quando a margem é muito alta)."
+    )
+
+    if _regime.startswith("📊"):
+        _resultado = _rec_total * 0.20   # 20% da receita bruta (arbitramento)
+        _base_desc = "20% da receita bruta (regime simplificado)"
+    else:
+        _resultado = _rec_total - _desp_total
+        _base_desc = "receitas − despesas (Livro Caixa)"
+
+    _BASE = max(_resultado, 0.0)
+
+    # ── Tabelas progressivas ANUAIS oficiais por ano-calendário (IN RFB 2174) ──
+    # Cada faixa: (limite_superior, alíquota, parcela_a_deduzir)
+    _tabelas_por_ano = {
+        2025: [  # exercício 2026, ano-calendário 2025
+            (27110.40, 0.000, 0.00),
+            (33919.80, 0.075, 2033.28),
+            (45012.60, 0.150, 4577.27),
+            (55976.16, 0.225, 7953.21),
+            (float("inf"), 0.275, 10752.02),
+        ],
+        2024: [  # exercício 2025, ano-calendário 2024
+            (26963.20, 0.000, 0.00),
+            (33919.80, 0.075, 2022.24),
+            (45012.60, 0.150, 4566.23),
+            (55976.16, 0.225, 7942.17),
+            (float("inf"), 0.275, 10740.98),
+        ],
+    }
+    # 2023 e 2022 usam a tabela vigente até então (mesma base de 2024 como aproximação)
+    _tabela_ir = _tabelas_por_ano.get(st.session_state.ir_ano, _tabelas_por_ano[2024])
+
+    # IMPORTANTE: o resultado positivo da atividade rural é somado aos demais
+    # rendimentos e tributado DIRETO pela tabela progressiva. A "isenção" é
+    # apenas a 1ª faixa da tabela (até ~R$ 27 mil) — NÃO existe isenção até
+    # R$ 142.798,50 (esse valor é só o limite de OBRIGATORIEDADE de declarar).
     _ir = 0.0; _aliq = 0.0
-    if _BASE > _ISENCAO:
-        for _lim, _a, _ded in _tabela_ir:
-            if _BASE <= _lim:
-                _ir = _BASE * _a - _ded
-                _aliq = _a; break
+    for _lim, _a, _ded in _tabela_ir:
+        if _BASE <= _lim:
+            _ir = max(_BASE * _a - _ded, 0.0)
+            _aliq = _a
+            break
 
     _ir = max(_ir, 0.0)
+    _LIMITE_DECLARAR = 142798.50  # receita bruta que obriga a declarar
 
     # Cards resultado
     _kc = st.columns(4)
     _kc[0].metric("💰 Receita Bruta",    f"R$ {_rec_total:,.2f}")
     _kc[1].metric("📉 Despesas Dedut.", f"R$ {_desp_total:,.2f}")
-    _kc[2].metric("📊 Resultado Líquido", f"R$ {_resultado:,.2f}",
+    _kc[2].metric("📊 Resultado Tributável", f"R$ {_resultado:,.2f}",
                    delta="Lucro" if _resultado >= 0 else "Prejuízo")
     _kc[3].metric("🧾 IR Estimado",       f"R$ {_ir:,.2f}",
                    delta=f"Alíquota {_aliq*100:.1f}%" if _ir > 0 else "Isento")
 
     # Status fiscal
     if _resultado <= 0:
-        st.success("✅ Resultado negativo — não há IR a pagar. O prejuízo pode ser compensado.")
-    elif _BASE <= _ISENCAO:
-        st.success(f"✅ Resultado abaixo do limite de isenção (R$ {_ISENCAO:,.2f}) — não há IR a pagar.")
+        st.success("✅ Resultado negativo ou zero — não há IR a pagar. "
+                   "O prejuízo pode ser compensado em anos seguintes (com Livro Caixa).")
+    elif _ir <= 0:
+        st.success(f"✅ Resultado dentro da faixa de isenção da tabela progressiva "
+                   f"(até R$ {_tabela_ir[0][0]:,.2f}) — não há IR a pagar.")
     else:
-        st.warning(f"⚠️ IR estimado: **R$ {_ir:,.2f}** — consulte seu contador.")
+        st.warning(f"⚠️ IR estimado: **R$ {_ir:,.2f}** (alíquota {_aliq*100:.1f}%) — "
+                   f"apurado por {_base_desc}. Confirme com seu contador.")
+
+    # Aviso de obrigatoriedade de declarar
+    if _rec_total > _LIMITE_DECLARAR:
+        st.info(f"📋 Sua receita bruta rural (R$ {_rec_total:,.2f}) ultrapassa "
+                f"R$ {_LIMITE_DECLARAR:,.2f} — você está **obrigado a declarar** "
+                f"a atividade rural no IRPF, mesmo que não haja imposto a pagar.")
 
     # Tabela resumo
     with st.expander("📋 Detalhamento completo"):
@@ -7762,15 +7860,17 @@ if menu == "💰 Financeiro":
             {"Item":"(+) Receitas automáticas (Financeiro)",  "Valor R$": sum(_auto_receitas.values())},
             {"Item":"(+) Contratos de troca (barter)",         "Valor R$": _auto_rec_trocas},
             {"Item":"(+) Receitas manuais",                    "Valor R$": sum(st.session_state.ir_receitas.values())},
+            {"Item":"(=) Receita Bruta Total",                 "Valor R$": _rec_total},
             {"Item":"(-) Despesas automáticas (Fin.+Estoque)", "Valor R$":-_auto_desp_total},
             {"Item":"(-) Despesas manuais",                    "Valor R$":-sum(st.session_state.ir_despesas.values())},
-            {"Item":"= Resultado Líquido",        "Valor R$": _resultado},
-            {"Item":"Limite de Isenção",          "Valor R$": _ISENCAO},
+            {"Item":f"= Resultado Tributável ({_base_desc})",  "Valor R$": _resultado},
             {"Item":"Base de Cálculo IR",         "Valor R$": _BASE},
             {"Item":f"Alíquota {_aliq*100:.1f}%","Valor R$": _ir},
         ]
         st.dataframe(_pd_ir.DataFrame(_rows_ir), use_container_width=True, hide_index=True)
-        st.caption("⚠️ Estimativa para planejamento. Declare com contador habilitado.")
+        st.caption(f"⚠️ Estimativa para planejamento, com a tabela progressiva anual de "
+                   f"{st.session_state.ir_ano}. O resultado da atividade rural soma-se aos "
+                   f"demais rendimentos da pessoa física. Declare com contador habilitado.")
 
     # ── EXPORTAÇÃO EM PDF ───────────────────────────────────────────────────
     st.divider()
