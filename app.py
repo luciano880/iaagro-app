@@ -2027,6 +2027,8 @@ def tela_login():
                         st.session_state.sb_plano         = sb_plano(_SB_URL, _SB_KEY, res["token"], res["user_id"])
                         # Carrega dados do usuário do Supabase
                         dados_sb = sb_carregar(_SB_URL, _SB_KEY, res["token"], res["user_id"])
+                        # Login bem-sucedido: dados vieram do Supabase, libera salvar
+                        st.session_state["_dados_prontos"] = True
                         if dados_sb:
                             for k, v in dados_sb.items():
                                 if k not in st.session_state:
@@ -2034,7 +2036,9 @@ def tela_login():
                             # Aplica segmento do cadastro se for primeiro login
                             if not dados_sb.get("segmento") and st.session_state.get("_seg_novo_usuario"):
                                 st.session_state.segmento = st.session_state.pop("_seg_novo_usuario")
+                                st.session_state["_permite_salvar_vazio"] = True  # 1º login, conta nova
                                 salvar_dados_iaagro()
+                                st.session_state["_permite_salvar_vazio"] = False
                         elif st.session_state.get("_seg_novo_usuario"):
                             st.session_state.segmento = st.session_state.pop("_seg_novo_usuario")
                         # Salva refresh info nos query_params para auto-login após reload
@@ -2121,41 +2125,41 @@ def tela_login():
                     else:
                         try:
                             import requests as _req
-                            # Envia OTP numérico de 6 dígitos
+                            # Endpoint /recover é o específico para RESET DE SENHA.
+                            # Gera um código do tipo "recovery" enviado por e-mail.
                             r = _req.post(
-                                f"{_SB_URL}/auth/v1/otp",
+                                f"{_SB_URL}/auth/v1/recover",
                                 headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
-                                json={
-                                    "email": email_r.strip(),
-                                    "create_user": False,
-                                    "options": {"should_create_user": False}
-                                },
+                                json={"email": email_r.strip()},
                                 timeout=10
                             )
-                            if r.status_code == 200:
+                            if r.status_code in (200, 204):
                                 st.session_state["_recup_email"] = email_r.strip()
                                 st.success(f"✅ Código enviado para **{email_r.strip()}**!")
-                                st.info("📧 Verifique seu e-mail e copie o código de 8 dígitos.")
+                                st.info("📧 Verifique seu e-mail (inclusive spam) e copie o código numérico.")
                                 st.rerun()
                             else:
-                                st.error("❌ E-mail não encontrado.")
+                                st.error("❌ Não foi possível enviar. Verifique se o e-mail está cadastrado.")
                         except Exception as e:
                             st.error(f"❌ Erro: {e}")
             else:
                 _email_recup = st.session_state["_recup_email"]
                 st.info(f"📧 Código enviado para **{_email_recup}**")
-                st.warning("⚠️ O e-mail enviado tem um código de 8 dígitos. **Não clique no link** — copie apenas o código numérico.")
+                st.warning("⚠️ O e-mail traz um **código numérico**. **Não clique no link** — "
+                           "copie apenas os números do código.")
 
                 with st.form("form_otp_sb", clear_on_submit=False):
-                    otp_code   = st.text_input("Código de 8 dígitos do e-mail", key="sb_otp_code",
-                                               placeholder="12345678", max_chars=8)
+                    otp_code   = st.text_input("Código do e-mail (só números)", key="sb_otp_code",
+                                               placeholder="123456", max_chars=10)
                     nova_senha = st.text_input("Nova senha (mín. 6 caracteres)", type="password", key="sb_nova_senha")
                     conf_nova  = st.text_input("Confirmar nova senha", type="password", key="sb_conf_nova")
                     btn_otp    = st.form_submit_button("🔐 Redefinir Senha", use_container_width=True)
 
                 if btn_otp:
-                    if not otp_code or len(otp_code.strip()) < 6:
-                        st.error("Digite o código de 8 dígitos.")
+                    # Aceita qualquer código de 6 a 10 dígitos (Supabase varia entre 6 e 8)
+                    _otp_limpo = "".join(c for c in (otp_code or "") if c.isdigit())
+                    if len(_otp_limpo) < 6:
+                        st.error("Digite o código numérico completo do e-mail (6 a 8 dígitos).")
                     elif len(nova_senha) < 6:
                         st.error("Senha deve ter pelo menos 6 caracteres.")
                     elif nova_senha != conf_nova:
@@ -2166,17 +2170,20 @@ def tela_login():
                             r = _req.post(
                                 f"{_SB_URL}/auth/v1/verify",
                                 headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
-                                json={"type": "magiclink", "email": _email_recup, "token": otp_code.strip()},
+                                json={"type": "recovery", "email": _email_recup, "token": _otp_limpo},
                                 timeout=10
                             )
                             if r.status_code != 200:
-                                # Tenta também com type "email"
-                                r = _req.post(
-                                    f"{_SB_URL}/auth/v1/verify",
-                                    headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
-                                    json={"type": "email", "email": _email_recup, "token": otp_code.strip()},
-                                    timeout=10
-                                )
+                                # Tenta com type "magiclink" e depois "email" (compatibilidade)
+                                for _tipo in ("magiclink", "email"):
+                                    r = _req.post(
+                                        f"{_SB_URL}/auth/v1/verify",
+                                        headers={"apikey": _SB_KEY, "Content-Type": "application/json"},
+                                        json={"type": _tipo, "email": _email_recup, "token": _otp_limpo},
+                                        timeout=10
+                                    )
+                                    if r.status_code == 200:
+                                        break
                             if r.status_code == 200 and "access_token" in r.json():
                                 _token_temp = r.json()["access_token"]
                                 r2 = _req.put(
