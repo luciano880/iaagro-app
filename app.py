@@ -5723,26 +5723,41 @@ if menu == "🌾 Lavoura":
 
         # Se a área atual já tem um croqui salvo, mostra ele no mapa
         _desenho_salvo = st.session_state.dados.get("desenho_talhao")
-        if _desenho_salvo and _desenho_salvo.get("geometry"):
+        _tem_croqui = False
+        if _desenho_salvo and isinstance(_desenho_salvo, dict) and _desenho_salvo.get("geometry"):
             try:
-                folium.GeoJson(
-                    _desenho_salvo,
-                    name="Croqui salvo",
-                    style_function=lambda x: {
-                        "fillColor": "#22c55e", "color": "#15803d",
-                        "weight": 3, "fillOpacity": 0.25,
-                    },
-                    tooltip="Talhão salvo",
-                ).add_to(mapa_folium)
-                # Centraliza o mapa no croqui salvo
-                _coords_salvas = _desenho_salvo["geometry"]["coordinates"][0]
-                _lats = [c[1] for c in _coords_salvas]
-                _lons = [c[0] for c in _coords_salvas]
-                mapa_folium.fit_bounds([[min(_lats), min(_lons)], [max(_lats), max(_lons)]])
-                st.success("📍 Esta área já tem um croqui salvo (mostrado em verde). "
-                           "Desenhe um novo apenas se quiser substituí-lo.")
+                _geo = _desenho_salvo["geometry"]
+                _coords_salvas = _geo.get("coordinates", [[]])[0]
+                # Valida que há pelo menos 3 pares de coordenadas numéricas
+                if _coords_salvas and len(_coords_salvas) >= 3:
+                    _lats = [float(c[1]) for c in _coords_salvas]
+                    _lons = [float(c[0]) for c in _coords_salvas]
+                    # Só aplica se as coordenadas forem plausíveis (dentro do globo)
+                    if (all(-90 <= la <= 90 for la in _lats) and
+                        all(-180 <= lo <= 180 for lo in _lons)):
+                        folium.GeoJson(
+                            _desenho_salvo,
+                            name="Croqui salvo",
+                            style_function=lambda x: {
+                                "fillColor": "#22c55e", "color": "#15803d",
+                                "weight": 3, "fillOpacity": 0.25,
+                            },
+                            tooltip="Talhão salvo",
+                        ).add_to(mapa_folium)
+                        # Só ajusta o zoom se o polígono tiver tamanho real
+                        # (evita fit_bounds degenerado que quebra o mapa)
+                        if (max(_lats) - min(_lats) > 1e-6 and
+                            max(_lons) - min(_lons) > 1e-6):
+                            mapa_folium.fit_bounds(
+                                [[min(_lats), min(_lons)], [max(_lats), max(_lons)]]
+                            )
+                        _tem_croqui = True
             except Exception:
-                pass
+                _tem_croqui = False
+
+        if _tem_croqui:
+            st.success("📍 Esta área já tem um croqui salvo (mostrado em verde no mapa). "
+                       "Desenhe um novo apenas se quiser substituí-lo.")
 
         dados_mapa_folium = st_folium(mapa_folium, width=900, height=500)
         st.subheader("💾 Salvar Desenho do Talhão")
