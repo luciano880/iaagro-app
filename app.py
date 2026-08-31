@@ -11894,6 +11894,28 @@ elif menu == "⚙️ Configurações":
         usuários, estoque, áreas cadastradas, histórico, aplicações e configurações.
         </div>''', unsafe_allow_html=True)
 
+        # Resumo do que está no backup — confirma que não está vazio antes de baixar
+        _n_areas   = len(st.session_state.get("areas", []))
+        _n_estoque = len(st.session_state.get("estoque", []))
+        _n_aplic   = len(st.session_state.get("aplicacoes", []))
+        _n_dre     = len(st.session_state.get("dre_registros", []))
+        _n_hist    = len(st.session_state.get("historico_produtividade", []))
+        _bk_vazio  = (_n_areas + _n_estoque + _n_aplic + _n_dre) == 0
+        if _bk_vazio:
+            st.markdown('''<div style="background:#7f1d1d;color:#fff;padding:11px 14px;
+            border-radius:8px;font-weight:700;margin:4px 0 12px 0;font-size:13px;">
+            🛑 Atenção: seus dados aparecem VAZIOS agora. Se você tem dados cadastrados,
+            NÃO baixe este backup (ele salvaria vazio) e NÃO restaure nada — recarregue
+            a página primeiro para os dados voltarem.
+            </div>''', unsafe_allow_html=True)
+        else:
+            st.markdown(f'''<div style="background:#14532d;color:#d1fae5;padding:11px 14px;
+            border-radius:8px;font-weight:600;margin:4px 0 12px 0;font-size:13px;">
+            ✅ Este backup contém: <b>{_n_areas}</b> área(s) · <b>{_n_estoque}</b> item(ns) de estoque ·
+            <b>{_n_aplic}</b> aplicação(ões) · <b>{_n_dre}</b> lançamento(s) financeiro(s) ·
+            <b>{_n_hist}</b> registro(s) de produtividade.
+            </div>''', unsafe_allow_html=True)
+
         backup_data = gerar_backup()
         st.download_button(
             "📥 Baixar Backup Completo (.json)",
