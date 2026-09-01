@@ -5035,14 +5035,22 @@ if menu == "🏠 Início":
             </div>
             """, unsafe_allow_html=True)
 
-        total_areas      = len(st.session_state.areas)
-        total_estoque    = len(st.session_state.estoque)
-        total_aplicacoes = len(st.session_state.aplicacoes)
-        area_total       = sum(a.get("Hectares", 0) for a in st.session_state.areas)
-        produtividade_media = (
-            sum(a.get("Meta Produtividade", 0) for a in st.session_state.areas) / total_areas
-            if total_areas > 0 else 0
-        )
+            # Botão pra quem acabou de pagar ver a liberação sem precisar relogar
+            if st.button("🔄 Já paguei — atualizar meu plano", key="btn_revalidar_plano",
+                         use_container_width=True):
+                if _SUPABASE_ATIVO and st.session_state.get("sb_token"):
+                    with st.spinner("Verificando seu pagamento..."):
+                        _novo_plano = sb_plano(_SB_URL, _SB_KEY,
+                                               st.session_state.sb_token,
+                                               st.session_state.sb_user_id)
+                    if _novo_plano and _novo_plano != "free":
+                        st.session_state.sb_plano = _novo_plano
+                        success_box(f"✅ Plano atualizado para {PLANOS.get(_novo_plano,{}).get('nome',_novo_plano)}!")
+                        st.rerun()
+                    else:
+                        st.info("Ainda não identificamos seu pagamento. Após pagar, "
+                                "a liberação leva alguns minutos. Se demorar, verifique "
+                                "se pagou com o mesmo e-mail do cadastro ou fale com o suporte.")
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("🌾 Áreas",      total_areas)
