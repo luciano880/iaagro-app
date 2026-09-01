@@ -2313,6 +2313,7 @@ PLANOS = {
         "preco":   0,
         "areas":   2,
         "estoque": 20,
+        "ia_perguntas_mes": 15,
         "cor":     "#78350f",
         "borda":   "#f59e0b",
         "recursos": [
@@ -2336,6 +2337,7 @@ PLANOS = {
         "preco":   39.90,
         "areas":   10,
         "estoque": 100,
+        "ia_perguntas_mes": 150,
         "cor":     "#1e3a5f",
         "borda":   "#3b82f6",
         "recursos": [
@@ -2363,6 +2365,7 @@ PLANOS = {
         "preco":   99.90,
         "areas":   -1,   # ilimitado
         "estoque": -1,   # ilimitado
+        "ia_perguntas_mes": 500,   # uso justo
         "cor":     "#14532d",
         "borda":   "#22c55e",
         "recursos": [
@@ -10522,6 +10525,31 @@ elif menu == "🧠 Assistente IA":
     if "assistente_hist" not in st.session_state:
         st.session_state.assistente_hist = []
 
+    # ── CONTROLE DE USO DO ASSISTENTE (limite por plano) ──
+    # Conta perguntas por mês e reseta a cada mês. Persiste em dados (Supabase).
+    from datetime import datetime as _dt_ia_lim
+    _mes_atual = _dt_ia_lim.now().strftime("%Y-%m")
+    _uso_ia = st.session_state.dados.get("ia_uso", {})
+    if _uso_ia.get("mes") != _mes_atual:
+        # Vira o mês: zera o contador
+        _uso_ia = {"mes": _mes_atual, "count": 0}
+        st.session_state.dados["ia_uso"] = _uso_ia
+    _plano_atual_ia = st.session_state.get("sb_plano", "free")
+    _limite_ia = PLANOS.get(_plano_atual_ia, PLANOS["free"]).get("ia_perguntas_mes", 15)
+    _usadas_ia = _uso_ia.get("count", 0)
+    _restantes_ia = max(_limite_ia - _usadas_ia, 0)
+
+    # Mostra o contador de uso
+    _cor_uso = "#22c55e" if _restantes_ia > _limite_ia*0.3 else ("#f59e0b" if _restantes_ia > 0 else "#ef4444")
+    st.markdown(f"""
+    <div style='background:#0f3460;border-radius:8px;padding:8px 14px;margin-bottom:10px;
+    border-left:4px solid {_cor_uso};font-size:12px;color:#cbd5e1;'>
+    💬 Perguntas usadas este mês: <b style='color:{_cor_uso};'>{_usadas_ia}/{_limite_ia}</b>
+    &nbsp;·&nbsp; Restam <b>{_restantes_ia}</b> no plano {PLANOS.get(_plano_atual_ia,{}).get('nome',_plano_atual_ia)}
+    </div>""", unsafe_allow_html=True)
+
+    _limite_atingido = _restantes_ia <= 0
+
     # Contexto rico da propriedade
     _d_ia  = st.session_state.dados
     _areas_ctx = ""
@@ -10589,9 +10617,24 @@ elif menu == "🧠 Assistente IA":
             if _doc_ia:
                 st.success(f"✅ {_doc_ia.name} anexado — faça sua pergunta abaixo que eu analiso.")
 
-        _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo... ou anexe um documento acima")
+        if _limite_atingido:
+            _prox_plano = "Pro" if _plano_atual_ia == "free" else "Premium"
+            st.warning(f"🚫 Você atingiu o limite de **{_limite_ia} perguntas** deste mês "
+                       f"no plano {PLANOS.get(_plano_atual_ia,{}).get('nome',_plano_atual_ia)}. "
+                       f"O contador zera no início do próximo mês."
+                       + (f" Para mais perguntas, faça upgrade para o plano {_prox_plano}."
+                          if _plano_atual_ia != "premium" else
+                          " Se precisar de mais, fale com o suporte."))
+            _prompt_ia = None
+        else:
+            _prompt_ia = st.chat_input("Pergunte sobre adubação, pragas, clima, preços, manejo... ou anexe um documento acima")
 
         if _prompt_ia:
+            # Incrementa o contador de uso e persiste
+            st.session_state.dados["ia_uso"] = {
+                "mes": _mes_atual, "count": _usadas_ia + 1
+            }
+            salvar_dados_iaagro()
             st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
             with st.chat_message("user"):
                 st.markdown(_prompt_ia)
@@ -10716,16 +10759,24 @@ elif menu == "🧠 Assistente IA":
                             "Para notas fiscais e estoque, ajude a organizar, "
                             "conferir e sugerir uso. Para planilhas de estoque, aponte itens em falta, "
                             "vencimentos, ou sugestões de compra conforme o manejo. Seja prático. "
-                            f"Contexto da propriedade: {_ctx_ia}"
                         )
                         # Monta o payload. Quando há PDF/imagem anexado, NÃO usa
                         # web_search na mesma chamada (a combinação documento + tool
                         # causa HTTP 400). Para análise de documento, a busca não é
                         # necessária — o conteúdo já está no anexo.
+                        # PROMPT CACHING: a parte FIXA do system (instruções, ~1500
+                        # tokens, igual para todos) é marcada com cache_control — assim
+                        # pagamos 90% menos nas repetições. O contexto da propriedade
+                        # (que muda por usuário) vai separado, sem cache.
+                        _system_blocks = [
+                            {"type": "text", "text": _system_ia,
+                             "cache_control": {"type": "ephemeral"}},
+                            {"type": "text", "text": f"Contexto da propriedade: {_ctx_ia}"},
+                        ]
                         _payload_ia = {
                             "model":      "claude-sonnet-4-6",
                             "max_tokens": 4000,
-                            "system":     _system_ia,
+                            "system":     _system_blocks,
                             "messages":   _msgs_ia,
                         }
                         if not _tem_doc_visual:
