@@ -5924,24 +5924,14 @@ if menu == "🌾 Lavoura":
                     # Só aplica se as coordenadas forem plausíveis (dentro do globo)
                     if (all(-90 <= la <= 90 for la in _lats) and
                         all(-180 <= lo <= 180 for lo in _lons)):
-                        # Monta um GeoJSON LIMPO do zero (o objeto bruto salvo pelo
-                        # Draw pode ter estrutura que o folium.GeoJson não processa,
-                        # quebrando o mapa). Usar só as coordenadas validadas é seguro.
-                        _geojson_limpo = {
-                            "type": "Feature",
-                            "properties": {},
-                            "geometry": {
-                                "type": "Polygon",
-                                "coordinates": [[[float(c[0]), float(c[1])] for c in _coords_salvas]],
-                            },
-                        }
-                        folium.GeoJson(
-                            _geojson_limpo,
-                            name="Croqui salvo",
-                            style_function=lambda x: {
-                                "fillColor": "#22c55e", "color": "#15803d",
-                                "weight": 3, "fillOpacity": 0.25,
-                            },
+                        # Usa folium.Polygon (recebe [lat,lon] direto) em vez de
+                        # GeoJson — o GeoJson quebrava a renderização do mapa quando
+                        # havia croqui salvo (confirmado em teste). Polygon é robusto.
+                        _pts_poly = [[float(c[1]), float(c[0])] for c in _coords_salvas]
+                        folium.Polygon(
+                            locations=_pts_poly,
+                            color="#15803d", weight=3,
+                            fill=True, fill_color="#22c55e", fill_opacity=0.25,
                             tooltip="Talhão salvo",
                         ).add_to(mapa_folium)
                         # Só ajusta o zoom se o polígono tiver tamanho real
@@ -5958,25 +5948,6 @@ if menu == "🌾 Lavoura":
         if _tem_croqui:
             st.success("📍 Esta área já tem um croqui salvo (mostrado em verde no mapa). "
                        "Desenhe um novo apenas se quiser substituí-lo.")
-            # Escape de segurança: se o croqui salvo estiver travando o mapa,
-            # o usuário pode ocultá-lo com um clique e o mapa volta a aparecer.
-            if st.checkbox("🔧 O mapa não aparece? Marque aqui para ocultar o croqui salvo",
-                           key="ocultar_croqui"):
-                st.session_state["_forcar_sem_croqui"] = True
-                st.rerun()
-
-        # Se o usuário pediu para ocultar o croqui, recria o mapa sem ele
-        if st.session_state.get("_forcar_sem_croqui"):
-            st.info("Croqui oculto. O mapa deve aparecer abaixo. "
-                    "(Para ver o croqui de novo, recarregue a página.)")
-            mapa_folium = folium.Map(location=[latitude, longitude], zoom_start=13,
-                                     tiles="OpenStreetMap")
-            folium.Marker(location=[latitude, longitude], tooltip="Local atual",
-                          icon=folium.Icon(color="darkgreen", icon="leaf")).add_to(mapa_folium)
-            Draw(draw_options={"polyline":False,"rectangle":True,"circle":False,
-                               "marker":False,"circlemarker":False,
-                               "polygon":{"allowIntersection":True,"showArea":True,"metric":True}},
-                 edit_options={"edit":True,"remove":True}).add_to(mapa_folium)
 
         # key única e largura responsiva evitam o mapa sumir após reruns
         _key_mapa = f"mapa_talhao_{st.session_state.dados.get('id_area','x')}"
