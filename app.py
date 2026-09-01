@@ -5964,8 +5964,19 @@ if menu == "🌾 Lavoura":
 
         st.info("💡 **Dica no celular:** Marque os pontos no sentido horário ao redor do talhão, sem cruzar as linhas. Use o botão **Delete last point** para desfazer o último ponto.")
 
-        if dados_mapa_folium and dados_mapa_folium.get("last_active_drawing"):
-            desenho = dados_mapa_folium["last_active_drawing"]
+        # Lê o desenho recém-feito. O Leaflet Draw pode devolver em
+        # 'last_active_drawing' OU no fim de 'all_drawings' — aceita os dois,
+        # senão, ao redesenhar sobre um croqui existente, o novo não aparecia.
+        _novo_desenho = None
+        if dados_mapa_folium:
+            _novo_desenho = dados_mapa_folium.get("last_active_drawing")
+            if not _novo_desenho:
+                _todos = dados_mapa_folium.get("all_drawings") or []
+                if _todos:
+                    _novo_desenho = _todos[-1]  # o último desenhado
+
+        if _novo_desenho and _novo_desenho.get("geometry"):
+            desenho = _novo_desenho
             coords  = desenho["geometry"]["coordinates"][0]
 
             # Corrige automaticamente polígonos com bordas cruzadas usando convex hull
@@ -6039,7 +6050,9 @@ if menu == "🌾 Lavoura":
                     st.session_state.areas[idx_area]["area_calculada_ha"] = round(area_calculada, 2)
 
                 salvar_dados_iaagro()
-                success_box("✅ Desenho do talhão salvo com sucesso!")
+                success_box("✅ Desenho do talhão salvo/atualizado com sucesso!")
+                # Recarrega para o mapa exibir o croqui NOVO (senão fica o antigo)
+                st.rerun()
 
 
 # ─────────────────────────────────────────────
