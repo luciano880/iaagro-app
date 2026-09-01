@@ -10520,11 +10520,28 @@ elif menu == "🧠 Assistente IA":
             f"{a.get('Talhão','?')} {a.get('Hectares',0)}ha {a.get('Cultura','?')}"
             for a in st.session_state.areas[:3]
         ])
+    # Rotação/planejamento de safras — essencial para a IA alertar sobre
+    # restrições de plantio (residual de herbicida na próxima cultura).
+    _rotacao_ctx = ""
+    _plan = st.session_state.get("planejamento_safras", [])
+    if _plan:
+        _rot = []
+        for _p in _plan[:4]:
+            _v = _p.get("verao",{}); _i = _p.get("inverno",{})
+            _seq = []
+            if _i.get("cultura"): _seq.append(f"inverno {_i.get('cultura')}")
+            if _v.get("cultura"): _seq.append(f"verão {_v.get('cultura')}")
+            if _seq:
+                _rot.append(" → ".join(_seq))
+        if _rot:
+            _rotacao_ctx = f" Rotação planejada: {'; '.join(_rot)}."
     _ctx_ia = (
         f"Segmento: {st.session_state.get('segmento','Grãos')}. "
-        f"Propriedade: {_areas_ctx or 'não cadastrada'}. "
+        f"Propriedade: {_areas_ctx or 'não cadastrada'}.{_rotacao_ctx} "
         f"Região: Sul do Brasil (PR/SC/RS). "
-        f"Plano: {st.session_state.get('plano','free')}."
+        f"Plano: {st.session_state.get('plano','free')}. "
+        f"IMPORTANTE: se for recomendar herbicida, considere a próxima cultura "
+        f"da rotação acima para alertar sobre residual/plantback."
     )
 
     # Busca API key de forma robusta
@@ -10654,10 +10671,30 @@ elif menu == "🧠 Assistente IA":
                             "(4) Ao analisar um programa do produtor, aponte pontos de atenção sem alarmismo "
                             "e SEMPRE reforce que a decisão final é do engenheiro agrônomo responsável, que "
                             "conhece o histórico da área. "
+                            "CARÊNCIA E RESTRIÇÕES DE ROTAÇÃO (CRÍTICO — erros aqui causam prejuízo real): "
+                            "(A) INTERVALO DE SEGURANÇA (carência pré-colheita): ao recomendar QUALQUER "
+                            "defensivo, informe o período de carência (dias entre a última aplicação e a "
+                            "colheita) e alerte para respeitá-lo. Esse dado vem da BULA do produto e varia "
+                            "por cultura — se não tiver certeza do valor atual, BUSQUE na web/bula (AGROFIT/MAPA) "
+                            "antes de afirmar, não invente. "
+                            "(B) RESTRIÇÃO DE ROTAÇÃO / CARÊNCIA DE PLANTIO (plantback): este é um ponto que "
+                            "você DEVE checar SEMPRE que recomendar herbicidas — especialmente com residual no "
+                            "solo (ex: imidazolinonas, sulfonilureias, triazinas como atrazina, clomazona, "
+                            "diclosulam, sulfentrazona, picloram). Muitos herbicidas têm efeito residual que "
+                            "IMPEDE ou RESTRINGE o plantio de certas culturas na sequência (ex: um herbicida "
+                            "usado na soja pode inviabilizar plantar milho, trigo, feijão ou hortaliças em "
+                            "pós — o milho é sensível a vários residuais). NUNCA recomende um herbicida sem "
+                            "considerar qual será a PRÓXIMA cultura da área (veja o contexto/rotação do "
+                            "produtor). Se a recomendação puder afetar a cultura seguinte, ALERTE "
+                            "explicitamente e informe o intervalo de plantback da bula. Na dúvida sobre o "
+                            "residual ou o intervalo, BUSQUE na bula/AGROFIT — não deduza. "
+                            "(C) Ao recomendar produto para uma cultura, confirme que ele é REGISTRADO para "
+                            "AQUELA cultura no MAPA/AGROFIT — não recomende uso não registrado (off-label). "
                             "ANÁLISE DE DOCUMENTOS: o produtor pode anexar documentos (notas fiscais, "
                             "laudos, planilhas de estoque, receituários, bulas). Quando houver documento "
                             "anexado, analise-o com atenção: identifique produtos, quantidades, valores, "
-                            "princípios ativos e datas. Para notas fiscais e estoque, ajude a organizar, "
+                            "princípios ativos, datas E CARÊNCIAS/RESTRIÇÕES DE ROTAÇÃO quando for bula. "
+                            "Para notas fiscais e estoque, ajude a organizar, "
                             "conferir e sugerir uso. Para planilhas de estoque, aponte itens em falta, "
                             "vencimentos, ou sugestões de compra conforme o manejo. Seja prático. "
                             f"Contexto da propriedade: {_ctx_ia}"
