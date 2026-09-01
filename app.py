@@ -4936,53 +4936,112 @@ def cultura_limpa(c):
         return c.split(" ",1)[1]
     return c
 
-# Necessidade hídrica por CICLO (mm) — faixas técnicas (Embrapa/Doorenbos & Kassam).
-# min = limite abaixo do qual começa déficit; max = acima começa risco de excesso.
+# Necessidade hídrica por CICLO (mm) — faixas técnicas (Embrapa, ESALQ/USP,
+# Doorenbos & Kassam 1979). (min, max, fase_critica, sensibilidade).
+# sensibilidade: fator 0.6-1.0 de quão sensível a cultura é ao déficit
+# (café e milho muito sensíveis na fase crítica; mandioca tolera melhor).
 _CHUVA_CICLO_MM = {
-    "Soja": (450, 800),  "Milho": (500, 800),  "Trigo": (350, 600),
-    "Feijão": (300, 500),"Canola": (400, 700), "Aveia": (300, 550),
-    "Cana-de-açúcar": (1200, 1800), "Arroz": (900, 1300), "Sorgo": (350, 650),
-    "Girassol": (400, 700), "Cevada": (350, 600), "Pastagem": (500, 1200),
-    "Algodão": (700, 1300), "Café": (1200, 1800), "Mandioca": (800, 1500),
+    # 🌾 Grãos
+    "Soja":     (450, 800,  "Floração e enchimento de grãos (R1-R6)", 1.0),
+    "Milho":    (500, 800,  "Pendoamento e enchimento de grãos",       1.0),
+    "Trigo":    (350, 600,  "Espigamento e enchimento",                0.9),
+    "Feijão":   (300, 500,  "Floração e formação de vagens",           1.0),
+    "Canola":   (400, 700,  "Floração e enchimento de síliquas",       0.9),
+    "Aveia":    (300, 550,  "Emborrachamento e enchimento",            0.8),
+    "Arroz":    (900, 1300, "Perfilhamento e floração",                1.0),
+    "Sorgo":    (350, 650,  "Emborrachamento e enchimento",            0.75),
+    "Cevada":   (350, 600,  "Espigamento e enchimento",                0.9),
+    "Girassol": (400, 700,  "Floração e enchimento de aquênios",       0.9),
+    # 🌿 Horticultura
+    "Tomate":   (400, 600,  "Floração e frutificação",                 1.0),
+    "Batata":   (350, 600,  "Tuberização (formação dos tubérculos)",   1.0),
+    "Cebola":   (350, 650,  "Bulbificação",                            0.9),
+    "Alho":     (350, 600,  "Bulbificação",                            0.9),
+    "Mandioca": (800, 1500, "Formação de raízes (menos sensível)",     0.6),
+    "Alface":   (200, 350,  "Formação de cabeça",                      1.0),
+    "Cenoura":  (350, 550,  "Engrossamento da raiz",                   0.9),
+    "Brócolis": (350, 550,  "Formação da inflorescência",              1.0),
+    "Pepino":   (350, 550,  "Floração e frutificação",                 1.0),
+    "Pimentão": (600, 900,  "Floração e frutificação",                 1.0),
+    # 🎯 Fruticultura (por ciclo/safra anual)
+    "Laranja":  (900, 1200, "Florada e crescimento dos frutos",        0.85),
+    "Banana":   (1200,1800, "Emissão do cacho e enchimento",           0.9),
+    "Uva":      (500, 800,  "Floração e maturação das bagas",          0.85),
+    "Maçã":     (800, 1100, "Frutificação e crescimento",              0.85),
+    "Manga":    (700, 1200, "Florada e frutificação",                  0.8),
+    "Abacate":  (1000,1400, "Frutificação",                            0.85),
+    "Limão":    (900, 1200, "Florada e crescimento dos frutos",        0.85),
+    "Pêssego":  (700, 1000, "Frutificação e maturação",                0.85),
+    "Caqui":    (700, 1100, "Frutificação",                            0.8),
+    "Café":     (1200,1800, "Florada, granação e enchimento",          1.0),
+    # 🌲 Silvicultura (anual — árvores toleram melhor por raízes profundas)
+    "Eucalipto":(1000,1500, "Fase de crescimento inicial (1-2 anos)",  0.6),
+    "Pinus":    (1000,1600, "Crescimento inicial",                     0.55),
+    "Teca":     (1200,2000, "Estação de crescimento",                  0.6),
+    "Paricá":   (1500,2500, "Crescimento",                             0.6),
+    "Cedro":    (1200,1800, "Crescimento",                             0.6),
+    "Mogno Africano": (1200,1800, "Crescimento",                       0.6),
+    # Outras
+    "Cana-de-açúcar": (1200,1800, "Perfilhamento e crescimento",       0.85),
+    "Algodão":  (700, 1300, "Floração e formação de maçãs",            0.9),
+    "Pastagem": (500, 1200, "Rebrota e crescimento vegetativo",        0.7),
 }
 
-def estimar_perda_hidrica(cultura, chuva_ciclo_mm):
+# Segmento de cada cultura (para a tabela organizada)
+_CULTURA_SEGMENTO = {
+    "🌾 Grãos": ["Soja","Milho","Trigo","Feijão","Canola","Aveia","Arroz","Sorgo","Cevada","Girassol"],
+    "🌿 Horticultura": ["Tomate","Batata","Cebola","Alho","Mandioca","Alface","Cenoura","Brócolis","Pepino","Pimentão"],
+    "🎯 Fruticultura": ["Laranja","Banana","Uva","Maçã","Manga","Abacate","Limão","Pêssego","Caqui","Café"],
+    "🌲 Silvicultura": ["Eucalipto","Pinus","Teca","Paricá","Cedro","Mogno Africano"],
+}
+
+def estimar_perda_hidrica(cultura, chuva_ciclo_mm, chuva_fase_critica=None):
     """
-    Estima a perda de produtividade (%) por déficit ou excesso hídrico,
-    comparando a chuva ACUMULADA do ciclo com a faixa ideal da cultura.
+    Estima a perda de produtividade (%) por déficit ou excesso hídrico.
 
     Base técnica (Embrapa, Doorenbos & Kassam 1979, Bergamaschi et al. 2006):
-    - Dentro da faixa ideal: sem perda por água.
-    - Déficit: a perda cresce com o quanto faltou de água. Estudos mostram
-      que déficit severo pode levar a perdas de até ~50%+, então usamos uma
-      relação proporcional ao déficit relativo, limitada a 60%.
-    - Excesso: encharcamento/veranicos invertidos causam perdas menores e mais
-      lentas que a seca (aeração, doenças), então o fator é mais brando.
+    - Compara a chuva ACUMULADA do ciclo com a faixa ideal da cultura.
+    - Aplica a SENSIBILIDADE da cultura ao déficit (café/milho sofrem mais;
+      mandioca/eucalipto toleram melhor por raízes profundas).
+    - Se informada a chuva da FASE CRÍTICA (floração/enchimento), ela pesa
+      mais no resultado — porque déficit nessa fase causa dano desproporcional
+      (um veranico na floração da soja quebra mais que total baixo distribuído).
 
     Retorna (perda_percentual, situacao_texto).
-    IMPORTANTE: é uma ESTIMATIVA de planejamento. A perda real depende muito
-    da FASE em que falta/sobra água (floração e enchimento R5-R6 são críticos),
-    da distribuição das chuvas e do solo — não só do total. Um veranico curto
-    na floração pode causar mais dano que um total baixo bem distribuído.
     """
     _c = cultura_limpa(cultura or "")
     faixa = _CHUVA_CICLO_MM.get(_c)
     if not faixa or chuva_ciclo_mm <= 0:
         return 0.0, "sem parâmetro"
-    _min, _max = faixa
+    _min, _max, _fase, _sens = faixa
+
+    # Perda base pelo total do ciclo
     if chuva_ciclo_mm < _min:
-        # Déficit relativo: quanto faltou em relação ao mínimo necessário
         _falta_rel = (_min - chuva_ciclo_mm) / _min
-        # Perda ~ proporcional ao déficit (fator 0.8), teto de 60%
-        perda = min(_falta_rel * 0.8 * 100, 60.0)
-        return round(perda, 1), "déficit hídrico (seca)"
+        perda_ciclo = min(_falta_rel * 0.8 * _sens * 100, 60.0)
+        situacao = "déficit hídrico (seca)"
     elif chuva_ciclo_mm > _max:
-        # Excesso relativo ao máximo tolerado
         _sobra_rel = (chuva_ciclo_mm - _max) / _max
-        # Excesso é menos danoso que seca por unidade — fator 0.35, teto 35%
-        perda = min(_sobra_rel * 0.35 * 100, 35.0)
-        return round(perda, 1), "excesso de chuva"
-    return 0.0, "faixa ideal"
+        perda_ciclo = min(_sobra_rel * 0.35 * 100, 35.0)
+        situacao = "excesso de chuva"
+    else:
+        perda_ciclo = 0.0
+        situacao = "faixa ideal"
+
+    # Refino pela fase crítica: se soubermos a chuva da fase crítica e ela
+    # estiver baixa, a perda é maior (peso 60% fase crítica / 40% ciclo geral).
+    if chuva_fase_critica is not None and _sens >= 0.7:
+        # Necessidade proporcional da fase crítica (~35% da água do ciclo
+        # concentrada na fase mais exigente)
+        _need_fase = (_min * 0.35)
+        if chuva_fase_critica < _need_fase and _need_fase > 0:
+            _falta_fase = (_need_fase - chuva_fase_critica) / _need_fase
+            perda_fase = min(_falta_fase * 0.9 * _sens * 100, 65.0)
+            # Combina: fase crítica pesa mais
+            perda_final = perda_ciclo * 0.4 + perda_fase * 0.6
+            return round(min(perda_final, 70.0), 1), "déficit na fase crítica"
+
+    return round(perda_ciclo, 1), situacao
 
 # ─────────────────────────────────────────────
 # MENU: INÍCIO
@@ -10714,6 +10773,38 @@ elif menu == "🌧️ Pluviômetro":
         🌧️ <b>Chuva ideal/mês:</b> {chuva_ideal_mes} mm
         </div>
         """, unsafe_allow_html=True)
+
+        # ── Tabela de necessidade hídrica por cultura (por segmento) ──
+        with st.expander("💧 Quanto de chuva cada cultura precisa no ciclo (por segmento)"):
+            st.caption("Faixas técnicas de necessidade hídrica por ciclo (Embrapa, "
+                       "ESALQ/USP, Doorenbos & Kassam). A perda é maior quando o "
+                       "déficit ocorre na fase crítica de cada cultura.")
+            import pandas as _pd_hidrico
+            _seg_ativo = st.session_state.get("segmento")
+            # Mostra o segmento ativo primeiro; se não houver, mostra todos
+            _segs_mostrar = ([_seg_ativo] if _seg_ativo in _CULTURA_SEGMENTO
+                             else list(_CULTURA_SEGMENTO.keys()))
+            for _seg in _segs_mostrar:
+                st.markdown(f"**{_seg}**")
+                _linhas = []
+                for _cult in _CULTURA_SEGMENTO[_seg]:
+                    _info = _CHUVA_CICLO_MM.get(_cult)
+                    if _info:
+                        _mn, _mx, _fase, _sens = _info
+                        _sens_txt = ("🔴 Alta" if _sens >= 0.9 else
+                                     "🟡 Média" if _sens >= 0.7 else "🟢 Tolerante")
+                        _linhas.append({
+                            "Cultura": _cult,
+                            "Chuva ideal/ciclo": f"{_mn}–{_mx} mm",
+                            "Fase mais crítica": _fase,
+                            "Sensib. à seca": _sens_txt,
+                        })
+                if _linhas:
+                    st.dataframe(_pd_hidrico.DataFrame(_linhas),
+                                 use_container_width=True, hide_index=True)
+            st.caption("💡 'Sensibilidade à seca' indica o quanto a cultura sofre com "
+                       "falta de água na fase crítica: 🔴 Alta (ex: café, milho, soja) · "
+                       "🟡 Média · 🟢 Tolerante (ex: mandioca, eucalipto, por raízes profundas).")
 
         # ── Registro diário ──────────────────────────────────
         st.subheader("➕ Registrar Chuva Diária")
