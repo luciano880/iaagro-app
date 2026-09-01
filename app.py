@@ -10596,7 +10596,7 @@ elif menu == "🧠 Assistente IA":
             with st.chat_message("user"):
                 st.markdown(_prompt_ia)
             with st.chat_message("assistant"):
-                with st.spinner("🌾 Consultando especialista agrícola..."):
+                with st.spinner("🌾 Analisando... (pode levar 1-2 min se eu precisar consultar bulas e dados na web)"):
                     try:
                         import requests as _rq_ia
                         import base64 as _b64_ia
@@ -10725,10 +10725,10 @@ elif menu == "🧠 Assistente IA":
                                 "tools": [{
                                     "type": "web_search_20250305",
                                     "name": "web_search",
-                                    "max_uses": 5,
+                                    "max_uses": 4,
                                 }],
                             },
-                            timeout=60,
+                            timeout=180,  # análises com busca na web podem levar 1-2 min
                         )
                         if _resp_ia.status_code == 200:
                             _data_ia = _resp_ia.json()
@@ -10751,6 +10751,10 @@ elif menu == "🧠 Assistente IA":
                             st.warning("⏳ Limite de requisições. Aguarde alguns segundos e tente novamente.")
                         else:
                             st.error(f"Erro na API: HTTP {_resp_ia.status_code}")
+                    except _rq_ia.exceptions.Timeout:
+                        st.warning("⏳ A análise está demorando mais que o normal (muitas buscas na web). "
+                                   "Tente de novo, ou faça uma pergunta mais específica — por exemplo, "
+                                   "analise um estádio ou produto por vez em vez do programa inteiro.")
                     except Exception as _e_ia:
                         st.error(f"Erro de conexão: {str(_e_ia)[:120]}")
 
