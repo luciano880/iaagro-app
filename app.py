@@ -10605,10 +10605,17 @@ elif menu == "🧠 Assistente IA":
                             {"role": m["role"], "content": m["content"]}
                             for m in st.session_state.assistente_hist[-10:]
                         ]
+                        # A API exige que a 1ª mensagem seja do usuário. Se o corte
+                        # deixou um 'assistant' no início, remove até achar um 'user'.
+                        while _msgs_ia and _msgs_ia[0]["role"] != "user":
+                            _msgs_ia.pop(0)
+                        if not _msgs_ia:
+                            _msgs_ia = [{"role":"user","content":_prompt_ia}]
 
                         # Se há documento anexado, injeta no ÚLTIMO turno do usuário
                         _doc_anexo = st.session_state.get("upload_doc_assistente")
                         _texto_extra_doc = ""
+                        _tem_doc_visual = False
                         if _doc_anexo is not None and _msgs_ia:
                             try:
                                 _doc_anexo.seek(0)
@@ -10619,10 +10626,12 @@ elif menu == "🧠 Assistente IA":
                                     _extd = "jpeg" if "jp" in _tipo_doc else "png"
                                     _conteudo_msg.append({"type":"image","source":{
                                         "type":"base64","media_type":f"image/{_extd}","data":_b64d}})
+                                    _tem_doc_visual = True
                                 elif _tipo_doc == "application/pdf":
                                     _b64d = _b64_ia.b64encode(_doc_anexo.read()).decode()
                                     _conteudo_msg.append({"type":"document","source":{
                                         "type":"base64","media_type":"application/pdf","data":_b64d}})
+                                    _tem_doc_visual = True
                                 elif _doc_anexo.name.lower().endswith((".xlsx",".csv")):
                                     # Planilha: extrai texto e anexa como contexto
                                     import pandas as _pd_doc
@@ -10709,6 +10718,22 @@ elif menu == "🧠 Assistente IA":
                             "vencimentos, ou sugestões de compra conforme o manejo. Seja prático. "
                             f"Contexto da propriedade: {_ctx_ia}"
                         )
+                        # Monta o payload. Quando há PDF/imagem anexado, NÃO usa
+                        # web_search na mesma chamada (a combinação documento + tool
+                        # causa HTTP 400). Para análise de documento, a busca não é
+                        # necessária — o conteúdo já está no anexo.
+                        _payload_ia = {
+                            "model":      "claude-sonnet-4-6",
+                            "max_tokens": 4000,
+                            "system":     _system_ia,
+                            "messages":   _msgs_ia,
+                        }
+                        if not _tem_doc_visual:
+                            _payload_ia["tools"] = [{
+                                "type": "web_search_20250305",
+                                "name": "web_search",
+                                "max_uses": 4,
+                            }]
                         _resp_ia = _rq_ia.post(
                             "https://api.anthropic.com/v1/messages",
                             headers={
@@ -10717,17 +10742,7 @@ elif menu == "🧠 Assistente IA":
                                 "anthropic-beta":    "pdfs-2024-09-25",
                                 "content-type":      "application/json",
                             },
-                            json={
-                                "model":      "claude-sonnet-4-6",
-                                "max_tokens": 4000,
-                                "system":     _system_ia,
-                                "messages":   _msgs_ia,
-                                "tools": [{
-                                    "type": "web_search_20250305",
-                                    "name": "web_search",
-                                    "max_uses": 4,
-                                }],
-                            },
+                            json=_payload_ia,
                             timeout=180,  # análises com busca na web podem levar 1-2 min
                         )
                         if _resp_ia.status_code == 200:
@@ -10750,7 +10765,13 @@ elif menu == "🧠 Assistente IA":
                         elif _resp_ia.status_code == 429:
                             st.warning("⏳ Limite de requisições. Aguarde alguns segundos e tente novamente.")
                         else:
-                            st.error(f"Erro na API: HTTP {_resp_ia.status_code}")
+                            _det = ""
+                            try:
+                                _det = _resp_ia.json().get("error",{}).get("message","")[:200]
+                            except Exception:
+                                pass
+                            st.error(f"Erro na API: HTTP {_resp_ia.status_code}"
+                                     + (f" — {_det}" if _det else ""))
                     except _rq_ia.exceptions.Timeout:
                         st.warning("⏳ A análise está demorando mais que o normal (muitas buscas na web). "
                                    "Tente de novo, ou faça uma pergunta mais específica — por exemplo, "
