@@ -2313,7 +2313,7 @@ PLANOS = {
         "preco":   0,
         "areas":   2,
         "estoque": 20,
-        "ia_perguntas_mes": 15,
+        "ia_perguntas_mes": 5,
         "cor":     "#78350f",
         "borda":   "#f59e0b",
         "recursos": [
@@ -10535,7 +10535,7 @@ elif menu == "🧠 Assistente IA":
         _uso_ia = {"mes": _mes_atual, "count": 0}
         st.session_state.dados["ia_uso"] = _uso_ia
     _plano_atual_ia = st.session_state.get("sb_plano", "free")
-    _limite_ia = PLANOS.get(_plano_atual_ia, PLANOS["free"]).get("ia_perguntas_mes", 15)
+    _limite_ia = PLANOS.get(_plano_atual_ia, PLANOS["free"]).get("ia_perguntas_mes", 5)
     _usadas_ia = _uso_ia.get("count", 0)
     _restantes_ia = max(_limite_ia - _usadas_ia, 0)
 
