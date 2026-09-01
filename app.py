@@ -5949,8 +5949,11 @@ if menu == "🌾 Lavoura":
             st.success("📍 Esta área já tem um croqui salvo (mostrado em verde no mapa). "
                        "Desenhe um novo apenas se quiser substituí-lo.")
 
-        # key única e largura responsiva evitam o mapa sumir após reruns
-        _key_mapa = f"mapa_talhao_{st.session_state.dados.get('id_area','x')}"
+        # key única POR ÁREA e POR VERSÃO do croqui. A versão muda toda vez que
+        # o croqui é salvo — assim o st_folium recria o mapa e mostra o desenho
+        # novo (com key fixa, ele mantinha o mapa em cache e ficava o antigo).
+        _versao_croqui = st.session_state.get("_croqui_versao", 0)
+        _key_mapa = f"mapa_talhao_{st.session_state.dados.get('id_area','x')}_{_versao_croqui}"
         dados_mapa_folium = None
         try:
             dados_mapa_folium = st_folium(mapa_folium, width=None, height=500,
@@ -6050,8 +6053,10 @@ if menu == "🌾 Lavoura":
                     st.session_state.areas[idx_area]["area_calculada_ha"] = round(area_calculada, 2)
 
                 salvar_dados_iaagro()
+                # Incrementa a versão do croqui → muda a key do mapa → st_folium
+                # recria o mapa exibindo o desenho NOVO (senão fica o antigo em cache)
+                st.session_state["_croqui_versao"] = st.session_state.get("_croqui_versao", 0) + 1
                 success_box("✅ Desenho do talhão salvo/atualizado com sucesso!")
-                # Recarrega para o mapa exibir o croqui NOVO (senão fica o antigo)
                 st.rerun()
 
 
