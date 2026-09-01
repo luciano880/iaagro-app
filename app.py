@@ -5878,10 +5878,13 @@ if menu == "🌾 Lavoura":
         if st.session_state.get("_gps_mf_lat"):
             latitude  = st.session_state["_gps_mf_lat"]
             longitude = st.session_state["_gps_mf_lon"]
-        mapa_folium = folium.Map(location=[latitude, longitude], zoom_start=13, tiles=None)
+        # Base OpenStreetMap (muito confiável) + satélite Esri como opção.
+        # Antes o mapa dependia só da Esri; quando ela não carregava, ficava em branco.
+        mapa_folium = folium.Map(location=[latitude, longitude], zoom_start=13,
+                                 tiles="OpenStreetMap")
         folium.TileLayer(
             tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            attr="Esri", name="Satélite", control=True
+            attr="Esri", name="🛰️ Satélite", control=True
         ).add_to(mapa_folium)
         folium.TileLayer(
             tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
@@ -5947,8 +5950,15 @@ if menu == "🌾 Lavoura":
 
         # key única e largura responsiva evitam o mapa sumir após reruns
         _key_mapa = f"mapa_talhao_{st.session_state.dados.get('id_area','x')}"
-        dados_mapa_folium = st_folium(mapa_folium, width=None, height=500,
-                                      key=_key_mapa, returned_objects=["last_active_drawing","all_drawings"])
+        dados_mapa_folium = None
+        try:
+            dados_mapa_folium = st_folium(mapa_folium, width=None, height=500,
+                                          key=_key_mapa,
+                                          returned_objects=["last_active_drawing","all_drawings"])
+        except Exception as _e_mapa:
+            st.warning("⚠️ O mapa não pôde ser exibido agora. Isso costuma ser temporário "
+                       "(conexão com o servidor de mapas). Recarregue a página. "
+                       "Você ainda pode usar Latitude/Longitude e GPS acima normalmente.")
         st.subheader("💾 Salvar Desenho do Talhão")
 
         st.info("💡 **Dica no celular:** Marque os pontos no sentido horário ao redor do talhão, sem cruzar as linhas. Use o botão **Delete last point** para desfazer o último ponto.")
