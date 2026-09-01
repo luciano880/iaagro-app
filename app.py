@@ -4936,6 +4936,54 @@ def cultura_limpa(c):
         return c.split(" ",1)[1]
     return c
 
+# Necessidade hídrica por CICLO (mm) — faixas técnicas (Embrapa/Doorenbos & Kassam).
+# min = limite abaixo do qual começa déficit; max = acima começa risco de excesso.
+_CHUVA_CICLO_MM = {
+    "Soja": (450, 800),  "Milho": (500, 800),  "Trigo": (350, 600),
+    "Feijão": (300, 500),"Canola": (400, 700), "Aveia": (300, 550),
+    "Cana-de-açúcar": (1200, 1800), "Arroz": (900, 1300), "Sorgo": (350, 650),
+    "Girassol": (400, 700), "Cevada": (350, 600), "Pastagem": (500, 1200),
+    "Algodão": (700, 1300), "Café": (1200, 1800), "Mandioca": (800, 1500),
+}
+
+def estimar_perda_hidrica(cultura, chuva_ciclo_mm):
+    """
+    Estima a perda de produtividade (%) por déficit ou excesso hídrico,
+    comparando a chuva ACUMULADA do ciclo com a faixa ideal da cultura.
+
+    Base técnica (Embrapa, Doorenbos & Kassam 1979, Bergamaschi et al. 2006):
+    - Dentro da faixa ideal: sem perda por água.
+    - Déficit: a perda cresce com o quanto faltou de água. Estudos mostram
+      que déficit severo pode levar a perdas de até ~50%+, então usamos uma
+      relação proporcional ao déficit relativo, limitada a 60%.
+    - Excesso: encharcamento/veranicos invertidos causam perdas menores e mais
+      lentas que a seca (aeração, doenças), então o fator é mais brando.
+
+    Retorna (perda_percentual, situacao_texto).
+    IMPORTANTE: é uma ESTIMATIVA de planejamento. A perda real depende muito
+    da FASE em que falta/sobra água (floração e enchimento R5-R6 são críticos),
+    da distribuição das chuvas e do solo — não só do total. Um veranico curto
+    na floração pode causar mais dano que um total baixo bem distribuído.
+    """
+    _c = cultura_limpa(cultura or "")
+    faixa = _CHUVA_CICLO_MM.get(_c)
+    if not faixa or chuva_ciclo_mm <= 0:
+        return 0.0, "sem parâmetro"
+    _min, _max = faixa
+    if chuva_ciclo_mm < _min:
+        # Déficit relativo: quanto faltou em relação ao mínimo necessário
+        _falta_rel = (_min - chuva_ciclo_mm) / _min
+        # Perda ~ proporcional ao déficit (fator 0.8), teto de 60%
+        perda = min(_falta_rel * 0.8 * 100, 60.0)
+        return round(perda, 1), "déficit hídrico (seca)"
+    elif chuva_ciclo_mm > _max:
+        # Excesso relativo ao máximo tolerado
+        _sobra_rel = (chuva_ciclo_mm - _max) / _max
+        # Excesso é menos danoso que seca por unidade — fator 0.35, teto 35%
+        perda = min(_sobra_rel * 0.35 * 100, 35.0)
+        return round(perda, 1), "excesso de chuva"
+    return 0.0, "faixa ideal"
+
 # ─────────────────────────────────────────────
 # MENU: INÍCIO
 # ─────────────────────────────────────────────
@@ -5611,19 +5659,21 @@ if menu == "🌾 Lavoura":
                 if "Perda Estimada" in registros_area[0]:
                     perda_media_clima = sum(r.get("Perda Estimada", 0) for r in registros_area) / len(registros_area)
                 else:
-                    _ideal = 120.0
-                    _meses = {}
+                    # Soma a chuva acumulada por ANO-SAFRA e compara com a faixa
+                    # técnica da cultura (perda por déficit ou excesso hídrico).
+                    _cultura_area = area.get("Cultura", "")
+                    _por_ano = {}
                     for r in registros_area:
-                        _k = f"{r.get('ano',0)}-{r.get('mes',0)}"
-                        _meses[_k] = _meses.get(_k, 0) + r.get("mm", 0)
+                        _ano = r.get("ano", 0)
+                        _por_ano[_ano] = _por_ano.get(_ano, 0) + r.get("mm", 0)
                     _perdas = []
-                    for _mm in _meses.values():
-                        if _mm < _ideal * 0.7:   _perdas.append((_ideal - _mm) * 0.15)
-                        elif _mm > _ideal * 1.3: _perdas.append((_mm - _ideal) * 0.08)
-                        else:                    _perdas.append(0)
+                    for _chuva_ano in _por_ano.values():
+                        _p, _ = estimar_perda_hidrica(_cultura_area, _chuva_ano)
+                        _perdas.append(_p)
                     perda_media_clima = sum(_perdas) / len(_perdas) if _perdas else 0
+                # Faixas de status em % de perda de produtividade
                 if   perda_media_clima <= 5:  clima_cor = "🟢 Ideal"
-                elif perda_media_clima <= 12: clima_cor = "🟡 Atenção"
+                elif perda_media_clima <= 15: clima_cor = "🟡 Atenção"
                 else:                         clima_cor = "🔴 Crítico"
             else:
                 clima_cor = "⚪ Sem dados"
