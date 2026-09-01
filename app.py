@@ -10827,17 +10827,25 @@ elif menu == "🌧️ Pluviômetro":
                        "ESALQ/USP, Doorenbos & Kassam). A perda é maior quando o "
                        "déficit ocorre na fase crítica de cada cultura.")
             import pandas as _pd_hidrico
-            # Descobre o segmento a mostrar: primeiro pela cultura da área ativa,
-            # senão pelo segmento salvo do usuário. Assim nunca mistura segmentos.
+            # Descobre o segmento a mostrar: PRIORIZA a cultura da ÁREA selecionada
+            # (você está analisando a chuva daquela área específica, então a tabela
+            # deve refletir a cultura dela). Usa o segmento do topo só como reserva,
+            # quando a cultura da área não estiver identificada.
             _cult_ativa_limpa = cultura_limpa(cultura_chuva)
-            _seg_da_cultura = None
+            _seg_ativo = None
             for _sg, _cults in _CULTURA_SEGMENTO.items():
                 if _cult_ativa_limpa in _cults:
-                    _seg_da_cultura = _sg
+                    _seg_ativo = _sg
                     break
-            _seg_ativo = _seg_da_cultura or st.session_state.get("segmento")
+            if _seg_ativo is None:
+                _seg_usuario = st.session_state.get("segmento")
+                if _seg_usuario in _CULTURA_SEGMENTO:
+                    _seg_ativo = _seg_usuario
 
             if _seg_ativo in _CULTURA_SEGMENTO:
+                st.caption(f"Mostrando o segmento da cultura desta área "
+                           f"(**{_cult_ativa_limpa}**). Para ver outra cultura, "
+                           f"selecione uma área dessa cultura acima.")
                 st.markdown(f"**{_seg_ativo}**")
                 _linhas = []
                 for _cult in _CULTURA_SEGMENTO[_seg_ativo]:
