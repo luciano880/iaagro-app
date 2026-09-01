@@ -5913,6 +5913,15 @@ if menu == "🌾 Lavoura":
         # Se a área atual já tem um croqui salvo, mostra ele no mapa
         _desenho_salvo = st.session_state.dados.get("desenho_talhao")
         _tem_croqui = False
+        # DIAGNÓSTICO temporário: mostra as coordenadas do croqui salvo
+        if _desenho_salvo and isinstance(_desenho_salvo, dict) and _desenho_salvo.get("geometry"):
+            try:
+                _dbg_c = _desenho_salvo["geometry"]["coordinates"][0]
+                st.caption(f"🔍 Croqui salvo: {len(_dbg_c)} pontos · "
+                           f"1º ponto [{_dbg_c[0][0]:.5f}, {_dbg_c[0][1]:.5f}] · "
+                           f"versão {st.session_state.get('_croqui_versao',0)}")
+            except Exception:
+                pass
         if _desenho_salvo and isinstance(_desenho_salvo, dict) and _desenho_salvo.get("geometry"):
             try:
                 _geo = _desenho_salvo["geometry"]
@@ -5978,8 +5987,21 @@ if menu == "🌾 Lavoura":
                 if _todos:
                     _novo_desenho = _todos[-1]  # o último desenhado
 
+        # Assim que um desenho válido chega, guarda no session_state. Isso é
+        # essencial: quando você clica em "Salvar", o rerun do clique faz o
+        # st_folium retornar vazio — então precisamos ter guardado o desenho antes.
         if _novo_desenho and _novo_desenho.get("geometry"):
-            desenho = _novo_desenho
+            try:
+                _c_check = _novo_desenho["geometry"]["coordinates"][0]
+                if _c_check and len(_c_check) >= 3:
+                    st.session_state["_desenho_pendente"] = _novo_desenho
+            except Exception:
+                pass
+
+        # Usa o desenho pendente (recém-capturado) para mostrar o botão de salvar
+        _desenho_para_salvar = st.session_state.get("_desenho_pendente")
+        if _desenho_para_salvar and _desenho_para_salvar.get("geometry"):
+            desenho = _desenho_para_salvar
             coords  = desenho["geometry"]["coordinates"][0]
 
             # Corrige automaticamente polígonos com bordas cruzadas usando convex hull
@@ -6056,6 +6078,8 @@ if menu == "🌾 Lavoura":
                 # Incrementa a versão do croqui → muda a key do mapa → st_folium
                 # recria o mapa exibindo o desenho NOVO (senão fica o antigo em cache)
                 st.session_state["_croqui_versao"] = st.session_state.get("_croqui_versao", 0) + 1
+                # Limpa o desenho pendente (já foi salvo)
+                st.session_state.pop("_desenho_pendente", None)
                 success_box("✅ Desenho do talhão salvo/atualizado com sucesso!")
                 st.rerun()
 
