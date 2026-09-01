@@ -10775,19 +10775,25 @@ elif menu == "🌧️ Pluviômetro":
         """, unsafe_allow_html=True)
 
         # ── Tabela de necessidade hídrica por cultura (por segmento) ──
-        with st.expander("💧 Quanto de chuva cada cultura precisa no ciclo (por segmento)"):
+        with st.expander("💧 Quanto de chuva cada cultura precisa no ciclo (do seu segmento)"):
             st.caption("Faixas técnicas de necessidade hídrica por ciclo (Embrapa, "
                        "ESALQ/USP, Doorenbos & Kassam). A perda é maior quando o "
                        "déficit ocorre na fase crítica de cada cultura.")
             import pandas as _pd_hidrico
-            _seg_ativo = st.session_state.get("segmento")
-            # Mostra o segmento ativo primeiro; se não houver, mostra todos
-            _segs_mostrar = ([_seg_ativo] if _seg_ativo in _CULTURA_SEGMENTO
-                             else list(_CULTURA_SEGMENTO.keys()))
-            for _seg in _segs_mostrar:
-                st.markdown(f"**{_seg}**")
+            # Descobre o segmento a mostrar: primeiro pela cultura da área ativa,
+            # senão pelo segmento salvo do usuário. Assim nunca mistura segmentos.
+            _cult_ativa_limpa = cultura_limpa(cultura_chuva)
+            _seg_da_cultura = None
+            for _sg, _cults in _CULTURA_SEGMENTO.items():
+                if _cult_ativa_limpa in _cults:
+                    _seg_da_cultura = _sg
+                    break
+            _seg_ativo = _seg_da_cultura or st.session_state.get("segmento")
+
+            if _seg_ativo in _CULTURA_SEGMENTO:
+                st.markdown(f"**{_seg_ativo}**")
                 _linhas = []
-                for _cult in _CULTURA_SEGMENTO[_seg]:
+                for _cult in _CULTURA_SEGMENTO[_seg_ativo]:
                     _info = _CHUVA_CICLO_MM.get(_cult)
                     if _info:
                         _mn, _mx, _fase, _sens = _info
@@ -10802,6 +10808,9 @@ elif menu == "🌧️ Pluviômetro":
                 if _linhas:
                     st.dataframe(_pd_hidrico.DataFrame(_linhas),
                                  use_container_width=True, hide_index=True)
+            else:
+                st.info("Defina o segmento nas configurações (ou selecione uma área "
+                        "com cultura cadastrada) para ver a tabela do seu segmento.")
             st.caption("💡 'Sensibilidade à seca' indica o quanto a cultura sofre com "
                        "falta de água na fase crítica: 🔴 Alta (ex: café, milho, soja) · "
                        "🟡 Média · 🟢 Tolerante (ex: mandioca, eucalipto, por raízes profundas).")
