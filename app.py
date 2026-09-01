@@ -5159,6 +5159,16 @@ if menu == "🏠 Início":
                                 "a liberação leva alguns minutos. Se demorar, verifique "
                                 "se pagou com o mesmo e-mail do cadastro ou fale com o suporte.")
 
+        # Métricas gerais da propriedade
+        total_areas      = len(st.session_state.areas)
+        total_estoque    = len(st.session_state.estoque)
+        total_aplicacoes = len(st.session_state.aplicacoes)
+        area_total       = sum(a.get("Hectares", 0) for a in st.session_state.areas)
+        produtividade_media = (
+            sum(a.get("Meta Produtividade", 0) for a in st.session_state.areas) / total_areas
+            if total_areas > 0 else 0
+        )
+
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("🌾 Áreas",      total_areas)
         col2.metric("📦 Estoque",    total_estoque)
