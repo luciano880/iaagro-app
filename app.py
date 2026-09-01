@@ -5945,7 +5945,10 @@ if menu == "🌾 Lavoura":
             st.success("📍 Esta área já tem um croqui salvo (mostrado em verde no mapa). "
                        "Desenhe um novo apenas se quiser substituí-lo.")
 
-        dados_mapa_folium = st_folium(mapa_folium, width=900, height=500)
+        # key única e largura responsiva evitam o mapa sumir após reruns
+        _key_mapa = f"mapa_talhao_{st.session_state.dados.get('id_area','x')}"
+        dados_mapa_folium = st_folium(mapa_folium, width=None, height=500,
+                                      key=_key_mapa, returned_objects=["last_active_drawing","all_drawings"])
         st.subheader("💾 Salvar Desenho do Talhão")
 
         st.info("💡 **Dica no celular:** Marque os pontos no sentido horário ao redor do talhão, sem cruzar as linhas. Use o botão **Delete last point** para desfazer o último ponto.")
