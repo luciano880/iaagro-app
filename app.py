@@ -6058,11 +6058,41 @@ if menu == "🌾 Lavoura":
                           for a in st.session_state.areas]
             area_vincular = st.selectbox("Vincular desenho à área:", ["— Não vincular —"] + areas_disp, key="sel_area_croqui")
 
+            def poligono_se_cruza(pts):
+                """Detecta se o polígono (lista de [lon,lat]) tem bordas que se
+                cruzam (self-intersecting). Só nesse caso vale a pena aplicar o
+                convex hull — em qualquer outro caso ele destruiria concavidades
+                válidas que o usuário desenhou de propósito."""
+                def segmentos_cruzam(p1, p2, p3, p4):
+                    def ccw(A, B, C):
+                        return (C[1]-A[1])*(B[0]-A[0]) > (B[1]-A[1])*(C[0]-A[0])
+                    return (ccw(p1,p3,p4) != ccw(p2,p3,p4)) and (ccw(p1,p2,p3) != ccw(p1,p2,p4))
+                n = len(pts)
+                if n < 4:
+                    return False
+                for i in range(n):
+                    a1, a2 = pts[i], pts[(i+1) % n]
+                    for j in range(i+1, n):
+                        # ignora segmentos adjacentes (compartilham vértice)
+                        if j == i or (j+1) % n == i or (i+1) % n == j:
+                            continue
+                        b1, b2 = pts[j], pts[(j+1) % n]
+                        if segmentos_cruzam(a1, a2, b1, b2):
+                            return True
+                return False
+
             if st.button("Salvar desenho no talhão", key="salvar_desenho_talhao"):
-                pts_hull = convex_hull([[c[0], c[1]] for c in coords])
-                if len(pts_hull) >= 3:
-                    pts_hull.append(pts_hull[0])
-                    desenho["geometry"]["coordinates"][0] = [[p[0], p[1]] for p in pts_hull]
+                _pts_originais = [[c[0], c[1]] for c in coords]
+                if poligono_se_cruza(_pts_originais):
+                    # Só corrige com convex hull quando realmente há
+                    # auto-interseção — senão manteríamos as concavidades do
+                    # desenho original do usuário.
+                    pts_hull = convex_hull(_pts_originais)
+                    if len(pts_hull) >= 3:
+                        pts_hull.append(pts_hull[0])
+                        desenho["geometry"]["coordinates"][0] = [[p[0], p[1]] for p in pts_hull]
+                    warning_box("⚠️ O desenho tinha linhas cruzadas — corrigido automaticamente "
+                                "(o contorno final pode ter perdido reentrâncias).")
 
                 # Salva no session_state global
                 st.session_state.dados["desenho_talhao"] = desenho
