@@ -5891,15 +5891,30 @@ if menu == "🌾 Lavoura":
             attr="Esri", name="Nomes e locais", overlay=True, control=True
         ).add_to(mapa_folium)
         folium.LayerControl(position="topright", collapsed=False).add_to(mapa_folium)
+        Draw(
+            draw_options={
+                "polyline":     False,
+                "rectangle":    True,
+                "circle":       False,
+                "marker":       False,
+                "circlemarker": False,
+                "polygon": {
+                    "allowIntersection": True,
+                    "showArea": True,
+                    "metric": True,
+                }
+            },
+            edit_options={"edit": True, "remove": True}
+        ).add_to(mapa_folium)
+        folium.Marker(location=[latitude, longitude], popup="Minha localização",
+                      tooltip="Local atual", icon=folium.Icon(color="darkgreen", icon="leaf")
+        ).add_to(mapa_folium)
 
-        # Grupo editável — TUDO que precisa ser editável/apagável pelo lápis
-        # do Draw (inclusive o croqui já salvo) precisa estar DENTRO deste
-        # grupo, e o Draw precisa ser criado com feature_group=este grupo.
-        # Antes o croqui salvo era desenhado direto no mapa (fora do grupo),
-        # por isso o lápis não conseguia editá-lo.
-        _grupo_editavel = folium.FeatureGroup(name="Desenho do talhão")
-
-        # Se a área atual já tem um croqui salvo, adiciona ele ao grupo editável
+        # Se a área atual já tem um croqui salvo, mostra ele no mapa (camada
+        # estática — não editável pelo lápis do Draw). Tentamos deixar essa
+        # camada editável colocando-a dentro do FeatureGroup do Draw, mas
+        # isso quebrava a renderização do mapa neste ambiente — revertido.
+        # Para trocar o croqui, desenhe um novo polígono por cima e salve.
         _desenho_salvo = st.session_state.dados.get("desenho_talhao")
         _tem_croqui = False
         if _desenho_salvo and isinstance(_desenho_salvo, dict) and _desenho_salvo.get("geometry"):
@@ -5921,8 +5936,8 @@ if menu == "🌾 Lavoura":
                             locations=_pts_poly,
                             color="#15803d", weight=3,
                             fill=True, fill_color="#22c55e", fill_opacity=0.25,
-                            tooltip="Talhão salvo (edite com o lápis ou apague com a lixeira)",
-                        ).add_to(_grupo_editavel)
+                            tooltip="Talhão salvo",
+                        ).add_to(mapa_folium)
                         # Só ajusta o zoom se o polígono tiver tamanho real
                         # (evita fit_bounds degenerado que quebra o mapa)
                         if (max(_lats) - min(_lats) > 1e-6 and
@@ -5934,32 +5949,9 @@ if menu == "🌾 Lavoura":
             except Exception:
                 _tem_croqui = False
 
-        _grupo_editavel.add_to(mapa_folium)
-
-        Draw(
-            draw_options={
-                "polyline":     False,
-                "rectangle":    True,
-                "circle":       False,
-                "marker":       False,
-                "circlemarker": False,
-                "polygon": {
-                    "allowIntersection": True,
-                    "showArea": True,
-                    "metric": True,
-                }
-            },
-            edit_options={"edit": True, "remove": True},
-            feature_group=_grupo_editavel,
-        ).add_to(mapa_folium)
-        folium.Marker(location=[latitude, longitude], popup="Minha localização",
-                      tooltip="Local atual", icon=folium.Icon(color="darkgreen", icon="leaf")
-        ).add_to(mapa_folium)
-
         if _tem_croqui:
             st.success("📍 Esta área já tem um croqui salvo (mostrado em verde no mapa). "
-                       "Clique no lápis ✏️ para editá-lo, na lixeira 🗑️ para apagá-lo, "
-                       "ou desenhe um novo polígono para substituí-lo.")
+                       "Desenhe um novo polígono por cima para substituí-lo.")
 
         # key única POR ÁREA e POR VERSÃO do croqui. A versão muda toda vez que
         # o croqui é salvo — assim o st_folium recria o mapa e mostra o desenho
