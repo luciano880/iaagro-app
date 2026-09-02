@@ -5931,12 +5931,18 @@ if menu == "🌾 Lavoura":
                         # Usa folium.Polygon (recebe [lat,lon] direto) em vez de
                         # GeoJson — o GeoJson quebrava a renderização do mapa quando
                         # havia croqui salvo (confirmado em teste). Polygon é robusto.
+                        # interactive=False é CRÍTICO: sem isso, tocar/clicar nesta
+                        # camada (o que acontece o tempo todo ao desenhar um novo
+                        # croqui por cima do antigo) disparava um evento de clique
+                        # que o componente confundia com "último desenho ativo",
+                        # sobrescrevendo o desenho novo pelo antigo antes de salvar.
                         _pts_poly = [[float(c[1]), float(c[0])] for c in _coords_salvas]
                         folium.Polygon(
                             locations=_pts_poly,
                             color="#15803d", weight=3,
                             fill=True, fill_color="#22c55e", fill_opacity=0.25,
                             tooltip="Talhão salvo",
+                            interactive=False,
                         ).add_to(mapa_folium)
                         # Só ajusta o zoom se o polígono tiver tamanho real
                         # (evita fit_bounds degenerado que quebra o mapa)
