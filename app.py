@@ -6060,9 +6060,9 @@ if menu == "🌾 Lavoura":
 
             def poligono_se_cruza(pts):
                 """Detecta se o polígono (lista de [lon,lat]) tem bordas que se
-                cruzam (self-intersecting). Só nesse caso vale a pena aplicar o
-                convex hull — em qualquer outro caso ele destruiria concavidades
-                válidas que o usuário desenhou de propósito."""
+                cruzam (self-intersecting). Usado só para AVISAR o usuário —
+                não corrige/altera nada automaticamente, porque a correção via
+                convex hull apaga reentrâncias válidas do desenho original."""
                 def segmentos_cruzam(p1, p2, p3, p4):
                     def ccw(A, B, C):
                         return (C[1]-A[1])*(B[0]-A[0]) > (B[1]-A[1])*(C[0]-A[0])
@@ -6082,17 +6082,15 @@ if menu == "🌾 Lavoura":
                 return False
 
             if st.button("Salvar desenho no talhão", key="salvar_desenho_talhao"):
+                # Salva o desenho SEMPRE exatamente como foi traçado — sem
+                # aplicar convex hull nem qualquer outra correção automática,
+                # pois isso apagava reentrâncias válidas do polígono do usuário.
                 _pts_originais = [[c[0], c[1]] for c in coords]
                 if poligono_se_cruza(_pts_originais):
-                    # Só corrige com convex hull quando realmente há
-                    # auto-interseção — senão manteríamos as concavidades do
-                    # desenho original do usuário.
-                    pts_hull = convex_hull(_pts_originais)
-                    if len(pts_hull) >= 3:
-                        pts_hull.append(pts_hull[0])
-                        desenho["geometry"]["coordinates"][0] = [[p[0], p[1]] for p in pts_hull]
-                    warning_box("⚠️ O desenho tinha linhas cruzadas — corrigido automaticamente "
-                                "(o contorno final pode ter perdido reentrâncias).")
+                    warning_box("⚠️ Atenção: o desenho parece ter linhas que se cruzam. "
+                                "Ele foi salvo do jeito que você traçou — se o formato "
+                                "não ficar certo no mapa, desenhe de novo com mais cuidado "
+                                "nos cantos, sem cruzar as bordas.")
 
                 # Salva no session_state global
                 st.session_state.dados["desenho_talhao"] = desenho
