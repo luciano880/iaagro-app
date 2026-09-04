@@ -9479,10 +9479,69 @@ if menu == "📦 Operacional":
                         if col_b1.button("✅ Marcar como Aplicado", key=f"btn_confirmar_aplic_{idx_a}",
                                          use_container_width=True, type="primary"):
                             _erros_baixa = []
+                            _avisos_baixa = []
                             for p in aplic.get("Produtos",[]):
                                 ok_b, msg_b = baixar_estoque(p["Produto"], p.get("Total usado",0), p.get("Unidade","L/ha"))
                                 if not ok_b:
                                     _erros_baixa.append(f"{p.get('Produto','')}: {msg_b}")
+
+                            # ── Baixa dos itens de PLANTIO (sementes, adubos, KCl,
+                            # ureia) — antes só os produtos da lista "Produtos" davam
+                            # baixa; aplicações de Plantio guardam os insumos em
+                            # "Dados Plantio" e nunca desconta o estoque. ──
+                            _dp_baixa = aplic.get("Dados Plantio", {})
+                            if _dp_baixa:
+                                _area_dp = aplic.get("Área aplicada ha", 0) or 0
+                                _itens_baixa_dp = []
+                                # Sementes — múltiplas variedades (já vem com total_kg pronto)
+                                for _v in _dp_baixa.get("variedades", []):
+                                    if _v.get("nome") and _v.get("total_kg", 0) > 0:
+                                        _itens_baixa_dp.append((_v["nome"], _v["total_kg"], "kg"))
+                                # Semente legado (single)
+                                if _dp_baixa.get("semente") and _dp_baixa.get("semente_total_kg", 0) > 0:
+                                    _itens_baixa_dp.append((_dp_baixa["semente"], _dp_baixa["semente_total_kg"], "kg"))
+                                # Adubos de base (lista, ou legado único)
+                                _adubos_baixa = _dp_baixa.get("adubos") or (
+                                    [{"nome": _dp_baixa["adubo_nome"], "total_kg": _dp_baixa.get("adubo_total_kg", 0)}]
+                                    if _dp_baixa.get("adubo_nome") else []
+                                )
+                                for _a in _adubos_baixa:
+                                    if _a.get("nome") and _a.get("total_kg", 0) > 0:
+                                        _itens_baixa_dp.append((_a["nome"], _a["total_kg"], "kg"))
+                                # KCl
+                                if _dp_baixa.get("kcl_nome") and _dp_baixa.get("kcl_total_kg", 0) > 0:
+                                    _itens_baixa_dp.append((_dp_baixa["kcl_nome"], _dp_baixa["kcl_total_kg"], "kg"))
+                                # Ureia/N (lista, ou legado único)
+                                _ureias_baixa = _dp_baixa.get("ureias") or (
+                                    [{"nome": _dp_baixa["ureia_nome"], "total_kg": _dp_baixa.get("ureia_total_kg", 0)}]
+                                    if _dp_baixa.get("ureia_nome") else []
+                                )
+                                for _u in _ureias_baixa:
+                                    if _u.get("nome") and _u.get("total_kg", 0) > 0:
+                                        _itens_baixa_dp.append((_u["nome"], _u["total_kg"], "kg"))
+                                # Inoculantes no sulco e co-inoculante (dose em mL/ha)
+                                for _chave_nome, _chave_dose in [("inoc1_nome","inoc1_dose"), ("inoc2_nome","inoc2_dose")]:
+                                    if _dp_baixa.get(_chave_nome) and _dp_baixa.get(_chave_dose, 0) > 0 and _area_dp > 0:
+                                        _total_ml = _dp_baixa[_chave_dose] * _area_dp
+                                        _itens_baixa_dp.append((_dp_baixa[_chave_nome], _total_ml, "mL"))
+                                # Micronutrientes no sulco (dose em kg/L por ha)
+                                for _chave_nome, _chave_dose in [("micro1_nome","micro1_dose"), ("micro2_nome","micro2_dose")]:
+                                    if _dp_baixa.get(_chave_nome) and _dp_baixa.get(_chave_dose, 0) > 0 and _area_dp > 0:
+                                        _total_kg = _dp_baixa[_chave_dose] * _area_dp
+                                        _itens_baixa_dp.append((_dp_baixa[_chave_nome], _total_kg, "kg"))
+                                # Inoculante de semente (mL/sc) não entra — não temos
+                                # o total de sacas de semente de forma confiável, então
+                                # avisa o usuário para dar baixa manual desse item.
+                                if _dp_baixa.get("inoc3_nome") and _dp_baixa.get("inoc3_dose", 0) > 0:
+                                    _avisos_baixa.append(
+                                        f"{_dp_baixa['inoc3_nome']} (inoculante de semente) — "
+                                        f"dê baixa manual no estoque, dose é por saca")
+
+                                for _nome_i, _qtd_i, _unid_i in _itens_baixa_dp:
+                                    ok_b, msg_b = baixar_estoque(_nome_i, _qtd_i, f"{_unid_i}/ha")
+                                    if not ok_b:
+                                        _erros_baixa.append(f"{_nome_i}: {msg_b}")
+
                             _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
                                              if a.get("Data") == aplic.get("Data") and
                                              a.get("Aplicação") == aplic.get("Aplicação")), None)
@@ -9493,6 +9552,8 @@ if menu == "📦 Operacional":
                             salvar_dados_iaagro()
                             if _erros_baixa:
                                 warning_box("Aplicado! Aviso estoque: " + " | ".join(_erros_baixa))
+                            elif _avisos_baixa:
+                                warning_box("✅ Aplicado! Baixa dada no estoque. Pendente: " + " | ".join(_avisos_baixa))
                             else:
                                 success_box("✅ Marcado como aplicado! Baixa dada no estoque.")
                             st.rerun()
