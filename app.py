@@ -4756,28 +4756,97 @@ def preco_por_kg_ou_l(item):
 
 def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
     """
-    Dá baixa no estoque convertendo unidades automaticamente.
-    Estoque sempre em L ou kg. Aplicação pode ser mL/ha, g/ha, etc.
-    """
-    def converter_para_base(qtd, unid):
-        """Converte para a unidade base: L ou kg."""
-        unid = (unid or "").lower().replace(" ", "")
-        base = unid.split("/")[0]  # "ml/ha"->"ml"  "kg/ha"->"kg"  "g/ha"->"g"  "mg/ha"->"mg"
-        if base == "ml": return qtd / 1000       # mL → L
-        if base == "g":  return qtd / 1000       # g → kg (NÃO confundir com "kg")
-        if base == "mg": return qtd / 1_000_000
-        return qtd  # já em L ou kg
+    Dá baixa no estoque, convertendo a unidade da aplicação (kg/ha, mL/ha, g/ha...)
+    para a MESMA FAMÍLIA de unidade do item no estoque.
 
-    qtd_convertida = converter_para_base(quantidade_usada, unidade_usada)
+    IMPORTANTE: antes esta função assumia que o estoque estava sempre em L ou kg
+    e comparava os números direto — isso causava baixa incorreta (ou erro de
+    "estoque insuficiente" por engano) quando o insumo estava cadastrado em uma
+    unidade de EMBALAGEM como "sc" (saca), porque comparava ex: 616 (kg
+    necessários) >= 37 (sacas em estoque) como se fossem a mesma coisa.
+
+    Agora: para "sc" (saca), usa o campo Embalagem do estoque (ex: "40 kg") pra
+    saber o peso por saca e converter automaticamente. Se esse peso não estiver
+    cadastrado, pede pra preencher em vez de arriscar comparar números errados.
+    Para as demais unidades, só faz baixa automática quando a unidade do
+    estoque é da mesma família (massa: kg/g/mg ou volume: L/mL) da aplicação.
+    """
+    def _familia(unid):
+        unid = (unid or "").lower().replace(" ", "").strip()
+        base = unid.split("/")[0]
+        if base in ("kg", "g", "mg"):
+            return "massa", base
+        if base in ("l", "ml"):
+            return "volume", base
+        return None, base
+
+    def _para_kg(qtd, base):
+        if base == "g":  return qtd / 1000
+        if base == "mg": return qtd / 1_000_000
+        return qtd  # já em kg
+
+    def _para_l(qtd, base):
+        if base == "ml": return qtd / 1000
+        return qtd  # já em L
+
+    fam_origem, base_origem = _familia(unidade_usada)
 
     for item in st.session_state.estoque:
         if item["Insumo"] == nome_insumo:
+            unid_estoque_raw = (item.get("Unidade", "") or "").strip()
+            unid_estoque_low = unid_estoque_raw.lower()
+            fam_estoque, base_estoque = _familia(unid_estoque_raw)
             estoque_atual = float(item.get("Quantidade", 0))
+
+            # ── Caso especial: estoque em "sc" (saca) ──────────────────────
+            # Só dá pra converter automaticamente se soubermos o peso por
+            # saca — usamos o campo Embalagem (ex: "40 kg" = 40 kg por saca).
+            if unid_estoque_low == "sc":
+                if fam_origem != "massa":
+                    return False, ("A dose da aplicação não está em unidade de "
+                                    "massa (kg/g) — não dá para converter para "
+                                    "sacas automaticamente. Dê baixa manual.")
+                _pacote = _parse_pacote(item.get("Embalagem", ""))
+                if not _pacote or _pacote[1] not in ("kg", "g"):
+                    return False, (f"Peso por saca não cadastrado para \"{nome_insumo}\". "
+                                   f"Edite o item no Estoque e preencha o campo Embalagem "
+                                   f"(ex: \"40 kg\") para habilitar a baixa automática. "
+                                   f"Por ora, dê baixa manual.")
+                _peso_num, _peso_unid = _pacote
+                _peso_kg_por_sc = _peso_num if _peso_unid == "kg" else _peso_num / 1000
+                if _peso_kg_por_sc <= 0:
+                    return False, "Peso por saca inválido cadastrado no estoque — dê baixa manual."
+                _qtd_kg_necessaria = _para_kg(quantidade_usada, base_origem)
+                qtd_convertida = _qtd_kg_necessaria / _peso_kg_por_sc
+                if estoque_atual >= qtd_convertida:
+                    item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
+                    item["Valor Total R$"] = item["Quantidade"] * item.get("Valor Unitário R$", 0)
+                    return True, (f"Baixa de {qtd_convertida:.2f} sc realizada "
+                                  f"({_peso_kg_por_sc:.0f} kg/sc).")
+                return False, (f"Estoque insuficiente: tem {estoque_atual:.2f} sc "
+                               f"(~{estoque_atual*_peso_kg_por_sc:.0f} kg), precisa "
+                               f"{qtd_convertida:.2f} sc (~{_qtd_kg_necessaria:.0f} kg).")
+
+            # ── Demais unidades: kg/g/mg (massa) ou L/mL (volume) ──────────
+            if fam_origem is None or fam_estoque is None or fam_origem != fam_estoque:
+                return False, (f"Unidade do estoque ('{unid_estoque_raw or '—'}') não é "
+                               f"compatível com baixa automática (esperado kg/g, L/mL "
+                               f"ou sc com Embalagem preenchida) — dê baixa manual.")
+
+            # Converte a quantidade usada para a MESMA unidade cadastrada no estoque
+            if fam_origem == "massa":
+                _qtd_kg = _para_kg(quantidade_usada, base_origem)
+                qtd_convertida = _qtd_kg * 1000 if base_estoque == "g" else _qtd_kg
+            else:
+                _qtd_l = _para_l(quantidade_usada, base_origem)
+                qtd_convertida = _qtd_l * 1000 if base_estoque == "ml" else _qtd_l
+
             if estoque_atual >= qtd_convertida:
                 item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
                 item["Valor Total R$"] = item["Quantidade"] * item.get("Valor Unitário R$", 0)
-                return True, f"Baixa de {qtd_convertida:.3f} realizada."
-            return False, f"Estoque insuficiente: tem {estoque_atual:.3f}, precisa {qtd_convertida:.3f}"
+                return True, f"Baixa de {qtd_convertida:.3f} {unid_estoque_raw} realizada."
+            return False, (f"Estoque insuficiente: tem {estoque_atual:.3f} {unid_estoque_raw}, "
+                           f"precisa {qtd_convertida:.3f} {unid_estoque_raw}")
     return False, "Insumo não encontrado no estoque."
 
 
@@ -8633,10 +8702,21 @@ if menu == "📦 Operacional":
                                                   min_value=0.0,
                                                   value=float(_item_edit.get("Estoque Mínimo",5)),
                                                   key="num_novo_min_edit")
+                # Campo de embalagem — essencial para itens em "sc" (saca):
+                # sem o peso por saca (ex: "40 kg"), a baixa automática não
+                # consegue converter kg necessários → sacas a descontar.
+                if (_item_edit.get("Unidade","") or "").strip().lower() == "sc":
+                    st.caption("💡 Este item está em **sacas**. Informe o peso por saca "
+                               "abaixo (ex: \"40 kg\") para a baixa automática funcionar "
+                               "quando você marcar uma aplicação como aplicada.")
+                _novo_emb = st.text_input("Embalagem (peso por saca/unidade, ex: \"40 kg\")",
+                                           value=_item_edit.get("Embalagem",""),
+                                           key="txt_novo_emb_edit")
                 col_btn1, col_btn2 = st.columns(2)
                 if col_btn1.button("💾 Salvar ajuste", key="btn_salvar_edit_est", use_container_width=True):
                     _item_edit["Quantidade"] = _nova_qtd
                     _item_edit["Estoque Mínimo"] = _novo_min
+                    _item_edit["Embalagem"] = _novo_emb
                     _item_edit["Valor Total R$"] = round(_nova_qtd * float(_item_edit.get("Valor Unitário R$",0)), 2)
                     atualizar_area_atual()  # vincula à área (preserva aplicações)
                     success_box(f"✅ {_prod_edit} atualizado: {_nova_qtd} {_item_edit.get('Unidade','')}")
@@ -8848,6 +8928,7 @@ if menu == "📦 Operacional":
                 {"nome":"AG 8600 PRO4",   "fab":"Agroceres"},
                 {"nome":"AG 8606 VT PRO4","fab":"Agroceres"},
                 {"nome":"AG 8701 VT PRO4","fab":"Agroceres"},
+                {"nome":"AG 8707 PRO4",   "fab":"Agroceres"},
                 {"nome":"AG 9045 PRO3",   "fab":"Agroceres"},
                 {"nome":"AG 9070 PRO4",   "fab":"Agroceres"},
                 {"nome":"AS 1633 PRO3",   "fab":"Agroeste"},
@@ -9407,9 +9488,9 @@ if menu == "📦 Operacional":
                         )
                         for _adbv in _adubos_view:
                             _ha_txt = f" × {_adbv.get('ha',0)} ha" if _adbv.get("ha",0) else ""
-                            _ferts.append(f"🟡 **{_adbv.get('nome','')}** — {_adbv.get('kg_ha',0)} kg/ha{_ha_txt} (Total: {_adbv.get('total_kg',0):,.0f} kg)")
+                            _ferts.append(f"🟡 <b>{_adbv.get('nome','')}</b> — {_adbv.get('kg_ha',0)} kg/ha{_ha_txt} (Total: {_adbv.get('total_kg',0):,.0f} kg)")
                         if _dp_view.get("kcl_nome") and _dp_view.get("kcl_kg_ha",0) > 0:
-                            _ferts.append(f"🟣 **{_dp_view['kcl_nome']}** — {_dp_view['kcl_kg_ha']} kg/ha (Total: {_dp_view.get('kcl_total_kg',0):,.0f} kg)")
+                            _ferts.append(f"🟣 <b>{_dp_view['kcl_nome']}</b> — {_dp_view['kcl_kg_ha']} kg/ha (Total: {_dp_view.get('kcl_total_kg',0):,.0f} kg)")
                         _ureias_view = _dp_view.get("ureias") or (
                             [{"nome": _dp_view["ureia_nome"], "kg_ha": _dp_view.get("ureia_kg_ha",0),
                               "total_kg": _dp_view.get("ureia_total_kg",0)}]
@@ -9417,7 +9498,7 @@ if menu == "📦 Operacional":
                         )
                         for _urbv in _ureias_view:
                             _ha_txt = f" × {_urbv.get('ha',0)} ha" if _urbv.get("ha",0) else ""
-                            _ferts.append(f"⬜ **{_urbv.get('nome','')}** — {_urbv.get('kg_ha',0)} kg/ha{_ha_txt} (Total: {_urbv.get('total_kg',0):,.0f} kg)")
+                            _ferts.append(f"⬜ <b>{_urbv.get('nome','')}</b> — {_urbv.get('kg_ha',0)} kg/ha{_ha_txt} (Total: {_urbv.get('total_kg',0):,.0f} kg)")
                         if _ferts:
                             _dv2.markdown(f"""
                             <div style='background:#1e3a5f;border-radius:8px;padding:8px 12px;margin:2px 0;'>
