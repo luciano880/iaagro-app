@@ -4757,89 +4757,98 @@ def preco_por_kg_ou_l(item):
 def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
     """
     Dá baixa no estoque, convertendo a unidade da aplicação (kg/ha, mL/ha, g/ha...)
-    para a MESMA FAMÍLIA de unidade do item no estoque.
+    para a unidade real cadastrada no item do estoque — que pode ser:
+      • massa direta: kg, g, mg, tn (tonelada = 1000 kg)
+      • volume direto: L, mL
+      • unidade de EMBALAGEM (sc, bg, cx, un...): nesses casos, o peso/volume
+        de UMA unidade é obtido do campo "Embalagem" do item (ex: "40 kg") ou,
+        se não preenchido, do próprio nome do produto — muitos já vêm com o
+        peso no final (ex: "UREIA FERTIPAR 750KG", "...BIG BAG 1000KG").
 
-    IMPORTANTE: antes esta função assumia que o estoque estava sempre em L ou kg
-    e comparava os números direto — isso causava baixa incorreta (ou erro de
-    "estoque insuficiente" por engano) quando o insumo estava cadastrado em uma
-    unidade de EMBALAGEM como "sc" (saca), porque comparava ex: 616 (kg
-    necessários) >= 37 (sacas em estoque) como se fossem a mesma coisa.
-
-    Agora: para "sc" (saca), usa o campo Embalagem do estoque (ex: "40 kg") pra
-    saber o peso por saca e converter automaticamente. Se esse peso não estiver
-    cadastrado, pede pra preencher em vez de arriscar comparar números errados.
-    Para as demais unidades, só faz baixa automática quando a unidade do
-    estoque é da mesma família (massa: kg/g/mg ou volume: L/mL) da aplicação.
+    IMPORTANTE: a versão anterior desta função só reconhecia kg/g/mg/L/mL (e
+    depois "sc" via Embalagem) — qualquer outra unidade real do estoque, como
+    "tn" (tonelada) ou "bg" (bag/saco), fazia a baixa falhar silenciosamente
+    ou comparar números incompatíveis (ex: 616 kg necessários vs 3 "bg" em
+    estoque, como se fossem a mesma unidade). Agora qualquer unidade não
+    diretamente reconhecida tenta usar Embalagem/nome do produto para
+    converter; só desiste e pede baixa manual se não achar um peso/volume
+    confiável.
     """
     def _familia(unid):
         unid = (unid or "").lower().replace(" ", "").strip()
         base = unid.split("/")[0]
-        if base in ("kg", "g", "mg"):
+        if base in ("kg", "g", "mg", "tn", "ton", "t"):
             return "massa", base
         if base in ("l", "ml"):
             return "volume", base
         return None, base
 
     def _para_kg(qtd, base):
-        if base == "g":  return qtd / 1000
-        if base == "mg": return qtd / 1_000_000
+        if base == "g":              return qtd / 1000
+        if base == "mg":             return qtd / 1_000_000
+        if base in ("tn", "ton", "t"): return qtd * 1000
         return qtd  # já em kg
 
     def _para_l(qtd, base):
         if base == "ml": return qtd / 1000
         return qtd  # já em L
 
+    def _kg_por_unidade(base):
+        """Quantos kg vale UMA unidade dessa base (kg/g/tn)."""
+        if base == "g":               return 0.001
+        if base in ("tn", "ton", "t"): return 1000.0
+        return 1.0
+
+    def _l_por_unidade(base):
+        if base == "ml": return 0.001
+        return 1.0
+
     fam_origem, base_origem = _familia(unidade_usada)
 
     for item in st.session_state.estoque:
         if item["Insumo"] == nome_insumo:
             unid_estoque_raw = (item.get("Unidade", "") or "").strip()
-            unid_estoque_low = unid_estoque_raw.lower()
             fam_estoque, base_estoque = _familia(unid_estoque_raw)
             estoque_atual = float(item.get("Quantidade", 0))
 
-            # ── Caso especial: estoque em "sc" (saca) ──────────────────────
-            # Só dá pra converter automaticamente se soubermos o peso por
-            # saca — usamos o campo Embalagem (ex: "40 kg" = 40 kg por saca).
-            if unid_estoque_low == "sc":
-                if fam_origem != "massa":
-                    return False, ("A dose da aplicação não está em unidade de "
-                                    "massa (kg/g) — não dá para converter para "
-                                    "sacas automaticamente. Dê baixa manual.")
-                _pacote = _parse_pacote(item.get("Embalagem", ""))
-                if not _pacote or _pacote[1] not in ("kg", "g"):
-                    return False, (f"Peso por saca não cadastrado para \"{nome_insumo}\". "
-                                   f"Edite o item no Estoque e preencha o campo Embalagem "
-                                   f"(ex: \"40 kg\") para habilitar a baixa automática. "
-                                   f"Por ora, dê baixa manual.")
-                _peso_num, _peso_unid = _pacote
-                _peso_kg_por_sc = _peso_num if _peso_unid == "kg" else _peso_num / 1000
-                if _peso_kg_por_sc <= 0:
-                    return False, "Peso por saca inválido cadastrado no estoque — dê baixa manual."
-                _qtd_kg_necessaria = _para_kg(quantidade_usada, base_origem)
-                qtd_convertida = _qtd_kg_necessaria / _peso_kg_por_sc
-                if estoque_atual >= qtd_convertida:
-                    item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
-                    item["Valor Total R$"] = item["Quantidade"] * item.get("Valor Unitário R$", 0)
-                    return True, (f"Baixa de {qtd_convertida:.2f} sc realizada "
-                                  f"({_peso_kg_por_sc:.0f} kg/sc).")
-                return False, (f"Estoque insuficiente: tem {estoque_atual:.2f} sc "
-                               f"(~{estoque_atual*_peso_kg_por_sc:.0f} kg), precisa "
-                               f"{qtd_convertida:.2f} sc (~{_qtd_kg_necessaria:.0f} kg).")
+            if fam_origem is None:
+                return False, ("A dose da aplicação não está em unidade de massa "
+                               "ou volume (kg/g/L/mL) — dê baixa manual.")
 
-            # ── Demais unidades: kg/g/mg (massa) ou L/mL (volume) ──────────
-            if fam_origem is None or fam_estoque is None or fam_origem != fam_estoque:
-                return False, (f"Unidade do estoque ('{unid_estoque_raw or '—'}') não é "
-                               f"compatível com baixa automática (esperado kg/g, L/mL "
-                               f"ou sc com Embalagem preenchida) — dê baixa manual.")
-
-            # Converte a quantidade usada para a MESMA unidade cadastrada no estoque
-            if fam_origem == "massa":
-                _qtd_kg = _para_kg(quantidade_usada, base_origem)
-                qtd_convertida = _qtd_kg * 1000 if base_estoque == "g" else _qtd_kg
+            if fam_estoque is not None and fam_origem == fam_estoque:
+                # ── Unidade do estoque reconhecida diretamente (kg/g/mg/tn ou L/mL) ──
+                if fam_origem == "massa":
+                    _qtd_kg = _para_kg(quantidade_usada, base_origem)
+                    qtd_convertida = _qtd_kg / _kg_por_unidade(base_estoque)
+                else:
+                    _qtd_l = _para_l(quantidade_usada, base_origem)
+                    qtd_convertida = _qtd_l / _l_por_unidade(base_estoque)
             else:
-                _qtd_l = _para_l(quantidade_usada, base_origem)
-                qtd_convertida = _qtd_l * 1000 if base_estoque == "ml" else _qtd_l
+                # ── Unidade de embalagem (sc, bg, cx, un...) — usa Embalagem
+                # ou o peso embutido no nome do produto (mesma lógica de
+                # preco_por_kg_ou_l, pra ficar consistente). ──
+                _pacote = _parse_pacote(item.get("Embalagem", "")) or _parse_pacote(item.get("Insumo", ""))
+                if not _pacote:
+                    return False, (f"Não sei quanto pesa/tem 1 \"{unid_estoque_raw or '—'}\" de "
+                                   f"\"{nome_insumo}\". Edite o item no Estoque e preencha o "
+                                   f"campo Embalagem (ex: \"40 kg\" ou \"750 kg\") para "
+                                   f"habilitar a baixa automática. Por ora, dê baixa manual.")
+                _peso_num, _peso_unid = _pacote
+                if fam_origem == "massa" and _peso_unid in ("kg", "g"):
+                    _peso_kg = _peso_num if _peso_unid == "kg" else _peso_num / 1000
+                    if _peso_kg <= 0:
+                        return False, "Peso cadastrado inválido no estoque — dê baixa manual."
+                    _qtd_kg_necessaria = _para_kg(quantidade_usada, base_origem)
+                    qtd_convertida = _qtd_kg_necessaria / _peso_kg
+                elif fam_origem == "volume" and _peso_unid in ("l", "ml"):
+                    _vol_l = _peso_num if _peso_unid == "l" else _peso_num / 1000
+                    if _vol_l <= 0:
+                        return False, "Volume cadastrado inválido no estoque — dê baixa manual."
+                    _qtd_l_necessaria = _para_l(quantidade_usada, base_origem)
+                    qtd_convertida = _qtd_l_necessaria / _vol_l
+                else:
+                    return False, (f"A embalagem cadastrada (\"{_peso_num}{_peso_unid}\") não é "
+                                   f"compatível com a dose da aplicação — dê baixa manual.")
 
             if estoque_atual >= qtd_convertida:
                 item["Quantidade"] = round(estoque_atual - qtd_convertida, 4)
@@ -4848,6 +4857,35 @@ def baixar_estoque(nome_insumo, quantidade_usada, unidade_usada="L/ha"):
             return False, (f"Estoque insuficiente: tem {estoque_atual:.3f} {unid_estoque_raw}, "
                            f"precisa {qtd_convertida:.3f} {unid_estoque_raw}")
     return False, "Insumo não encontrado no estoque."
+
+
+def nomes_plantio_fora_do_estoque(dp):
+    """
+    Confere os nomes de semente/adubo/KCl/ureia de uma aplicação de Plantio
+    (dict "Dados Plantio") contra o Estoque de Insumos. Retorna a lista dos
+    nomes que NÃO batem com nenhum item cadastrado — usada para avisar o
+    usuário ANTES de salvar, porque um nome digitado errado (ex: manualmente,
+    diferente do cadastro) faz a baixa automática falhar silenciosamente
+    quando a aplicação for marcada como aplicada.
+    """
+    if not dp:
+        return []
+    _nomes_estoque = {i.get("Insumo", "") for i in st.session_state.get("estoque", [])}
+    _candidatos = []
+    for _v in dp.get("variedades", []):
+        if _v.get("nome"):
+            _candidatos.append(_v["nome"])
+    if dp.get("semente"):
+        _candidatos.append(dp["semente"])
+    for _a in (dp.get("adubos") or ([{"nome": dp["adubo_nome"]}] if dp.get("adubo_nome") else [])):
+        if _a.get("nome"):
+            _candidatos.append(_a["nome"])
+    if dp.get("kcl_nome"):
+        _candidatos.append(dp["kcl_nome"])
+    for _u in (dp.get("ureias") or ([{"nome": dp["ureia_nome"]}] if dp.get("ureia_nome") else [])):
+        if _u.get("nome"):
+            _candidatos.append(_u["nome"])
+    return [n for n in _candidatos if n not in _nomes_estoque]
 
 
 # ─────────────────────────────────────────────
@@ -8970,12 +9008,32 @@ if menu == "📦 Operacional":
                 _sv_invalido = _sv_sel in ("— digitar manualmente —", _SEPARADOR_CATALOGO)
                 _sv_nome  = _sv_man if _sv_sel == "— digitar manualmente —" else ("" if _sv_sel == _SEPARADOR_CATALOGO else _sv_sel)
                 _sv_ha    = _sv_c2.number_input("Hectares desta variedade", min_value=0.1, value=10.0, step=0.5, key="sv_ha")
-                _sv_dose  = _sv_c2.number_input("Dose (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="sv_dose")
+                # Dose pode ser digitada em kg/ha (padrão) ou em sc/ha (sacos) —
+                # se for em sc, converte pra kg/ha usando o peso da saca informado.
+                _sv_unid_dose = _sv_c2.radio("Unidade da dose", ["kg/ha", "sc/ha"],
+                                              key="sv_unid_dose", horizontal=True)
+                if _sv_unid_dose == "sc/ha":
+                    _sv_dose_sc = _sv_c2.number_input("Dose (sc/ha)", min_value=0.0, value=1.0,
+                                                       step=0.1, key="sv_dose_sc")
+                    _sv_peso_sc = _sv_c2.number_input("Peso da saca (kg)", min_value=0.1, value=40.0,
+                                                       step=1.0, key="sv_peso_sc",
+                                                       help="Padrão soja: 40 kg/sc. Milho varia — confira na embalagem.")
+                    _sv_dose = round(_sv_dose_sc * _sv_peso_sc, 2)
+                    _sv_c2.caption(f"= {_sv_dose} kg/ha")
+                else:
+                    _sv_dose = _sv_c2.number_input("Dose (kg/ha)", min_value=0.0, value=55.0, step=1.0, key="sv_dose")
                 _sv_pop   = _sv_c3.number_input("População (pl/ha)", min_value=0, value=240000, step=5000, key="sv_pop")
                 _sv_esp   = _sv_c3.number_input("Espaçamento (cm)", min_value=0.0, value=45.0, key="sv_esp")
                 _sv_add   = st.form_submit_button("➕ Adicionar Variedade", use_container_width=True)
                 if _sv_sel == _SEPARADOR_CATALOGO:
                     st.caption("⚠️ Isso é só um separador visual — selecione um híbrido da lista acima ou abaixo dele.")
+                if _sv_sel == "— digitar manualmente —" and _sv_man.strip():
+                    _bate_estoque = any(i["Insumo"] == _sv_man.strip() for i in st.session_state.estoque)
+                    if not _bate_estoque:
+                        st.warning(f"⚠️ \"{_sv_man.strip()}\" não bate com nenhum nome cadastrado no "
+                                   f"Estoque de Insumos. Se essa semente já estiver no estoque, "
+                                   f"selecione ela na lista acima em vez de digitar manualmente — "
+                                   f"senão a baixa automática ao marcar como aplicado NÃO vai funcionar.")
 
             if _sv_add and _sv_nome and not _sv_invalido:
                 st.session_state.pl_variedades.append({
@@ -9186,6 +9244,7 @@ if menu == "📦 Operacional":
                     "ureia_total_kg": round(_pl_ureia_kg * area_aplic, 1),
                     "semente_total_kg": round(_pl_dose_sem * area_aplic, 1),
                 }
+                _nomes_fora = nomes_plantio_fora_do_estoque(_dp)
                 st.session_state.aplicacoes.append({
                     "ID Área":             st.session_state.dados.get("id_area",""),
                     "Cultura":             st.session_state.get("aplic_cultura_ativa",""),
@@ -9211,7 +9270,14 @@ if menu == "📦 Operacional":
                 st.session_state.pl_variedades = []
                 st.session_state.pl_adubos = []
                 st.session_state.pl_ureias = []
-                success_box(f"✅ Plantio salvo no cronograma da {st.session_state.get('aplic_cultura_ativa','cultura')}!")
+                if _nomes_fora:
+                    warning_box("✅ Plantio salvo! Mas atenção: " + ", ".join(f'"{n}"' for n in _nomes_fora) +
+                                " não bate com nenhum item do Estoque de Insumos — a baixa "
+                                "automática NÃO vai funcionar para esses itens quando marcar "
+                                "como aplicado. Confira o nome cadastrado no estoque e edite "
+                                "esta aplicação se precisar corrigir.")
+                else:
+                    success_box(f"✅ Plantio salvo no cronograma da {st.session_state.get('aplic_cultura_ativa','cultura')}!")
                 st.rerun()
 
         st.subheader("🧪 Produtos da Aplicação" if not _is_plantio else "🧪 Defensivos e Outros Produtos")
@@ -9335,7 +9401,14 @@ if menu == "📦 Operacional":
                     st.session_state.pl_variedades = []
                     st.session_state.pl_adubos = []
                     st.session_state.pl_ureias = []
-                success_box(f"✅ {nome_aplic} salva! {len(produtos_aplic)} produto(s).")
+                _nomes_fora2 = nomes_plantio_fora_do_estoque(_dados_plantio) if _is_plantio else []
+                if _nomes_fora2:
+                    warning_box(f"✅ {nome_aplic} salva! Mas atenção: " +
+                                ", ".join(f'"{n}"' for n in _nomes_fora2) +
+                                " não bate com nenhum item do Estoque de Insumos — a baixa "
+                                "automática NÃO vai funcionar para esses itens.")
+                else:
+                    success_box(f"✅ {nome_aplic} salva! {len(produtos_aplic)} produto(s).")
                 st.rerun()
 
         # PDF
