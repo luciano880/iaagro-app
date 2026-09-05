@@ -9413,6 +9413,38 @@ if menu == "📦 Operacional":
 
         # PDF
         st.divider()
+
+        # ── Relatório detalhado da última baixa de estoque ──────────────
+        # Fica visível até o usuário fechar, em vez de piscar e sumir no
+        # rerun — assim dá pra ver EXATAMENTE o que aconteceu com cada
+        # item (sucesso ou motivo da falha), sem precisar ficar tirando
+        # print e comparando manualmente.
+        if st.session_state.get("_ultimo_relatorio_baixa"):
+            _rel = st.session_state["_ultimo_relatorio_baixa"]
+            _n_ok  = sum(1 for r in _rel if r["ok"])
+            _n_falha = len(_rel) - _n_ok
+            with st.container():
+                st.markdown(f"""
+                <div style='background:#0f172a;border:2px solid #3b82f6;border-radius:12px;
+                padding:14px 18px;margin:8px 0;'>
+                <b style='color:#93c5fd;font-size:14px;'>📋 Relatório da última baixa de estoque</b>
+                <span style='color:#94a3b8;font-size:12px;'> — {_n_ok} item(ns) com baixa ok,
+                {_n_falha} item(ns) sem baixa</span>
+                </div>""", unsafe_allow_html=True)
+                for _r in _rel:
+                    _cor = "#14532d" if _r["ok"] else "#78350f"
+                    _brd = "#22c55e" if _r["ok"] else "#f59e0b"
+                    _ico = "✅" if _r["ok"] else "⚠️"
+                    st.markdown(f"""
+                    <div style='background:{_cor};border-left:4px solid {_brd};border-radius:6px;
+                    padding:6px 12px;margin:2px 0;font-size:12px;color:#fff;'>
+                    {_ico} <b>{_r['nome']}</b> — {_r['msg']}
+                    </div>""", unsafe_allow_html=True)
+                if st.button("Fechar relatório", key="btn_fechar_relatorio_baixa"):
+                    st.session_state.pop("_ultimo_relatorio_baixa", None)
+                    st.rerun()
+            st.divider()
+
         st.subheader("📋 Histórico de Aplicações")
         if st.session_state.aplicacoes:
             # ── Filtro por cultura para o PDF ──
@@ -9634,8 +9666,10 @@ if menu == "📦 Operacional":
                                          use_container_width=True, type="primary"):
                             _erros_baixa = []
                             _avisos_baixa = []
+                            _relatorio_baixa = []  # todo item processado, sucesso ou falha
                             for p in aplic.get("Produtos",[]):
                                 ok_b, msg_b = baixar_estoque(p["Produto"], p.get("Total usado",0), p.get("Unidade","L/ha"))
+                                _relatorio_baixa.append({"nome": p.get("Produto",""), "ok": ok_b, "msg": msg_b})
                                 if not ok_b:
                                     _erros_baixa.append(f"{p.get('Produto','')}: {msg_b}")
 
@@ -9690,11 +9724,25 @@ if menu == "📦 Operacional":
                                     _avisos_baixa.append(
                                         f"{_dp_baixa['inoc3_nome']} (inoculante de semente) — "
                                         f"dê baixa manual no estoque, dose é por saca")
+                                    _relatorio_baixa.append({"nome": _dp_baixa['inoc3_nome'],
+                                        "ok": False, "msg": "dose por saca — dê baixa manual"})
+
+                                if not _itens_baixa_dp:
+                                    _relatorio_baixa.append({"nome": "(Dados de Plantio)", "ok": False,
+                                        "msg": "nenhum item com quantidade > 0 encontrado — confira "
+                                               "se a área aplicada e as doses foram preenchidas"})
 
                                 for _nome_i, _qtd_i, _unid_i in _itens_baixa_dp:
                                     ok_b, msg_b = baixar_estoque(_nome_i, _qtd_i, f"{_unid_i}/ha")
+                                    _relatorio_baixa.append({"nome": _nome_i, "ok": ok_b, "msg": msg_b})
                                     if not ok_b:
                                         _erros_baixa.append(f"{_nome_i}: {msg_b}")
+                            else:
+                                if not aplic.get("Produtos"):
+                                    _relatorio_baixa.append({"nome": "(aplicação)", "ok": False,
+                                        "msg": "sem produtos nem Dados de Plantio — nada pra dar baixa"})
+
+                            st.session_state["_ultimo_relatorio_baixa"] = _relatorio_baixa
 
                             _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
                                              if a.get("Data") == aplic.get("Data") and
@@ -9704,12 +9752,6 @@ if menu == "📦 Operacional":
                                 st.session_state.aplicacoes[_idx_orig]["Data Confirmacao"] = \
                                     datetime.now().strftime("%d/%m/%Y %H:%M")
                             salvar_dados_iaagro()
-                            if _erros_baixa:
-                                warning_box("Aplicado! Aviso estoque: " + " | ".join(_erros_baixa))
-                            elif _avisos_baixa:
-                                warning_box("✅ Aplicado! Baixa dada no estoque. Pendente: " + " | ".join(_avisos_baixa))
-                            else:
-                                success_box("✅ Marcado como aplicado! Baixa dada no estoque.")
                             st.rerun()
                     else:
                         col_b1.success(f"✅ Aplicado em {aplic.get('Data Confirmacao', aplic.get('Data',''))}")
