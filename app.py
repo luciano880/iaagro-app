@@ -4723,16 +4723,35 @@ def score_solo(d, cultura="Soja"):
             score -= 10; alertas.append(f"pH elevado — risco de deficiência de micronutrientes")
 
     # Fósforo (mg/dm³ — Mehlich-1)
+    # NOTA: a CQFS RS/SC também varia o nível crítico de P por classe de
+    # argila do solo (assim como faz com K por CTC, logo abaixo). Não
+    # aplicamos esse ajuste aqui ainda — as fontes consultadas divergiam
+    # nos valores exatos por classe, e um ajuste errado seria pior que não
+    # ajustar. As faixas abaixo são uma referência de textura média.
     if fosforo > 0:
-        if   fosforo < 6:   score -= 20; alertas.append("Fósforo muito baixo (<6 mg/dm³)")
-        elif fosforo < 12:  score -= 12; alertas.append("Fósforo baixo (6-12 mg/dm³)")
-        elif fosforo < 18:  score -= 6;  alertas.append("Fósforo médio — atenção")
+        if   fosforo < 6:   score -= 20; alertas.append("Fósforo muito baixo (<6 mg/dm³, referência textura média)")
+        elif fosforo < 12:  score -= 12; alertas.append("Fósforo baixo (6-12 mg/dm³, referência textura média)")
+        elif fosforo < 18:  score -= 6;  alertas.append("Fósforo médio — atenção (referência textura média)")
 
-    # Potássio (mg/dm³)
+    # Potássio (mg/dm³) — nível crítico varia com a CTC pH7,0 do solo (CQFS
+    # RS/SC): quanto maior a CTC, maior o teor de K necessário para ser
+    # considerado adequado (solos com CTC alta "seguram" mais K, então o
+    # mesmo teor medido representa uma fração menor da capacidade de troca).
+    # Referência: crítico ≈45 mg/dm³ (CTC baixa) | ≈60 (CTC média) | ≈90
+    # (CTC alta) — usamos essa proporção (0,75 : 1,0 : 1,5) para escalar as
+    # 3 faixas já calibradas do app (antes fixas em 60/100/150, válidas
+    # para CTC média).
     if potassio > 0:
-        if   potassio < 60:  score -= 20; alertas.append("Potássio muito baixo (<60 mg/dm³)")
-        elif potassio < 100: score -= 12; alertas.append("Potássio baixo (60-100 mg/dm³)")
-        elif potassio < 150: score -= 5;  alertas.append("Potássio médio — monitorar")
+        _ctc_k = d.get("ctc", 0)
+        if   _ctc_k > 0 and _ctc_k <= 7.5:  _fator_k_ctc, _classe_ctc_txt = 0.75, "CTC baixa"
+        elif _ctc_k > 15.0:                  _fator_k_ctc, _classe_ctc_txt = 1.50, "CTC alta"
+        else:                                 _fator_k_ctc, _classe_ctc_txt = 1.00, "CTC média"
+        _k_muito_baixo = round(60  * _fator_k_ctc)
+        _k_baixo       = round(100 * _fator_k_ctc)
+        _k_medio       = round(150 * _fator_k_ctc)
+        if   potassio < _k_muito_baixo: score -= 20; alertas.append(f"Potássio muito baixo (<{_k_muito_baixo} mg/dm³, {_classe_ctc_txt})")
+        elif potassio < _k_baixo:       score -= 12; alertas.append(f"Potássio baixo ({_k_muito_baixo}-{_k_baixo} mg/dm³, {_classe_ctc_txt})")
+        elif potassio < _k_medio:       score -= 5;  alertas.append(f"Potássio médio — monitorar ({_classe_ctc_txt})")
 
     # Cálcio (cmolc/dm³)
     if calcio > 0:
@@ -11096,7 +11115,11 @@ elif menu == "🧠 Assistente IA":
         # Histórico de mensagens
         for msg in st.session_state.assistente_hist:
             with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+                # Escapa "$" só na exibição — o Streamlit interpreta $..$ como
+                # fórmula matemática (LaTeX), o que bagunçava valores em R$
+                # (ex: "R$ 58,00 a R$ 65,00" virava uma fórmula quebrada).
+                # O texto original (sem escape) continua salvo no histórico.
+                st.markdown(msg["content"].replace("$", "\\$"))
 
         # Upload de documento para análise (PDF, imagem, planilha)
         with st.expander("📎 Anexar documento para análise (PDF, imagem, planilha)"):
@@ -11130,7 +11153,7 @@ elif menu == "🧠 Assistente IA":
             salvar_dados_iaagro()
             st.session_state.assistente_hist.append({"role":"user","content":_prompt_ia})
             with st.chat_message("user"):
-                st.markdown(_prompt_ia)
+                st.markdown(_prompt_ia.replace("$", "\\$"))
             with st.chat_message("assistant"):
                 with st.spinner("🌾 Analisando... (pode levar 1-2 min se eu precisar consultar bulas e dados na web)"):
                     try:
@@ -11299,7 +11322,10 @@ elif menu == "🧠 Assistente IA":
                                 if isinstance(b, dict) and b.get("type") == "text"
                             ).strip()
                             if _ans:
-                                st.markdown(_ans)
+                                # Escapa "$" só na exibição (ver comentário no
+                                # histórico acima) — mantém _ans original para
+                                # salvar no histórico/PDF sem o escape.
+                                st.markdown(_ans.replace("$", "\\$"))
                                 st.session_state.assistente_hist.append(
                                     {"role":"assistant","content":_ans})
                             else:
