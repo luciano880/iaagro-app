@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="IAAgro Pro",
@@ -834,7 +835,7 @@ def gerar_pdf_conversa_assistente(historico):
                              textColor=_sub, alignment=TA_CENTER, leading=10)
     _el.append(HRFlowable(width="100%", thickness=0.7, color=_cinza_bd, spaceAfter=6))
     _el.append(Paragraph(
-        "IAAgro - Inteligência Agrícola de Precisão - iaagropro.streamlit.app", _st_rod))
+        "IAAgro - Inteligência Agrícola de Precisão - iaagro-app-kvrwxtkugla8pqe7dgqeue.streamlit.app", _st_rod))
 
     try:
         _doc.build(_el)
@@ -1003,7 +1004,7 @@ def gerar_pdf_lista_pecas(itens, titulo="Lista de Compras — Peças de Revisão
     _st_rodape = ParagraphStyle("rod", fontName="Helvetica", fontSize=7.5,
                                 textColor=_sub, alignment=TA_CENTER, leading=10)
     _el.append(Paragraph(
-        "Gerado pelo IAAgro · Inteligência Agrícola de Precisão · iaagropro.streamlit.app",
+        "Gerado pelo IAAgro · Inteligência Agrícola de Precisão · iaagro-app-kvrwxtkugla8pqe7dgqeue.streamlit.app",
         _st_rodape))
 
     _doc.build(_el)
@@ -12959,16 +12960,26 @@ st.markdown(f"""
 <link rel="apple-touch-icon" sizes="192x192" href="{_IC192}">
 <link rel="apple-touch-icon" sizes="512x512" href="{_IC512}">
 <link rel="icon" type="image/png" sizes="192x192" href="{_IC192}">
+""", unsafe_allow_html=True)
+
+# O <script> acima foi tirado do st.markdown(unsafe_allow_html=True) porque o
+# Streamlit atualmente NÃO executa tags <script> inseridas assim (issue
+# confirmada no GitHub oficial do Streamlit, fev/2025) — por isso o manifest
+# nunca era realmente trocado, e o Android sempre instalava usando o ícone
+# padrão do Streamlit. components.html() executa JS de verdade (dentro de um
+# iframe), e usamos window.parent.document para alcançar a página principal.
+components.html(f"""
 <script>
 (function forcePWA() {{
+  var doc = window.parent.document;
   // Remove qualquer manifest existente
-  document.querySelectorAll('link[rel="manifest"]').forEach(el => el.remove());
+  doc.querySelectorAll('link[rel="manifest"]').forEach(el => el.remove());
   // Cria novo manifest com ícone embutido
   var manifest = {{
     "name": "IAAgro Pro",
     "short_name": "IAAgro",
     "description": "Gestão agrícola inteligente",
-    "start_url": window.location.origin + window.location.pathname,
+    "start_url": window.parent.location.origin + window.parent.location.pathname,
     "display": "standalone",
     "background_color": "#0d2137",
     "theme_color": "#22c55e",
@@ -12980,20 +12991,20 @@ st.markdown(f"""
   }};
   var blob = new Blob([JSON.stringify(manifest)], {{type: "application/manifest+json"}});
   var url  = URL.createObjectURL(blob);
-  var link = document.createElement("link");
+  var link = doc.createElement("link");
   link.rel  = "manifest";
   link.href = url;
-  document.head.appendChild(link);
+  doc.head.appendChild(link);
   // Service Worker mínimo via blob
-  if ('serviceWorker' in navigator) {{
+  if ('serviceWorker' in window.parent.navigator) {{
     var swCode = 'self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>self.clients.claim());';
     var swBlob = new Blob([swCode], {{type: "text/javascript"}});
     var swUrl  = URL.createObjectURL(swBlob);
-    navigator.serviceWorker.register(swUrl, {{scope: "/"}}).catch(function(){{}});
+    window.parent.navigator.serviceWorker.register(swUrl, {{scope: "/"}}).catch(function(){{}});
   }}
 }})();
 </script>
-""", unsafe_allow_html=True)
+""", height=0)
 
 # ── Persiste token nos query_params e sessionStorage para sobreviver reload ──
 if (st.session_state.get("sb_token") and st.session_state.get("sb_user_id")
