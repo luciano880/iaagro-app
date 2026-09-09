@@ -9890,9 +9890,12 @@ if menu == "📦 Operacional":
 
                             st.session_state["_ultimo_relatorio_baixa"] = _relatorio_baixa
 
-                            _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
-                                             if a.get("Data") == aplic.get("Data") and
-                                             a.get("Aplicação") == aplic.get("Aplicação")), None)
+                            # Localiza pelo OBJETO em memória (identidade), não por
+                            # Data+Aplicação — dois registros com a mesma data e o
+                            # mesmo nome (ex: dois "🚜 Plantio" no mesmo dia, em áreas
+                            # diferentes) faziam o app achar o registro ERRADO.
+                            _idx_orig = next((i for i, a in enumerate(st.session_state.aplicacoes)
+                                             if a is aplic), None)
                             if _idx_orig is not None:
                                 st.session_state.aplicacoes[_idx_orig]["Status"] = "aplicado"
                                 st.session_state.aplicacoes[_idx_orig]["Data Confirmacao"] = \
@@ -9929,9 +9932,10 @@ if menu == "📦 Operacional":
                         use_container_width=True
                     )
                     if col_b3.button("🗑️ Excluir", key=f"apagar_app_{idx_a}", use_container_width=True):
-                        _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
-                                         if a.get("Data") == aplic.get("Data") and
-                                         a.get("Aplicação") == aplic.get("Aplicação")), None)
+                        # Localiza pelo objeto em memória (identidade) — ver
+                        # explicação no botão "Marcar como Aplicado" acima.
+                        _idx_orig = next((i for i, a in enumerate(st.session_state.aplicacoes)
+                                         if a is aplic), None)
                         if _idx_orig is not None:
                             st.session_state.aplicacoes.pop(_idx_orig)
                         salvar_dados_iaagro()
@@ -10045,9 +10049,10 @@ if menu == "📦 Operacional":
 
                             _salvar_edicao = st.form_submit_button("💾 Salvar edição", type="primary", use_container_width=True)
                             if _salvar_edicao:
-                                _idx_orig = next((i for i,a in enumerate(st.session_state.aplicacoes)
-                                                 if a.get("Data") == aplic.get("Data") and
-                                                 a.get("Aplicação") == aplic.get("Aplicação")), None)
+                                # Localiza pelo objeto em memória (identidade) — ver
+                                # explicação no botão "Marcar como Aplicado" acima.
+                                _idx_orig = next((i for i, a in enumerate(st.session_state.aplicacoes)
+                                                 if a is aplic), None)
                                 if _idx_orig is not None:
                                     _reg = st.session_state.aplicacoes[_idx_orig]
                                     _reg["Data"]              = _edt_data
