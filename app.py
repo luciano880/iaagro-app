@@ -8476,7 +8476,7 @@ if menu == "💰 Financeiro":
             [_P("(+) Receita Bruta",9), _P(f"R$ {_rec_total:,.2f}",9,True,None,_TR)],
             [_P("(-) Despesas Dedutíveis",9), _P(f"R$ {_desp_total:,.2f}",9,True,None,_TR)],
             [_P("<b>= Resultado Líquido</b>",9,True), _P(f"<b>R$ {_resultado:,.2f}</b>",9,True,None,_TR)],
-            [_P("Limite de Isenção",9), _P(f"R$ {_ISENCAO:,.2f}",9,False,None,_TR)],
+            [_P("Limite de Isenção",9), _P(f"R$ {_tabela_ir[0][0]:,.2f}",9,False,None,_TR)],
             [_P(f"<b>IR Estimado (alíquota {_aliq*100:.1f}%)</b>",10,True,_BRANCO),
              _P(f"<b>R$ {_ir:,.2f}</b>",11,True,_BRANCO,_TR)],
         ]
@@ -11577,7 +11577,6 @@ elif menu == "🌧️ Pluviômetro":
 
             # Estimativa de perda por déficit ou excesso (igual ao modelo anterior)
             if _media_3m < chuva_ideal_mes * 0.7:
-                _perda_est = round((_chuva_ideal_mes - _media_3m) * 0.15, 1) if hasattr(locals(), '_chuva_ideal_mes') else round((chuva_ideal_mes - _media_3m) * 0.15, 1)
                 _perda_est = round((chuva_ideal_mes - _media_3m) * 0.15, 1)
                 _status_h  = "⚠️ Déficit hídrico"
                 _risco     = "🔴 Alto risco hídrico — avaliar seguro agrícola"
