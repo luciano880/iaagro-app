@@ -2277,13 +2277,22 @@ if not st.session_state.logado:
 # ─────────────────────────────────────────────
 # SPLASH SCREEN (apenas 1x por sessão)
 # ─────────────────────────────────────────────
+# ANTES: usava _ph = st.empty() + time.sleep(1.2) + _ph.empty() pra mostrar
+# o logo por um tempo fixo. Esse padrão (bloquear o script com sleep() e
+# depois remover manualmente o elemento) podia conflitar com os reruns do
+# autologin (que também usa sleep()+rerun() em sequência), fazendo o
+# navegador tentar remover um nó do DOM que já tinha sido substituído por
+# outro rerun — erro "Falha ao executar 'removeChild'... nó não é filho
+# deste nó", que travava o carregamento do app inteiro.
+# AGORA: mostra o splash uma única vez e deixa o Streamlit trocar de tela
+# no próximo rerun natural (via st.rerun(), não via remoção manual do nó),
+# sem sleep bloqueando o script.
 if "app_loaded" not in st.session_state:
-    _ph = st.empty()
     if os.path.exists("IAAgrologo.jpeg"):
-        import base64 as _b64x, time as _tx
+        import base64 as _b64x
         with open("IAAgrologo.jpeg","rb") as _fx:
             _ls = _b64x.b64encode(_fx.read()).decode()
-        _ph.markdown(f"""
+        st.markdown(f"""
         <div style="display:flex;flex-direction:column;align-items:center;
                     justify-content:center;padding:80px 0;">
             <img src="data:image/jpeg;base64,{_ls}"
@@ -2292,9 +2301,8 @@ if "app_loaded" not in st.session_state:
             <h2 style="color:#6ee7b7;margin-top:20px;font-weight:900;">Carregando IAAgro Pro...</h2>
             <p style="color:#93c5fd;font-size:1rem;">Sistema de gestão agrícola inteligente</p>
         </div>""", unsafe_allow_html=True)
-        _tx.sleep(1.2)
-    _ph.empty()
     st.session_state.app_loaded = True
+    st.rerun()
 
 # ─────────────────────────────────────────────
 # BARRA LATERAL
