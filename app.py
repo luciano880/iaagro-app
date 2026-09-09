@@ -9877,11 +9877,20 @@ if menu == "📦 Operacional":
                                     if _dp_baixa.get(_chave_nome) and _dp_baixa.get(_chave_dose, 0) > 0 and _area_dp > 0:
                                         _total_ml = _dp_baixa[_chave_dose] * _area_dp
                                         _itens_baixa_dp.append((_dp_baixa[_chave_nome], _total_ml, "mL"))
-                                # Micronutrientes no sulco (dose em kg/L por ha)
+                                # Micronutrientes no sulco (dose digitada em "kg/L ha" —
+                                # ambíguo de propósito, porque pode ser produto sólido
+                                # ou líquido). Em vez de forçar sempre "kg" (o que
+                                # quebrava a baixa de produtos líquidos, ex: "TIMAC
+                                # PROGEN D CODE 5L"), olha a unidade REAL cadastrada
+                                # no estoque pra esse produto e usa ela.
                                 for _chave_nome, _chave_dose in [("micro1_nome","micro1_dose"), ("micro2_nome","micro2_dose")]:
                                     if _dp_baixa.get(_chave_nome) and _dp_baixa.get(_chave_dose, 0) > 0 and _area_dp > 0:
-                                        _total_kg = _dp_baixa[_chave_dose] * _area_dp
-                                        _itens_baixa_dp.append((_dp_baixa[_chave_nome], _total_kg, "kg"))
+                                        _total_micro = _dp_baixa[_chave_dose] * _area_dp
+                                        _item_micro_estq = next((i for i in st.session_state.estoque
+                                                                  if i.get("Insumo") == _dp_baixa[_chave_nome]), None)
+                                        _unid_micro_estq = ((_item_micro_estq or {}).get("Unidade","") or "").strip().lower()
+                                        _unid_micro_dose = "L" if _unid_micro_estq in ("l","ml") else "kg"
+                                        _itens_baixa_dp.append((_dp_baixa[_chave_nome], _total_micro, _unid_micro_dose))
                                 # Inoculante de semente (mL/sc) não entra — não temos
                                 # o total de sacas de semente de forma confiável, então
                                 # avisa o usuário para dar baixa manual desse item.
