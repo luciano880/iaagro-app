@@ -9172,6 +9172,13 @@ if menu == "📦 Operacional":
                 f"{p['nome']} — {p['fab']}" for p in CATALOGO_SEMENTES_MILHO
             ]
 
+            # Unidade da dose fica FORA do formulário — dentro de st.form, o
+            # Streamlit só atualiza a tela quando o formulário é enviado
+            # ("Adicionar Variedade"), então trocar entre kg/ha e sc/ha não
+            # trocava os campos mostrados até salvar. Fora do form, reage na hora.
+            _sv_unid_dose = st.radio("Unidade da dose", ["kg/ha", "sc/ha"],
+                                      key="sv_unid_dose", horizontal=True)
+
             # Form para adicionar variedade
             with st.form("form_add_variedade", clear_on_submit=True):
                 _sv_c1, _sv_c2, _sv_c3 = st.columns(3)
@@ -9180,10 +9187,6 @@ if menu == "📦 Operacional":
                 _sv_invalido = _sv_sel in ("— digitar manualmente —", _SEPARADOR_CATALOGO)
                 _sv_nome  = _sv_man if _sv_sel == "— digitar manualmente —" else ("" if _sv_sel == _SEPARADOR_CATALOGO else _sv_sel)
                 _sv_ha    = _sv_c2.number_input("Hectares desta variedade", min_value=0.1, value=10.0, step=0.5, key="sv_ha")
-                # Dose pode ser digitada em kg/ha (padrão) ou em sc/ha (sacos) —
-                # se for em sc, converte pra kg/ha usando o peso da saca informado.
-                _sv_unid_dose = _sv_c2.radio("Unidade da dose", ["kg/ha", "sc/ha"],
-                                              key="sv_unid_dose", horizontal=True)
                 if _sv_unid_dose == "sc/ha":
                     _sv_dose_sc = _sv_c2.number_input("Dose (sc/ha)", min_value=0.0, value=1.0,
                                                        step=0.1, key="sv_dose_sc")
