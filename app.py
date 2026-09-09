@@ -7063,8 +7063,8 @@ if menu == "🧪 Solo & Adubação":
 
             # Excluir
             with st.expander("🗑️ Excluir registro"):
-                _opts = [f"{c.get('data','')} — {c.get('produto','')} — {c.get('toneladas_ha',0)} t/ha"
-                         for c in _corretivos]
+                _opts = [f"[{i+1}] {c.get('data','')} — {c.get('produto','')} — {c.get('toneladas_ha',0)} t/ha"
+                         for i, c in enumerate(_corretivos)]
                 _del = st.selectbox("Selecione", _opts, key="sel_del_corretivo")
                 if st.button("🗑️ Excluir", key="btn_del_corretivo"):
                     _idx = _opts.index(_del)
@@ -7802,8 +7802,8 @@ if menu == "💰 Financeiro":
                          use_container_width=True, hide_index=True)
 
             with st.expander("🗑️ Excluir lançamento"):
-                _opts_l = [f"{r.get('Data','')} — {r.get('Categoria','')} — R${r.get('Valor R$',0):.2f}"
-                           for r in _regs_l]
+                _opts_l = [f"[{i+1}] {r.get('Data','')} — {r.get('Categoria','')} — R${r.get('Valor R$',0):.2f}"
+                           for i, r in enumerate(_regs_l)]
                 _del_l = st.selectbox("Selecione", _opts_l, key="sel_del_lavoura")
                 if st.button("🗑️ Excluir", key="btn_del_lavoura"):
                     _idx_l = _opts_l.index(_del_l)
@@ -7867,8 +7867,8 @@ if menu == "💰 Financeiro":
         st.bar_chart(_cat_group)
 
         with st.expander("🗑️ Excluir lançamento"):
-            _opts_c = [f"{r.get('Data','')} — {r.get('Categoria','')} — R${r.get('Valor R$',0):.2f}"
-                       for r in _regs_c]
+            _opts_c = [f"[{i+1}] {r.get('Data','')} — {r.get('Categoria','')} — R${r.get('Valor R$',0):.2f}"
+                       for i, r in enumerate(_regs_c)]
             _del_c = st.selectbox("Selecione", _opts_c, key="sel_del_comp")
             if st.button("🗑️ Excluir", key="btn_del_comp"):
                 _idx_c = _opts_c.index(_del_c)
@@ -10122,8 +10122,8 @@ if menu == "📦 Operacional":
         df_car = pd.DataFrame(st.session_state.carencia_registros)
         st.dataframe(df_car, use_container_width=True)
         with st.expander("🗑️ Excluir"):
-            opcoes_del = [f"{r.get('Produto','')} — {r.get('Data Aplicação','')}"
-                          for r in st.session_state.carencia_registros]
+            opcoes_del = [f"[{i+1}] {r.get('Produto','')} — {r.get('Data Aplicação','')}"
+                          for i, r in enumerate(st.session_state.carencia_registros)]
             del_choice = st.selectbox("Excluir registro", opcoes_del, key="del_carencia")
             if st.button("🗑️ Excluir", key="btn_del_carencia"):
                 idx = opcoes_del.index(del_choice)
@@ -11822,16 +11822,24 @@ if menu == "📅 Planejamento de Safras":
                 <span style='color:rgba(255,255,255,0.5);font-size:11px;'>
                 📅 {_ev.get("Data","")} &nbsp;·&nbsp; {_ev.get("Área","")}
                 </span></div>""", unsafe_allow_html=True)
+                # Localiza pelo objeto em memória (identidade) — .index(_ev)
+                # comparava por VALOR (todos os campos iguais), então dois
+                # eventos com o mesmo texto (comum em lembretes repetidos)
+                # faziam o app concluir/excluir o registro errado.
                 if not _concl:
                     if _c2.button("✅", key=f"concl_ev_{_idx_ev}", help="Marcar como concluído"):
-                        _idx_orig = st.session_state.calendario_eventos.index(_ev)
-                        st.session_state.calendario_eventos[_idx_orig]["Concluído"] = True
-                        salvar_dados_iaagro()
+                        _idx_orig = next((i for i, e in enumerate(st.session_state.calendario_eventos)
+                                          if e is _ev), None)
+                        if _idx_orig is not None:
+                            st.session_state.calendario_eventos[_idx_orig]["Concluído"] = True
+                            salvar_dados_iaagro()
                         st.rerun()
                 if _c3.button("🗑️", key=f"del_ev_{_idx_ev}", help="Excluir"):
-                    _idx_orig = st.session_state.calendario_eventos.index(_ev)
-                    st.session_state.calendario_eventos.pop(_idx_orig)
-                    salvar_dados_iaagro()
+                    _idx_orig = next((i for i, e in enumerate(st.session_state.calendario_eventos)
+                                      if e is _ev), None)
+                    if _idx_orig is not None:
+                        st.session_state.calendario_eventos.pop(_idx_orig)
+                        salvar_dados_iaagro()
                     st.rerun()
         else:
             st.info("Nenhum evento cadastrado ainda.")
@@ -12376,11 +12384,13 @@ if menu == "🔧 Máquinas":
         st.markdown("#### ➕ Programar Revisão")
         with st.form("form_revisao", clear_on_submit=True):
             _rc1, _rc2 = st.columns(2)
-            _r_maq_nome = _rc1.selectbox(
-                "Máquina",
-                [f"{m.get('categoria','')} {m.get('nome','')}" for m in _maqs_r],
-                key="rev_maq_sel"
-            )
+            # Rótulo inclui o ID da máquina entre parênteses pra desambiguar
+            # duas máquinas com categoria+nome idênticos (ex: dois "🚜 Trator"
+            # sem apelido) — sem isso, .index() pegava sempre a primeira.
+            _maq_labels = [f"{m.get('categoria','')} {m.get('nome','')} ({m.get('id','')})" for m in _maqs_r]
+            _r_maq_label = _rc1.selectbox("Máquina", _maq_labels, key="rev_maq_sel")
+            _idx_maq = _maq_labels.index(_r_maq_label)
+            _r_maq_nome = f"{_maqs_r[_idx_maq].get('categoria','')} {_maqs_r[_idx_maq].get('nome','')}"
             _r_tipo = _rc2.text_input("Tipo de revisão", placeholder="Troca de óleo, filtros, revisão geral...")
 
             _rc3, _rc4, _rc5 = st.columns(3)
@@ -12392,8 +12402,7 @@ if menu == "🔧 Máquinas":
                                                 value=250,
                                                 help="0 = não alertar por horas de uso")
 
-            # Horímetro no momento da última revisão
-            _idx_maq = [f"{m.get('categoria','')} {m.get('nome','')}" for m in _maqs_r].index(_r_maq_nome)
+            # Horímetro no momento da última revisão (já sabemos o índice certo)
             _horim_atual = _maqs_r[_idx_maq].get("horimetro", 0)
             _r_horim_ult = st.number_input(
                 "Horímetro na última revisão (h)", min_value=0.0, step=10.0,
