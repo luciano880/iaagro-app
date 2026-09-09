@@ -8917,12 +8917,19 @@ if menu == "📦 Operacional":
                                            key="txt_novo_emb_edit")
                 col_btn1, col_btn2 = st.columns(2)
                 if col_btn1.button("💾 Salvar ajuste", key="btn_salvar_edit_est", use_container_width=True):
+                    # Se a pessoa digitar só o número (ex: "22", sem "kg"), a
+                    # baixa automática não reconhece — completa sozinho com
+                    # "kg" nesse caso, em vez de silenciosamente não funcionar.
+                    _emb_final = (_novo_emb or "").strip()
+                    if _emb_final and re.fullmatch(r"[\d.,]+", _emb_final):
+                        _emb_final = f"{_emb_final} kg"
                     _item_edit["Quantidade"] = _nova_qtd
                     _item_edit["Estoque Mínimo"] = _novo_min
-                    _item_edit["Embalagem"] = _novo_emb
+                    _item_edit["Embalagem"] = _emb_final
                     _item_edit["Valor Total R$"] = round(_nova_qtd * float(_item_edit.get("Valor Unitário R$",0)), 2)
                     atualizar_area_atual()  # vincula à área (preserva aplicações)
-                    success_box(f"✅ {_prod_edit} atualizado: {_nova_qtd} {_item_edit.get('Unidade','')}")
+                    _aviso_emb = f" (Embalagem completada para \"{_emb_final}\")" if _emb_final != (_novo_emb or "").strip() else ""
+                    success_box(f"✅ {_prod_edit} atualizado: {_nova_qtd} {_item_edit.get('Unidade','')}{_aviso_emb}")
                     st.rerun()
                 if col_btn2.button("🗑️ Excluir produto", key="btn_excluir_est", use_container_width=True):
                     st.session_state.estoque = [i for i in st.session_state.estoque if i["Insumo"] != _prod_edit]
