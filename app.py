@@ -4171,11 +4171,17 @@ def calcular_calcario_por_v(ctc, v_atual, area, prnt=75, v_desejado=70):
     return dose, round(dose * area, 2), f"V {v_atual:.0f}%→{v_desejado}%, CTC {ctc:.1f}, PRNT {prnt}%"
 
 
-def calcular_calcario_por_ph(ph, area):
+def calcular_calcario_por_ph(ph, area, argila=35):
     """
     Calagem pelo método SMP (CQFS RS/SC 2016) ou pH em água.
     PRNT médio adotado: 75% (calcário comercial típico da região Sul)
     Fórmula: NC (t/ha) = dose_base / (PRNT/100)
+
+    Agora considera a TEXTURA do solo (argila %): solos argilosos têm maior
+    capacidade tampão (mais colóides retendo H+/Al3+) e exigem mais calcário
+    para elevar o pH na mesma proporção; solos arenosos, com menor CTC e
+    capacidade tampão, exigem menos. Fator aplicado sobre a dose base:
+      argiloso (≥60% argila): ×1.15 | médio (35-60%): ×1.00 | arenoso (<35%): ×0.80
     """
     PRNT = 0.75  # PRNT médio 75% — calcário comercial RS/SC/PR
 
@@ -4189,9 +4195,82 @@ def calcular_calcario_por_ph(ph, area):
     elif ph < 6.0: dose_base = 0.5
     else:          dose_base = 0.0
 
+    if   argila >= 60: fator_textura = 1.15
+    elif argila >= 35: fator_textura = 1.00
+    else:               fator_textura = 0.80
+    dose_base *= fator_textura
+
     # Corrige pelo PRNT 75%
     dose = round(dose_base / PRNT, 2) if dose_base > 0 else 0.0
     return dose, dose * area
+
+
+def calcular_manutencao_calcario_por_n(n_kg_ha, prnt=75):
+    """
+    Estima a dose de calcário de MANUTENÇÃO — não corrige deficiência atual,
+    mas repõe a acidez gerada continuamente pela adubação nitrogenada
+    (ureia, sulfato de amônio e similares acidificam o solo à medida que o
+    N é nitrificado). Regra prática consolidada na literatura de calagem:
+    cada 1 kg de N amoniacal/ureia aplicado consome, em média, ~1,8 kg de
+    CaCO3 equivalente para neutralizar a acidez gerada.
+    Retorna a dose em t/ha de calcário comercial (já ajustada pelo PRNT).
+    """
+    if n_kg_ha <= 0:
+        return 0.0
+    caco3_necessario = n_kg_ha * 1.8 / 1000  # t/ha de CaCO3 puro
+    return round(caco3_necessario / (prnt / 100), 3)
+
+
+# Exportação de enxofre pela colheita (kg de S por tonelada de grão) —
+# valores de referência EMBRAPA/CQFS para estimar reposição via gesso.
+COEF_ENXOFRE_EXPORTACAO = {
+    "Soja": 4.0, "Milho": 2.0, "Trigo": 3.0, "Feijão": 3.5,
+    "Canola": 6.0, "Arroz": 2.5, "Sorgo": 2.0, "Aveia": 2.5,
+    "Cevada": 2.5, "Girassol": 5.0,
+}
+
+def calcular_reposicao_enxofre_gesso(cultura, produtividade_sc, peso_saca=60):
+    """
+    Estima a dose de gesso agrícola (t/ha) necessária para REPOR o enxofre
+    que será exportado pela colheita na produtividade esperada — componente
+    de "manutenção/exportação", separado da dose de "correção" (que trata
+    alumínio tóxico, cálcio baixo ou CTC baixa, já calculada em
+    calcular_gesso()). Gesso agrícola (CaSO4·2H2O) tem ~18% de S.
+    """
+    cult = cultura_limpa(cultura) if cultura else "Soja"
+    coef = COEF_ENXOFRE_EXPORTACAO.get(cult, 3.0)
+    ton_ha = (produtividade_sc * peso_saca) / 1000.0
+    s_exportado_kg_ha = coef * ton_ha
+    gesso_kg_ha = s_exportado_kg_ha / 0.18
+    return round(gesso_kg_ha / 1000, 3)  # t/ha
+
+
+def calcular_npk_correcao_exportacao(cultura, produtividade, fosforo, potassio,
+                                      materia_organica, argila=50, ph=5.5):
+    """
+    Separa a recomendação de P2O5 e K2O em dois componentes, para deixar
+    claro pro produtor o que é cada parte:
+      • correção   = dose adicional para elevar o solo (hoje numa classe
+                      baixa/média) até a faixa adequada — já ajustada por
+                      textura (recomendacao_npk já pondera argila).
+      • exportação = reposição do que a lavoura vai literalmente retirar do
+                      solo e levar embora no grão, na produtividade
+                      esperada (balanco_nutrientes já calcula isso).
+      total = correção + exportação
+    Retorna dict com "n", "p2o5" e "k2o" (cada um {correcao, exportacao, total}).
+    """
+    n_ha, p2o5_corr, k2o_corr = recomendacao_npk(
+        cultura, produtividade, fosforo, potassio, materia_organica, argila, ph)
+    _bal = balanco_nutrientes(cultura, produtividade)
+    p2o5_exp = _bal["P2O5"]["exporta"] if _bal else 0.0
+    k2o_exp  = _bal["K2O"]["exporta"] if _bal else 0.0
+    return {
+        "n": n_ha,
+        "p2o5": {"correcao": p2o5_corr, "exportacao": p2o5_exp,
+                 "total": round(p2o5_corr + p2o5_exp, 1)},
+        "k2o":  {"correcao": k2o_corr, "exportacao": k2o_exp,
+                 "total": round(k2o_corr + k2o_exp, 1)},
+    }
 
 
 def calcular_gesso(d):
@@ -5820,7 +5899,8 @@ if menu == "🌾 Lavoura":
 
             # Status calagem
             if dados_area and "ph" in dados_area:
-                _dose_rec, _ = calcular_calcario_por_ph(dados_area.get("ph",5.5), area.get("Hectares",1))
+                _dose_rec, _ = calcular_calcario_por_ph(dados_area.get("ph",5.5), area.get("Hectares",1),
+                                                         dados_area.get("argila",35))
                 if _calc_total == 0:
                     _calc_status = "⚪ Não aplicado"
                 elif _calc_total >= _dose_rec:
@@ -6511,35 +6591,46 @@ if menu == "🧪 Solo & Adubação":
         prioridade_final = prioridade(nota)
 
         # Calagem: método V% (mais preciso) quando há CTC e V%; senão, por pH
-        _ctc_d = d.get("ctc", 0)
-        _v_d   = d.get("v_percent", 0)
+        _ctc_d   = d.get("ctc", 0)
+        _v_d     = d.get("v_percent", 0)
+        _argila_d = d.get("argila", 35)
         _metodo_cal = "pH"
         if _ctc_d > 0 and _v_d > 0:
             dose_calcario, total_calcario, _det_cal = calcular_calcario_por_v(
                 _ctc_d, _v_d, d["area"], prnt=75, v_desejado=70)
             _metodo_cal = "Saturação de Bases (V%)"
             # Se o V% já está ok mas o pH está muito baixo, checa pelo pH também
-            _dose_ph, _tot_ph = calcular_calcario_por_ph(d["ph"], d["area"])
+            _dose_ph, _tot_ph = calcular_calcario_por_ph(d["ph"], d["area"], _argila_d)
             if dose_calcario == 0 and _dose_ph > 0:
                 dose_calcario, total_calcario = _dose_ph, _tot_ph
                 _metodo_cal = "pH (V% já adequado)"
         else:
-            dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"])
+            dose_calcario, total_calcario = calcular_calcario_por_ph(d["ph"], d["area"], _argila_d)
             _det_cal = f"Baseado no pH {d['ph']} (informe CTC e V% para cálculo mais preciso)"
 
         precisa_gesso, dose_gesso, total_gesso, motivos_gesso = calcular_gesso(d)
         producao_estimada = estimar_producao(d["produtividade"], nota)
 
+        # ── Componentes de MANUTENÇÃO/EXPORTAÇÃO (além da correção acima) ──
+        _npk_diag = calcular_npk_correcao_exportacao(
+            d.get("cultura","Soja"), d["produtividade"], d.get("fosforo",0),
+            d.get("potassio",0), d.get("materia_organica",0), _argila_d, d["ph"])
+        _manut_calcario = calcular_manutencao_calcario_por_n(_npk_diag["n"])
+        _gesso_exportacao = calcular_reposicao_enxofre_gesso(d.get("cultura","Soja"), d["produtividade"])
+        dose_calcario_total = round(dose_calcario + _manut_calcario, 2)
+        dose_gesso_total    = round(dose_gesso + _gesso_exportacao, 3)
+
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Nota",              f"{nota}/100")
         col2.metric("Prioridade",        prioridade_final)
-        col3.metric("Calcário",          f"{dose_calcario} t/ha")
-        col4.metric("Gesso",             f"{dose_gesso} t/ha")
+        col3.metric("Calcário",          f"{dose_calcario_total} t/ha")
+        col4.metric("Gesso",             f"{dose_gesso_total} t/ha")
         col5.metric("Produção Estimada", f"{producao_estimada:.1f} sc/ha")
 
         if dose_calcario > 0:
             st.caption(f"🧮 Calagem calculada pelo método **{_metodo_cal}** — {_det_cal}. "
-                       f"Meta V% = 70% (padrão grãos). PRNT considerado: 75%.")
+                       f"Meta V% = 70% (padrão grãos). PRNT considerado: 75%. "
+                       f"Argila: {_argila_d:.0f}% ({'argiloso' if _argila_d>=60 else 'médio' if _argila_d>=35 else 'arenoso'}).")
 
         st.subheader("🧠 Score Inteligente do Solo")
         col1, col2 = st.columns(2)
@@ -6583,17 +6674,41 @@ if menu == "🧪 Solo & Adubação":
         </div>''', unsafe_allow_html=True)
 
         st.subheader("Calcário")
-        st.write(f"Dose estimada: {dose_calcario} t/ha")
-        st.write(f"Total estimado: {total_calcario:.1f} toneladas")
+        st.markdown(f"""
+        <div style='background:#0f3460;border-radius:10px;padding:12px 16px;border:1px solid #3b82f6;margin:6px 0;'>
+        <span style='color:#93c5fd;font-size:13px;'>
+        🧪 <b>Correção</b> (elevar pH/V% até a faixa adequada, ajustado por textura): <b>{dose_calcario} t/ha</b><br>
+        🌱 <b>Manutenção</b> (repor a acidez gerada pela adubação nitrogenada, {_npk_diag['n']:.0f} kg N/ha): <b>{_manut_calcario} t/ha</b><br>
+        <hr style='border-color:#1e3a5f;margin:6px 0;'>
+        <b style='color:#6ee7b7;'>➡️ Total recomendado: {dose_calcario_total} t/ha</b>
+        &nbsp;|&nbsp; {round(dose_calcario_total * d['area'],1)} toneladas para {d['area']} ha
+        </span></div>
+        """, unsafe_allow_html=True)
 
         st.subheader("Gesso Agrícola")
         if precisa_gesso:
-            warning_box(f"Indicação inicial de gesso: {dose_gesso} t/ha")
-            st.write(f"Total estimado: {total_gesso:.1f} toneladas")
-            for motivo in motivos_gesso:
-                st.write(f"- {motivo}")
+            _motivos_txt = "; ".join(motivos_gesso)
+            st.markdown(f"""
+            <div style='background:#78350f;border-radius:10px;padding:12px 16px;border:1px solid #f59e0b;margin:6px 0;'>
+            <span style='color:#fde68a;font-size:13px;'>
+            ⚠️ <b>Correção</b> ({_motivos_txt}), ajustada por textura: <b>{dose_gesso} t/ha</b><br>
+            🌾 <b>Reposição de enxofre</b> exportado na colheita: <b>{_gesso_exportacao} t/ha</b><br>
+            <hr style='border-color:#92400e;margin:6px 0;'>
+            <b style='color:#fbbf24;'>➡️ Total recomendado: {dose_gesso_total} t/ha</b>
+            &nbsp;|&nbsp; {round(dose_gesso_total * d['area'],1)} toneladas para {d['area']} ha
+            </span></div>
+            """, unsafe_allow_html=True)
+        elif _gesso_exportacao > 0:
+            st.markdown(f"""
+            <div style='background:#0f3460;border-radius:10px;padding:12px 16px;border:1px solid #3b82f6;margin:6px 0;'>
+            <span style='color:#93c5fd;font-size:13px;'>
+            ✅ Sem indicação de correção (Al/Ca/S/CTC adequados). Ainda assim, considere repor o
+            enxofre exportado na colheita: <b>{_gesso_exportacao} t/ha</b> de gesso
+            ({round(_gesso_exportacao * d['area'],1)} t para {d['area']} ha).
+            </span></div>
+            """, unsafe_allow_html=True)
         else:
-            success_box("Sem indicação inicial forte para gesso.")
+            success_box("Sem indicação de gesso — nem correção, nem reposição de enxofre.")
 
         cultura_diag = d.get("cultura", "Soja")
         score, classe_score, alertas_score = score_solo(d, cultura_diag)
@@ -6915,7 +7030,7 @@ if menu == "🧪 Solo & Adubação":
             # Status vs recomendado
             _d_atual = st.session_state.dados
             _ph_atual = _d_atual.get("ph", 5.5)
-            _dose_rec, _ = calcular_calcario_por_ph(_ph_atual, _d_atual.get("area", 1))
+            _dose_rec, _ = calcular_calcario_por_ph(_ph_atual, _d_atual.get("area", 1), _d_atual.get("argila", 35))
             _, _dose_gesso_rec, _, _ = calcular_gesso(_d_atual)
             _ph_pos = _d_atual.get("ph_pos_calagem", _ph_atual)
 
@@ -7098,6 +7213,18 @@ if menu == "🧪 Solo & Adubação":
         p2o5_ha = round(p2o5_ha * fator_zona, 1)
         k2o_ha  = round(k2o_ha  * fator_zona, 1)
 
+        # ── Componente de EXPORTAÇÃO (reposição do que a colheita leva embora) ──
+        # Os valores acima (p2o5_ha/k2o_ha) são a dose de CORREÇÃO — baseada na
+        # classe de fertilidade do solo (já ajustada por textura). Agora soma-se
+        # o que a lavoura vai exportar no grão na produtividade esperada dessa
+        # zona, calculado a partir dos coeficientes de exportação por cultura.
+        p2o5_ha_correcao, k2o_ha_correcao = p2o5_ha, k2o_ha
+        _bal_adub = balanco_nutrientes(cultura, produtividade_ajustada)
+        p2o5_ha_exportacao = _bal_adub["P2O5"]["exporta"] if _bal_adub else 0.0
+        k2o_ha_exportacao  = _bal_adub["K2O"]["exporta"]  if _bal_adub else 0.0
+        p2o5_ha = round(p2o5_ha_correcao + p2o5_ha_exportacao, 1)
+        k2o_ha  = round(k2o_ha_correcao  + k2o_ha_exportacao, 1)
+
         # Converter para produtos comerciais
         map_ha   = round(p2o5_ha / 0.52, 1)   # MAP 11-52-00: 52% P2O5
         kcl_ha   = round(k2o_ha  / 0.60, 1)   # KCl 00-00-60: 60% K2O
@@ -7107,6 +7234,17 @@ if menu == "🧪 Solo & Adubação":
         col1.metric("Nitrogênio", f"{n_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
         col2.metric("P₂O₅",      f"{p2o5_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
         col3.metric("K₂O",       f"{k2o_ha:.1f} kg/ha", delta=f"{((fator_zona-1)*100):+.0f}%")
+
+        st.markdown(f"""
+        <div style='background:#0f3460;border-radius:10px;padding:12px 16px;border:1px solid #3b82f6;margin:8px 0;'>
+        <span style='color:#93c5fd;font-size:13px;'>
+        📊 <b>Conta detalhada (textura: {argila:.0f}% argila — {'argiloso' if argila>=60 else 'médio' if argila>=40 else 'arenoso'})</b><br>
+        🧪 P₂O₅ — Correção: <b>{p2o5_ha_correcao:.1f}</b> + Exportação (colheita): <b>{p2o5_ha_exportacao:.1f}</b>
+        = <b style='color:#6ee7b7;'>{p2o5_ha:.1f} kg/ha</b><br>
+        🧪 K₂O — Correção: <b>{k2o_ha_correcao:.1f}</b> + Exportação (colheita): <b>{k2o_ha_exportacao:.1f}</b>
+        = <b style='color:#6ee7b7;'>{k2o_ha:.1f} kg/ha</b>
+        </span></div>
+        """, unsafe_allow_html=True)
         st.divider()
 
         st.subheader("🌱 Opções de Adubação — escolha a que melhor se encaixa")
