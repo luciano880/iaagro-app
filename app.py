@@ -835,7 +835,7 @@ def gerar_pdf_conversa_assistente(historico):
                              textColor=_sub, alignment=TA_CENTER, leading=10)
     _el.append(HRFlowable(width="100%", thickness=0.7, color=_cinza_bd, spaceAfter=6))
     _el.append(Paragraph(
-        "IAAgro - Inteligência Agrícola de Precisão - iaagro-app-kvrwxtkugla8pqe7dgqeue.streamlit.app", _st_rod))
+        "IAAgro - Inteligência Agrícola de Precisão - iaagro-app.streamlit.app", _st_rod))
 
     try:
         _doc.build(_el)
@@ -1004,7 +1004,7 @@ def gerar_pdf_lista_pecas(itens, titulo="Lista de Compras — Peças de Revisão
     _st_rodape = ParagraphStyle("rod", fontName="Helvetica", fontSize=7.5,
                                 textColor=_sub, alignment=TA_CENTER, leading=10)
     _el.append(Paragraph(
-        "Gerado pelo IAAgro · Inteligência Agrícola de Precisão · iaagro-app-kvrwxtkugla8pqe7dgqeue.streamlit.app",
+        "Gerado pelo IAAgro · Inteligência Agrícola de Precisão · iaagro-app.streamlit.app",
         _st_rodape))
 
     _doc.build(_el)
