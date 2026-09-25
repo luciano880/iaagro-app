@@ -4145,6 +4145,60 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
     story.append(ttg)
     story.append(Spacer(1,3*mm))
 
+    # ── CONTROLE DE APLICAÇÃO POR ÁREA — checklist pra levar a campo e
+    # preencher à mão qual talhão foi aplicado e em que dia, útil quando a
+    # mesma aplicação (produto/programação) é feita em várias áreas ao
+    # longo de vários dias. ──
+    _areas_pdf = st.session_state.get("areas", [])
+    if _areas_pdf:
+        story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
+        story.append(Spacer(1,3*mm))
+        story.append(P("📋 CONTROLE DE APLICAÇÃO POR ÁREA", 12, True, COR_VERDE))
+        story.append(P("Preencha manualmente a data em que cada área/talhão recebeu esta aplicação.",
+                       7.5, False, COR_SUB))
+        story.append(Spacer(1,2*mm))
+
+        # Agrupa as áreas por Cultura — uma tabela separada pra cada cultura
+        # (ex: Soja e Milho não ficam misturados na mesma tabela).
+        _culturas_ordem = []
+        _por_cultura = {}
+        for _a in _areas_pdf:
+            _c = _a.get("Cultura","—") or "Sem cultura"
+            if _c not in _por_cultura:
+                _por_cultura[_c] = []
+                _culturas_ordem.append(_c)
+            _por_cultura[_c].append(_a)
+
+        for _c in _culturas_ordem:
+            _lista_c = _por_cultura[_c]
+            story.append(P(f"🌾 {_c}", 9.5, True, COR_TEXTO))
+            story.append(Spacer(1,1*mm))
+
+            cab_areas = [P("Talhão",8,True,COR_BRANCO), P("Fazenda",8,True,COR_BRANCO),
+                         P("ha",8,True,COR_BRANCO),
+                         P("Data Aplicada",8,True,COR_BRANCO), P("OK",8,True,COR_BRANCO)]
+            linhas_areas = [cab_areas]
+            for _a in _lista_c:
+                linhas_areas.append([
+                    P(_a.get("Talhão","—") or "—", 8),
+                    P(_a.get("Fazenda","—") or "—", 8),
+                    P(f"{_a.get('Hectares',0)}", 8),
+                    P("____/____/______", 8),
+                    P("[&nbsp;&nbsp;]", 9, True, align=TA_CENTER),
+                ])
+            t_areas = Table(linhas_areas, colWidths=[4.0*cm,4.0*cm,1.8*cm,4.0*cm,1.7*cm], repeatRows=1)
+            st_areas = [("BACKGROUND",(0,0),(-1,0),COR_VERDE_E),
+                        ("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
+                        ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
+                        ("LEFTPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+                        ("ALIGN",(4,0),(4,-1),"CENTER")]
+            for ri in range(1, len(linhas_areas)):
+                if ri % 2 == 0:
+                    st_areas.append(("BACKGROUND",(0,ri),(-1,ri),COR_CINZA))
+            t_areas.setStyle(TableStyle(st_areas))
+            story.append(t_areas)
+            story.append(Spacer(1,4*mm))
+
     story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
     story.append(Spacer(1,2*mm))
     story.append(P(f"IAAgro - Inteligencia Agricola de Precisao | {datetime.now().strftime('%d/%m/%Y %H:%M')} | Uso interno",
