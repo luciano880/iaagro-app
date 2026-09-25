@@ -4151,10 +4151,16 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
     # longo de vários dias. ──
     _areas_pdf = st.session_state.get("areas", [])
     if _areas_pdf:
+        # Quantas "colunas de aplicação" em branco por talhão — cobre um
+        # programa de aplicações da safra inteira (padrão 6; dá pra ajustar
+        # se o programa da cultura tiver mais ou menos etapas).
+        N_APLIC_CONTROLE = 6
+
         story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
         story.append(Spacer(1,3*mm))
         story.append(P("📋 CONTROLE DE APLICAÇÃO POR ÁREA", 12, True, COR_VERDE))
-        story.append(P("Preencha manualmente a data em que cada área/talhão recebeu esta aplicação.",
+        story.append(P(f"Um espaço para cada uma das {N_APLIC_CONTROLE} aplicações da safra — "
+                       f"anote a data (e opcionalmente o estádio) ao concluir em cada talhão.",
                        7.5, False, COR_SUB))
         story.append(Spacer(1,2*mm))
 
@@ -4174,24 +4180,27 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
             story.append(P(f"🌾 {_c}", 9.5, True, COR_TEXTO))
             story.append(Spacer(1,1*mm))
 
-            cab_areas = [P("Talhão",8,True,COR_BRANCO), P("Fazenda",8,True,COR_BRANCO),
-                         P("ha",8,True,COR_BRANCO),
-                         P("Data Aplicada",8,True,COR_BRANCO), P("OK",8,True,COR_BRANCO)]
+            cab_areas = [P("Talhão",7.5,True,COR_BRANCO), P("ha",7.5,True,COR_BRANCO)]
+            for _n in range(1, N_APLIC_CONTROLE+1):
+                cab_areas.append(P(f"Apl.{_n}",7.5,True,COR_BRANCO,TA_CENTER))
             linhas_areas = [cab_areas]
             for _a in _lista_c:
-                linhas_areas.append([
-                    P(_a.get("Talhão","—") or "—", 8),
-                    P(_a.get("Fazenda","—") or "—", 8),
-                    P(f"{_a.get('Hectares',0)}", 8),
-                    P("____/____/______", 8),
-                    P("[&nbsp;&nbsp;]", 9, True, align=TA_CENTER),
-                ])
-            t_areas = Table(linhas_areas, colWidths=[4.0*cm,4.0*cm,1.8*cm,4.0*cm,1.7*cm], repeatRows=1)
+                linha = [P(_a.get("Talhão","—") or "—", 7.5),
+                         P(f"{_a.get('Hectares',0)}", 7.5)]
+                for _n in range(N_APLIC_CONTROLE):
+                    linha.append(P("____/____", 7.5, False, None, TA_CENTER))
+                linhas_areas.append(linha)
+
+            _w_talhao, _w_ha = 3.3*cm, 1.2*cm
+            _w_apl = (18.0*cm - _w_talhao - _w_ha) / N_APLIC_CONTROLE
+            t_areas = Table(linhas_areas,
+                             colWidths=[_w_talhao, _w_ha] + [_w_apl]*N_APLIC_CONTROLE,
+                             repeatRows=1)
             st_areas = [("BACKGROUND",(0,0),(-1,0),COR_VERDE_E),
                         ("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
-                        ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
-                        ("LEFTPADDING",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-                        ("ALIGN",(4,0),(4,-1),"CENTER")]
+                        ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),
+                        ("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),
+                        ("VALIGN",(0,0),(-1,-1),"MIDDLE")]
             for ri in range(1, len(linhas_areas)):
                 if ri % 2 == 0:
                     st_areas.append(("BACKGROUND",(0,ri),(-1,ri),COR_CINZA))
