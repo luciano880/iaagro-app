@@ -4152,10 +4152,18 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
     _areas_pdf = st.session_state.get("areas", [])
     if _areas_pdf:
         # Quantas "colunas de aplicação" em branco por talhão — cobre um
-        # programa de aplicações da safra inteira (padrão 6; dá pra ajustar
+        # programa de aplicações da safra inteira (padrão 7; dá pra ajustar
         # se o programa da cultura tiver mais ou menos etapas).
-        N_APLIC_CONTROLE = 6
+        N_APLIC_CONTROLE = 7
 
+        # Página própria pra essa tabela, com a logo grande no topo.
+        story.append(PageBreak())
+        _logo_path = "IAAgrologo.jpeg"
+        if os.path.exists(_logo_path):
+            _logo_img = Image(_logo_path, width=4.5*cm, height=4.5*cm)
+            _logo_img.hAlign = "CENTER"
+            story.append(_logo_img)
+            story.append(Spacer(1,4*mm))
         story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
         story.append(Spacer(1,3*mm))
         story.append(P("📋 CONTROLE DE APLICAÇÃO POR ÁREA", 12, True, COR_VERDE))
