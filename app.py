@@ -4163,14 +4163,14 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
             _logo_img = Image(_logo_path, width=6*cm, height=6*cm)
             _logo_img.hAlign = "CENTER"
             story.append(_logo_img)
-            story.append(Spacer(1,6*mm))
+            story.append(Spacer(1,2*mm))
         story.append(HRFlowable(width="100%",thickness=1.5,color=COR_VERDE))
-        story.append(Spacer(1,5*mm))
+        story.append(Spacer(1,2*mm))
         story.append(P("📋 CONTROLE DE APLICAÇÃO POR ÁREA", 16, True, COR_VERDE))
         story.append(P(f"Um espaço para cada uma das {N_APLIC_CONTROLE} aplicações da safra — "
                        f"anote a data (e opcionalmente o estágio) ao concluir em cada talhão.",
                        9.5, False, COR_SUB))
-        story.append(Spacer(1,5*mm))
+        story.append(Spacer(1,2*mm))
 
         # Agrupa as áreas por Cultura — uma tabela separada pra cada cultura
         # (ex: Soja e Milho não ficam misturados na mesma tabela).
@@ -4214,7 +4214,7 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                     st_areas.append(("BACKGROUND",(0,ri),(-1,ri),COR_CINZA))
             t_areas.setStyle(TableStyle(st_areas))
             story.append(t_areas)
-            story.append(Spacer(1,7*mm))
+            story.append(Spacer(1,4*mm))
 
     story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
     story.append(Spacer(1,2*mm))
