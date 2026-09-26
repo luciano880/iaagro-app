@@ -3795,7 +3795,7 @@ def atualizar_area_atual():
 
 
 def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura="", area_ha=0, operador=""):
-    """Gera PDF profissional com programação de aplicações por estádio."""
+    """Gera PDF profissional com programação de aplicações por estágio."""
     import io
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -3894,7 +3894,7 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
 
     # BLOCOS POR ESTÁDIO
     for num, aplic in enumerate(aplicacoes, 1):
-        est = aplic.get("Estádio") or aplic.get("Aplicação","")
+        est = aplic.get("Estágio") or aplic.get("Estádio") or aplic.get("Aplicação","")
         for e in ["🌱","🌿","🌾","🌸","🫘","📋"]: est = est.replace(e,"").strip()
 
         cab = [[P(f"{num}. {est}",11,True,COR_BRANCO),
@@ -4160,17 +4160,17 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
         story.append(PageBreak())
         _logo_path = "IAAgrologo.jpeg"
         if os.path.exists(_logo_path):
-            _logo_img = Image(_logo_path, width=4.5*cm, height=4.5*cm)
+            _logo_img = Image(_logo_path, width=8*cm, height=8*cm)
             _logo_img.hAlign = "CENTER"
             story.append(_logo_img)
-            story.append(Spacer(1,4*mm))
-        story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
-        story.append(Spacer(1,3*mm))
-        story.append(P("📋 CONTROLE DE APLICAÇÃO POR ÁREA", 12, True, COR_VERDE))
+            story.append(Spacer(1,6*mm))
+        story.append(HRFlowable(width="100%",thickness=1.5,color=COR_VERDE))
+        story.append(Spacer(1,5*mm))
+        story.append(P("📋 CONTROLE DE APLICAÇÃO POR ÁREA", 16, True, COR_VERDE))
         story.append(P(f"Um espaço para cada uma das {N_APLIC_CONTROLE} aplicações da safra — "
-                       f"anote a data (e opcionalmente o estádio) ao concluir em cada talhão.",
-                       7.5, False, COR_SUB))
-        story.append(Spacer(1,2*mm))
+                       f"anote a data (e opcionalmente o estágio) ao concluir em cada talhão.",
+                       9.5, False, COR_SUB))
+        story.append(Spacer(1,5*mm))
 
         # Agrupa as áreas por Cultura — uma tabela separada pra cada cultura
         # (ex: Soja e Milho não ficam misturados na mesma tabela).
@@ -4185,18 +4185,18 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
 
         for _c in _culturas_ordem:
             _lista_c = _por_cultura[_c]
-            story.append(P(f"🌾 {_c}", 9.5, True, COR_TEXTO))
-            story.append(Spacer(1,1*mm))
+            story.append(P(f"🌾 {_c}", 13, True, COR_TEXTO))
+            story.append(Spacer(1,2*mm))
 
-            cab_areas = [P("Talhão",7.5,True,COR_BRANCO), P("ha",7.5,True,COR_BRANCO)]
+            cab_areas = [P("Talhão",10.5,True,COR_BRANCO), P("ha",10.5,True,COR_BRANCO)]
             for _n in range(1, N_APLIC_CONTROLE+1):
-                cab_areas.append(P(f"Apl.{_n}",7.5,True,COR_BRANCO,TA_CENTER))
+                cab_areas.append(P(f"Apl.{_n}",10.5,True,COR_BRANCO,TA_CENTER))
             linhas_areas = [cab_areas]
             for _a in _lista_c:
-                linha = [P(_a.get("Talhão","—") or "—", 7.5),
-                         P(f"{_a.get('Hectares',0)}", 7.5)]
+                linha = [P(_a.get("Talhão","—") or "—", 10.5),
+                         P(f"{_a.get('Hectares',0)}", 10.5)]
                 for _n in range(N_APLIC_CONTROLE):
-                    linha.append(P("____/____", 7.5, False, None, TA_CENTER))
+                    linha.append(P("__/__", 10.5, False, None, TA_CENTER))
                 linhas_areas.append(linha)
 
             _w_talhao, _w_ha = 3.3*cm, 1.2*cm
@@ -4205,16 +4205,16 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
                              colWidths=[_w_talhao, _w_ha] + [_w_apl]*N_APLIC_CONTROLE,
                              repeatRows=1)
             st_areas = [("BACKGROUND",(0,0),(-1,0),COR_VERDE_E),
-                        ("GRID",(0,0),(-1,-1),0.4,COR_BORDA),
-                        ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4),
-                        ("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),
+                        ("GRID",(0,0),(-1,-1),0.5,COR_BORDA),
+                        ("TOPPADDING",(0,0),(-1,-1),10),("BOTTOMPADDING",(0,0),(-1,-1),10),
+                        ("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),
                         ("VALIGN",(0,0),(-1,-1),"MIDDLE")]
             for ri in range(1, len(linhas_areas)):
                 if ri % 2 == 0:
                     st_areas.append(("BACKGROUND",(0,ri),(-1,ri),COR_CINZA))
             t_areas.setStyle(TableStyle(st_areas))
             story.append(t_areas)
-            story.append(Spacer(1,4*mm))
+            story.append(Spacer(1,7*mm))
 
     story.append(HRFlowable(width="100%",thickness=1,color=COR_VERDE))
     story.append(Spacer(1,2*mm))
@@ -7763,7 +7763,7 @@ if menu == "💰 Financeiro":
                 _custo_insumos += _custo_p
                 _det_insumos.append({
                     "ap_idx":      _ap_idx,
-                    "Aplicação":   ap.get("Estádio", ap.get("Aplicação","")),
+                    "Aplicação":   ap.get("Estágio", ap.get("Estádio", ap.get("Aplicação",""))),
                     "Produto":     _nome_p,
                     "Tipo":        _item_e.get("Categoria","") if _item_e else p.get("Tipo",""),
                     "Qtd":         f"{_qtd_base:.2f} {_base_u}",
@@ -7823,7 +7823,7 @@ if menu == "💰 Financeiro":
                            "A data e os produtos ajudam a identificar qual remover.")
                 _opcoes_del = {}
                 for _i, ap in enumerate(st.session_state.aplicacoes):
-                    _est = ap.get('Estádio', ap.get('Aplicação', 'Aplicação'))
+                    _est = ap.get('Estágio', ap.get('Estádio', ap.get('Aplicação', 'Aplicação')))
                     _dt  = ap.get('Data', ap.get('data', ''))
                     _prods = ', '.join(p.get('Produto','') for p in ap.get('Produtos',[])[:3])
                     _reticencias = '...' if len(ap.get('Produtos',[])) > 3 else ''
@@ -9090,7 +9090,7 @@ if menu == "📦 Operacional":
         st.subheader("➕ Nova Aplicação")
         col_h1, col_h2, col_h3 = st.columns(3)
         with col_h1:
-            estadio_sel = st.selectbox("📅 Estádio fenológico", ESTADIOS, key="sel_estadio_aplic")
+            estadio_sel = st.selectbox("📅 Estágio fenológico", ESTADIOS, key="sel_estadio_aplic")
             if estadio_sel == "📋 Outro":
                 nome_aplic = st.text_input("Nome da aplicação", placeholder="Ex: Aplicação especial", key="txt_nome_aplic")
             else:
@@ -9496,7 +9496,7 @@ if menu == "📦 Operacional":
                     "ID Área":             st.session_state.dados.get("id_area",""),
                     "Cultura":             st.session_state.get("aplic_cultura_ativa",""),
                     "Hectares Cultura":    st.session_state.get("aplic_ha_ativo", area_aplic),
-                    "Estádio":             "🚜 Plantio",
+                    "Estágio":             "🚜 Plantio",
                     "Aplicação":           "🚜 Plantio",
                     "Data":                str(data_aplic),
                     "Área aplicada ha":    area_aplic,
@@ -9625,7 +9625,7 @@ if menu == "📦 Operacional":
                     "ID Área":             st.session_state.dados.get("id_area",""),
                     "Cultura":             st.session_state.get("aplic_cultura_ativa",""),
                     "Hectares Cultura":    st.session_state.get("aplic_ha_ativo",0),
-                    "Estádio":             estadio_sel,
+                    "Estágio":             estadio_sel,
                     "Aplicação":           nome_aplic,
                     "Data":                str(data_aplic),
                     "Área aplicada ha":    area_aplic,
@@ -9777,12 +9777,12 @@ if menu == "📦 Operacional":
                 if a.get("Cultura","Sem cultura") == _fil_cult_hist]
 
             aplicacoes_ordenadas = sorted(_aplic_filtradas,
-                key=lambda x: _ordem.get(x.get("Estádio", x.get("Aplicação","")), 99))
+                key=lambda x: _ordem.get(x.get("Estágio", x.get("Estádio", x.get("Aplicação",""))), 99))
 
             for idx_a, aplic in enumerate(aplicacoes_ordenadas):
                 _status   = aplic.get("Status", "pendente")
                 _badge    = "✅ Aplicado" if _status == "aplicado" else "⏳ Pendente"
-                with st.expander(f"{aplic.get('Estádio','') or aplic.get('Aplicação','')} — {aplic.get('Data','')} | {_badge}"):
+                with st.expander(f"{aplic.get('Estágio','') or aplic.get('Estádio','') or aplic.get('Aplicação','')} — {aplic.get('Data','')} | {_badge}"):
                     col_i1, col_i2 = st.columns(2)
                     col_i1.markdown(f"**Área:** {aplic.get('Área aplicada ha',0)} ha")
                     col_i1.markdown(f"**Calda:** {aplic.get('Volume calda L/ha',0)} L/ha")
@@ -10016,7 +10016,7 @@ if menu == "📦 Operacional":
                         col_b1.success(f"✅ Aplicado em {aplic.get('Data Confirmacao', aplic.get('Data',''))}")
                     # Exportar para imprimir
                     _linhas_exp = [
-                        f"Aplicação: {aplic.get('Estádio', aplic.get('Aplicação',''))}",
+                        f"Aplicação: {aplic.get('Estágio', aplic.get('Estádio', aplic.get('Aplicação','')))}",
                         f"Data: {aplic.get('Data','')}",
                         f"Área: {aplic.get('Área aplicada ha',0)} ha",
                         f"Calda: {aplic.get('Volume calda L/ha',0)} L/ha",
@@ -10097,8 +10097,8 @@ if menu == "📦 Operacional":
                         with st.form(key=f"form_edit_aplic_{idx_a}"):
                             _e1, _e2, _e3 = st.columns(3)
                             _edt_data     = _e1.text_input("Data (dd/mm/aaaa)", value=aplic.get("Data",""), key=f"edt_data_{idx_a}")
-                            _edt_estadio  = _e2.text_input("Estádio/Nome da aplicação",
-                                value=aplic.get("Estádio", aplic.get("Aplicação","")), key=f"edt_estadio_{idx_a}")
+                            _edt_estadio  = _e2.text_input("Estágio/Nome da aplicação",
+                                value=aplic.get("Estágio", aplic.get("Estádio", aplic.get("Aplicação",""))), key=f"edt_estadio_{idx_a}")
                             _edt_operador = _e3.text_input("Operador", value=aplic.get("Operador",""), key=f"edt_operador_{idx_a}")
 
                             _e4, _e5, _e6 = st.columns(3)
@@ -10166,7 +10166,7 @@ if menu == "📦 Operacional":
                                 if _idx_orig is not None:
                                     _reg = st.session_state.aplicacoes[_idx_orig]
                                     _reg["Data"]              = _edt_data
-                                    _reg["Estádio"]           = _edt_estadio
+                                    _reg["Estágio"]           = _edt_estadio
                                     _reg["Aplicação"]         = _edt_estadio
                                     _reg["Operador"]          = _edt_operador
                                     _reg["Pulverizador"]      = _edt_pulv
@@ -10325,7 +10325,7 @@ if menu == "📦 Operacional":
         rec_cultura   = st.selectbox("Cultura", get_culturas(), key="rec_cultura")
         rec_praga     = st.text_input("Praga/doença/planta daninha", key="rec_praga")
         rec_dose      = st.text_input("Dose recomendada", placeholder="Ex: 0.5 L/ha", key="rec_dose")
-        rec_epoca     = st.text_input("Época de aplicação", placeholder="Ex: Estádio R1", key="rec_epoca")
+        rec_epoca     = st.text_input("Época de aplicação", placeholder="Ex: Estágio R1", key="rec_epoca")
     with col2:
         rec_responsavel = st.text_input("Responsável técnico", key="rec_responsavel")
         rec_crea        = st.text_input("CREA/CRB", key="rec_crea")
@@ -11329,7 +11329,7 @@ elif menu == "🧠 Assistente IA":
                             "mais. Busque a recomendação atual do grupo específico antes de afirmar limites. "
                             "(2) NÃO trate a repetição de um mesmo grupo químico como ERRO automático. Um "
                             "bom programa de aplicação é avaliado no CONJUNTO: qual doença-alvo em cada "
-                            "estádio (ex: manchas e fungos de solo no início; ferrugem asiática, que é "
+                            "estágio (ex: manchas e fungos de solo no início; ferrugem asiática, que é "
                             "biotrófica, mais para frente), a alternância de triazóis (DMI) ao longo do "
                             "programa, e o uso de multissítios. Repetir um grupo pode ser tecnicamente "
                             "justificado pela pressão de doença. "
@@ -11436,7 +11436,7 @@ elif menu == "🧠 Assistente IA":
                     except _rq_ia.exceptions.Timeout:
                         st.warning("⏳ A análise está demorando mais que o normal (muitas buscas na web). "
                                    "Tente de novo, ou faça uma pergunta mais específica — por exemplo, "
-                                   "analise um estádio ou produto por vez em vez do programa inteiro.")
+                                   "analise um estágio ou produto por vez em vez do programa inteiro.")
                     except Exception as _e_ia:
                         st.error(f"Erro de conexão: {str(_e_ia)[:120]}")
 
