@@ -4160,7 +4160,7 @@ def gerar_pdf_programacao_aplicacoes(aplicacoes, fazenda="", talhao="", cultura=
         story.append(PageBreak())
         _logo_path = "IAAgrologo.jpeg"
         if os.path.exists(_logo_path):
-            _logo_img = Image(_logo_path, width=8*cm, height=8*cm)
+            _logo_img = Image(_logo_path, width=6*cm, height=6*cm)
             _logo_img.hAlign = "CENTER"
             story.append(_logo_img)
             story.append(Spacer(1,6*mm))
