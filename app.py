@@ -1034,6 +1034,7 @@ def gerar_backup():
         "planejamento_safras": st.session_state.get("planejamento_safras", []),
         "maquinas":           st.session_state.get("maquinas", []),
         "maquinas_revisoes":  st.session_state.get("maquinas_revisoes", []),
+        "ia_conversas":       st.session_state.get("ia_conversas", []),
         "segmento":           st.session_state.get("segmento", None),
         "email_config":       st.session_state.get("email_config", {}),
         "backup_data": str(datetime.now())
@@ -1071,6 +1072,7 @@ def restaurar_backup(arquivo):
         st.session_state.planejamento_safras = dados.get("planejamento_safras", [])
         st.session_state.maquinas            = dados.get("maquinas", [])
         st.session_state.maquinas_revisoes   = dados.get("maquinas_revisoes", [])
+        st.session_state.ia_conversas        = dados.get("ia_conversas", [])
         st.session_state.segmento            = dados.get("segmento", None)
         if dados.get("email_config"):
             st.session_state.email_config = dados["email_config"]
@@ -1695,6 +1697,7 @@ def salvar_dados_iaagro():
         "corretivos_aplicados":    st.session_state.get("corretivos_aplicados", []),
         "maquinas":                st.session_state.get("maquinas", []),
         "maquinas_revisoes":       st.session_state.get("maquinas_revisoes", []),
+        "ia_conversas":            st.session_state.get("ia_conversas", []),
     }
     # Lê variáveis globais dinamicamente (podem não existir quando função é definida)
     _sb_url    = st.secrets.get("SUPABASE_URL", "") if hasattr(st, 'secrets') else ""
@@ -2552,6 +2555,8 @@ if "maquinas" not in st.session_state or (not st.session_state.get("maquinas") a
     st.session_state.maquinas = dados_carregados.get("maquinas", [])
 if "maquinas_revisoes" not in st.session_state or (not st.session_state.get("maquinas_revisoes") and dados_carregados.get("maquinas_revisoes")):
     st.session_state.maquinas_revisoes = dados_carregados.get("maquinas_revisoes", [])
+if "ia_conversas" not in st.session_state or (not st.session_state.get("ia_conversas") and dados_carregados.get("ia_conversas")):
+    st.session_state.ia_conversas = dados_carregados.get("ia_conversas", [])
 
 # ── LIBERA O SALVAMENTO (salvaguarda anti-perda) ──
 # Só marca "dados prontos" quando o carregamento inicial terminou de fato.
@@ -11178,6 +11183,66 @@ elif menu == "🧠 Assistente IA":
 
     if "assistente_hist" not in st.session_state:
         st.session_state.assistente_hist = []
+    if "ia_conversas" not in st.session_state:
+        st.session_state.ia_conversas = []
+    if "assistente_conv_id" not in st.session_state:
+        st.session_state.assistente_conv_id = None
+
+    def _ia_salvar_conversa_atual():
+        """Grava/atualiza a conversa em andamento na lista de conversas salvas."""
+        _h = st.session_state.assistente_hist
+        if not _h:
+            return
+        from datetime import datetime as _dtc
+        _cid = st.session_state.assistente_conv_id
+        _conv = next((c for c in st.session_state.ia_conversas if c.get("id") == _cid), None) if _cid else None
+        if _conv is None:
+            _cid = _dtc.now().strftime("%Y%m%d%H%M%S%f")
+            _prim = next((m["content"] for m in _h if m["role"] == "user"), "Conversa")
+            _tit = " ".join(str(_prim).split())[:60] or "Conversa"
+            _conv = {"id": _cid, "titulo": _tit, "data": _dtc.now().strftime("%d/%m/%Y %H:%M")}
+            st.session_state.ia_conversas.insert(0, _conv)
+            st.session_state.assistente_conv_id = _cid
+        _conv["msgs"] = [{"role": m["role"], "content": m["content"]} for m in _h]
+        _conv["atualizada"] = _dtc.now().strftime("%d/%m/%Y %H:%M")
+        # limite: mantém as 50 conversas mais recentes
+        del st.session_state.ia_conversas[50:]
+        salvar_dados_iaagro()
+
+    with st.expander(f"📚 Histórico de conversas ({len(st.session_state.ia_conversas)})", expanded=False):
+        if st.button("➕ Nova conversa", key="btn_nova_conv_ia", use_container_width=True):
+            st.session_state.assistente_hist = []
+            st.session_state.assistente_conv_id = None
+            st.rerun()
+        if not st.session_state.ia_conversas:
+            st.caption("Nenhuma conversa salva ainda. Suas perguntas passam a ser guardadas aqui automaticamente.")
+        for _ci, _c in enumerate(list(st.session_state.ia_conversas)):
+            _ativa = (_c.get("id") == st.session_state.assistente_conv_id)
+            _n_msgs = len(_c.get("msgs", []))
+            _cc1, _cc2, _cc3 = st.columns([6, 1.4, 1])
+            _cc1.markdown(
+                f"<div style='padding:4px 0;font-size:13px;color:#cbd5e1;'>"
+                f"{'🟢 ' if _ativa else '💬 '}<b>{str(_c.get('titulo','Conversa')).replace('<','&lt;')}</b><br>"
+                f"<span style='color:#94a3b8;font-size:11px;'>{_c.get('atualizada', _c.get('data',''))} · {_n_msgs} mensagens</span></div>",
+                unsafe_allow_html=True)
+            if _cc2.button("📂 Abrir", key=f"btn_abrir_conv_{_c.get('id')}", use_container_width=True):
+                st.session_state.assistente_hist = [dict(m) for m in _c.get("msgs", [])]
+                st.session_state.assistente_conv_id = _c.get("id")
+                st.rerun()
+            if _cc3.button("🗑️", key=f"btn_del_conv_{_c.get('id')}", help="Excluir esta conversa"):
+                st.session_state.ia_conversas = [x for x in st.session_state.ia_conversas if x.get("id") != _c.get("id")]
+                if _ativa:
+                    st.session_state.assistente_hist = []
+                    st.session_state.assistente_conv_id = None
+                salvar_dados_iaagro()
+                st.rerun()
+        if st.session_state.ia_conversas:
+            if st.button("🧹 Excluir todo o histórico", key="btn_del_todas_conv"):
+                st.session_state.ia_conversas = []
+                st.session_state.assistente_hist = []
+                st.session_state.assistente_conv_id = None
+                salvar_dados_iaagro()
+                st.rerun()
 
     # ── CONTROLE DE USO DO ASSISTENTE (limite por plano) ──
     # Conta perguntas por mês e reseta a cada mês. Persiste em dados (Supabase).
@@ -11470,6 +11535,7 @@ elif menu == "🧠 Assistente IA":
                                 st.markdown(_ans.replace("$", "\\$"))
                                 st.session_state.assistente_hist.append(
                                     {"role":"assistant","content":_ans})
+                                _ia_salvar_conversa_atual()
                             else:
                                 st.error("Resposta vazia da API.")
                         elif _resp_ia.status_code == 401:
@@ -11520,7 +11586,9 @@ elif menu == "🧠 Assistente IA":
 
         if _btn_col3.button("🗑️ Limpar conversa", key="btn_limpar_assistente",
                             use_container_width=True):
+            # Só limpa a tela; a conversa continua guardada no histórico
             st.session_state.assistente_hist = []
+            st.session_state.assistente_conv_id = None
             st.rerun()
 
 # ─────────────────────────────────────────────
