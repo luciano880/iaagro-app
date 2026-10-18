@@ -10094,6 +10094,57 @@ if menu == "📦 Operacional":
                                         st.rerun()
                             st.markdown("---")
 
+                        # ── ADICIONAR PRODUTO À APLICAÇÃO (fora do form) ──
+                        with st.expander("➕ Adicionar produto a esta aplicação", expanded=False):
+                            _est_ops = ["— digitar manualmente —"] + [
+                                i.get("Insumo", "") for i in st.session_state.get("estoque", []) if i.get("Insumo")]
+                            _ad_sel = st.selectbox("Produto do estoque", _est_ops, key=f"add_prod_sel_{idx_a}")
+                            _ad_nome = st.text_input(
+                                "Nome do produto",
+                                value="" if _ad_sel == _est_ops[0] else _ad_sel,
+                                key=f"add_prod_nome_{idx_a}_{_ad_sel}")
+                            _ac1, _ac2, _ac3 = st.columns(3)
+                            _ad_dose = _ac1.number_input("Dose/ha", min_value=0.0, value=0.0, key=f"add_prod_dose_{idx_a}")
+                            _ad_unid = _ac2.selectbox("Unidade", ["L/ha", "kg/ha", "g/ha", "mL/ha", "sc/ha", "tn/ha"],
+                                                      key=f"add_prod_unid_{idx_a}")
+                            _preco_est = 0.0
+                            for _it in st.session_state.get("estoque", []):
+                                if _it.get("Insumo") == _ad_sel:
+                                    try:
+                                        _preco_est = float(preco_por_kg_ou_l(_it)[0] or 0)
+                                    except Exception:
+                                        _preco_est = 0.0
+                                    break
+                            _ad_preco = _ac3.number_input("R$ unit.", min_value=0.0, value=_preco_est,
+                                                          key=f"add_prod_preco_{idx_a}_{_ad_sel}")
+                            _ad_obs = st.text_input("Observação (opcional)", key=f"add_prod_obs_{idx_a}")
+                            if st.button("➕ Adicionar à aplicação", key=f"btn_add_prod_{idx_a}", type="primary"):
+                                if not _ad_nome.strip() or _ad_dose <= 0:
+                                    error_box("Informe o nome do produto e uma dose maior que zero.")
+                                else:
+                                    _area_ap = float(aplic.get("Área aplicada ha", 0) or 0)
+                                    _tot = round(_ad_dose * _area_ap, 3)
+                                    _ul = _ad_unid.lower()
+                                    _qb = _tot / 1000 if ("ml" in _ul or _ul.startswith("g/")) else _tot
+                                    aplic.setdefault("Produtos", []).append({
+                                        "Produto": _ad_nome.strip(), "Tipo": "Outro",
+                                        "Dose por ha": _ad_dose, "Unidade": _ad_unid,
+                                        "Produto por tanque": 0, "Total usado": _tot,
+                                        "Observação": _ad_obs,
+                                        "Preço Unitário R$": _ad_preco,
+                                        "Custo Total R$": round(_qb * _ad_preco, 2),
+                                    })
+                                    _idw = st.session_state.dados.get("id_area")
+                                    if _idw:
+                                        for _ar in st.session_state.areas:
+                                            if _ar.get("ID") == _idw:
+                                                _ar["Aplicacoes"] = list(st.session_state.aplicacoes)
+                                                break
+                                    salvar_dados_iaagro()
+                                    st.rerun()
+                            if aplic.get("Status") == "aplicado":
+                                st.caption("ℹ️ Esta aplicação já foi marcada como aplicada: o produto novo não baixa o estoque automaticamente — dê baixa manual.")
+
                         with st.form(key=f"form_edit_aplic_{idx_a}"):
                             _e1, _e2, _e3 = st.columns(3)
                             _edt_data     = _e1.text_input("Data (dd/mm/aaaa)", value=aplic.get("Data",""), key=f"edt_data_{idx_a}")
