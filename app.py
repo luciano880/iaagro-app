@@ -10069,6 +10069,11 @@ if menu == "📦 Operacional":
                         st.markdown("---")
                         st.markdown("**✏️ Editar Aplicação**")
 
+                        # Versão das chaves dos campos de produto: muda ao remover/adicionar,
+                        # para o Streamlit não reaproveitar valores de widgets antigos
+                        # (por índice) e "ressuscitar" um produto já excluído.
+                        _ev_key = f"edt_ver_{idx_a}"
+                        _ev = st.session_state.get(_ev_key, 0)
                         # ── REMOVER PRODUTO INDIVIDUAL (fora do form, botões diretos) ──
                         _prods_atuais = aplic.get("Produtos", [])
                         if _prods_atuais:
@@ -10086,6 +10091,7 @@ if menu == "📦 Operacional":
                                     _lista_real = aplic.get("Produtos", [])
                                     if 0 <= _pi < len(_lista_real):
                                         _removido = _lista_real.pop(_pi)  # muta a lista in-place
+                                        st.session_state[_ev_key] = _ev + 1
                                         aplic["Produtos"] = _lista_real
                                         # Reflete na área ativa também (as aplicações vivem lá dentro)
                                         _idw = st.session_state.dados.get("id_area")
@@ -10145,6 +10151,7 @@ if menu == "📦 Operacional":
                                             if _ar.get("ID") == _idw:
                                                 _ar["Aplicacoes"] = list(st.session_state.aplicacoes)
                                                 break
+                                    st.session_state[_ev_key] = _ev + 1
                                     salvar_dados_iaagro()
                                     st.rerun()
                             if aplic.get("Status") == "aplicado":
@@ -10174,13 +10181,13 @@ if menu == "📦 Operacional":
                                 for _pi, _p in enumerate(_produtos_orig):
                                     _pc1, _pc2, _pc3, _pc4 = st.columns([2,1,1,1])
                                     _p_nome = _pc1.text_input("Produto", value=_p.get("Produto",""),
-                                        key=f"edt_prod_nome_{idx_a}_{_pi}")
+                                        key=f"edt_prod_nome_{idx_a}_{_pi}_v{_ev}")
                                     _p_dose = _pc2.number_input("Dose/ha", min_value=0.0,
-                                        value=float(_p.get("Dose por ha",0) or 0), key=f"edt_prod_dose_{idx_a}_{_pi}")
+                                        value=float(_p.get("Dose por ha",0) or 0), key=f"edt_prod_dose_{idx_a}_{_pi}_v{_ev}")
                                     _p_unid = _pc3.text_input("Unidade", value=_p.get("Unidade",""),
-                                        key=f"edt_prod_unid_{idx_a}_{_pi}")
+                                        key=f"edt_prod_unid_{idx_a}_{_pi}_v{_ev}")
                                     _p_preco = _pc4.number_input("R$ unit.", min_value=0.0,
-                                        value=float(_p.get("Preço Unitário R$",0) or 0), key=f"edt_prod_preco_{idx_a}_{_pi}")
+                                        value=float(_p.get("Preço Unitário R$",0) or 0), key=f"edt_prod_preco_{idx_a}_{_pi}_v{_ev}")
                                     _p_total_novo = round(_p_dose * _edt_area, 3)
                                     _u_low = (_p_unid or "").lower()
                                     _p_qtd_base = _p_total_novo/1000 if ("ml" in _u_low or _u_low in ("g","g/ha")) else _p_total_novo
