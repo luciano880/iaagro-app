@@ -11335,6 +11335,132 @@ elif menu == "🧠 Assistente IA":
                 # O texto original (sem escape) continua salvo no histórico.
                 st.markdown(msg["content"].replace("$", "\\$"))
 
+        # ── DIAGNÓSTICO POR FOTO (doenças, pragas, deficiências) ──
+        with st.expander("📸 Diagnóstico por foto — doenças, pragas e deficiências", expanded=False):
+            st.caption("Tire uma foto (ou envie da galeria) da folha, vagem, espiga ou planta. "
+                       "A IA identifica o provável problema, avalia a gravidade e sugere o manejo. "
+                       "Conta como 1 pergunta do seu plano.")
+            _dv = st.session_state.get("diag_foto_ver", 0)
+            _cult_ops = ["Não sei / outra"] + sorted({str(a.get("Cultura", "")).strip()
+                         for a in st.session_state.areas if a.get("Cultura")})
+            _dc1, _dc2 = st.columns(2)
+            _diag_cult = _dc1.selectbox("Cultura", _cult_ops + (["Soja", "Milho", "Trigo", "Feijão"]
+                                        if len(_cult_ops) == 1 else []), key=f"diag_cult_{_dv}")
+            _diag_fase = _dc2.text_input("Estágio da cultura (opcional)", placeholder="Ex: V6, R2, enchimento de grão",
+                                         key=f"diag_fase_{_dv}")
+            _diag_obs = st.text_area("O que você observou? (opcional)",
+                                     placeholder="Ex: manchas escuras nas folhas de baixo, começou há 5 dias, ~20% da área, choveu muito...",
+                                     key=f"diag_obs_{_dv}", height=80)
+            _diag_files = st.file_uploader("Fotos (até 3) — envie da galeria ou tire na hora",
+                                           type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True,
+                                           key=f"diag_files_{_dv}")
+            _diag_cam = None
+            if st.checkbox("📷 Usar a câmera agora", key=f"diag_usecam_{_dv}"):
+                _diag_cam = st.camera_input("Tirar foto", key=f"diag_cam_{_dv}")
+            _fotos_diag = list(_diag_files or [])[:3]
+            if _diag_cam is not None:
+                _fotos_diag = (_fotos_diag + [_diag_cam])[:3]
+            if _fotos_diag:
+                _pcols = st.columns(len(_fotos_diag))
+                for _pc, _pf in zip(_pcols, _fotos_diag):
+                    _pc.image(_pf, use_container_width=True)
+            if len(_diag_files or []) > 3:
+                st.caption("⚠️ Só as 3 primeiras fotos serão analisadas.")
+
+            if _limite_atingido:
+                st.warning("🚫 Limite mensal de perguntas atingido — o diagnóstico por foto volta no próximo mês.")
+            if st.button("🔍 Analisar foto", type="primary", key=f"btn_diag_foto_{_dv}",
+                         disabled=(not _fotos_diag) or _limite_atingido, use_container_width=True):
+                try:
+                    import requests as _rq_dg
+                    import base64 as _b64_dg
+                    import io as _io_dg
+                    from PIL import ImageOps as _IO_dg
+                    _conteudo_dg = []
+                    for _pf in _fotos_diag:
+                        _pf.seek(0)
+                        _im = PILImage.open(_pf)
+                        _im = _IO_dg.exif_transpose(_im).convert("RGB")
+                        _im.thumbnail((1568, 1568))
+                        _buf = _io_dg.BytesIO()
+                        _im.save(_buf, format="JPEG", quality=85)
+                        _conteudo_dg.append({"type": "image", "source": {
+                            "type": "base64", "media_type": "image/jpeg",
+                            "data": _b64_dg.b64encode(_buf.getvalue()).decode()}})
+                    _txt_dg = (f"Diagnóstico por foto. Cultura: {_diag_cult}. "
+                               f"Estágio: {_diag_fase or 'não informado'}. "
+                               f"Observações do produtor: {_diag_obs or 'nenhuma'}. "
+                               f"Número de fotos: {len(_fotos_diag)}.")
+                    _conteudo_dg.append({"type": "text", "text": _txt_dg})
+                    _system_dg = (
+                        "Você é um engenheiro agrônomo fitopatologista/entomologista brasileiro, foco no Sul do "
+                        "Brasil (PR, SC, RS). Analise as FOTOS enviadas pelo produtor e responda SEMPRE em português, "
+                        "de forma prática. Estruture a resposta assim: "
+                        "1) **O que a foto mostra** (sintomas visíveis, parte da planta, qualidade da foto); "
+                        "2) **Diagnóstico provável** — liste as 1 a 3 hipóteses mais prováveis (doença, praga, "
+                        "deficiência nutricional, fitotoxicidade/deriva, estresse hídrico/térmico), com nível de "
+                        "confiança (alta/média/baixa) e por quê; "
+                        "3) **Como confirmar no campo** (o que olhar: face inferior da folha, raízes, haste, "
+                        "armadilha, teste de amostragem, análise laboratorial) e como diferenciar das hipóteses "
+                        "parecidas; "
+                        "4) **Gravidade e nível de ação** (nível de dano econômico/controle quando existir, "
+                        "urgência); "
+                        "5) **Manejo/tratamento**: (a) cultural/preventivo, (b) biológico, (c) químico — cite "
+                        "grupos químicos/ingredientes ativos com registro no MAPA/AGROFIT PARA A CULTURA informada, "
+                        "dose de bula, época e número máximo de aplicações, INTERVALO DE SEGURANÇA e, para "
+                        "herbicidas/residuais, a restrição de rotação com a próxima cultura; "
+                        "6) **Manejo de resistência** (alternar modos de ação FRAC/IRAC/HRAC, sem dogmatismo); "
+                        "7) **Alertas** (limitações da foto, quando enviar amostra a laboratório/ técnico). "
+                        "REGRAS: seja honesto sobre incerteza — se a foto não permite concluir, diga e peça "
+                        "novas fotos (qual parte, distância, luz). NUNCA afirme com certeza absoluta um diagnóstico "
+                        "só por foto. NÃO invente doses nem registros: se não tiver certeza do dado atual, use a "
+                        "busca na web (AGROFIT/bulas/EMBRAPA) e cite a fonte. Termine SEMPRE lembrando que a "
+                        "decisão e a receita agronômica são do engenheiro agrônomo responsável."
+                    )
+                    _payload_dg = {
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 4000,
+                        "system": [
+                            {"type": "text", "text": _system_dg, "cache_control": {"type": "ephemeral"}},
+                            {"type": "text", "text": f"Contexto da propriedade: {_ctx_ia}"},
+                        ],
+                        "messages": [{"role": "user", "content": _conteudo_dg}],
+                        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+                    }
+                    _hdr_dg = {"x-api-key": _api_key_ia, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"}
+                    with st.spinner("🔬 Analisando as fotos... (pode levar 1-2 min se eu consultar bulas na web)"):
+                        _r_dg = _rq_dg.post("https://api.anthropic.com/v1/messages", headers=_hdr_dg,
+                                            json=_payload_dg, timeout=180)
+                        if _r_dg.status_code == 400:
+                            # Alguns casos imagem+busca web dão 400: refaz sem a busca
+                            _payload_dg.pop("tools", None)
+                            _r_dg = _rq_dg.post("https://api.anthropic.com/v1/messages", headers=_hdr_dg,
+                                                json=_payload_dg, timeout=180)
+                    if _r_dg.status_code == 200:
+                        _ans_dg = "".join(b.get("text", "") for b in (_r_dg.json().get("content") or [])
+                                          if isinstance(b, dict) and b.get("type") == "text").strip()
+                        if _ans_dg:
+                            st.session_state.dados["ia_uso"] = {"mes": _mes_atual, "count": _usadas_ia + 1}
+                            _resumo_dg = (f"📸 **Diagnóstico por foto** — {len(_fotos_diag)} foto(s) · cultura: "
+                                          f"{_diag_cult}" + (f" · estágio: {_diag_fase}" if _diag_fase else "")
+                                          + (f"\n\nObservações: {_diag_obs}" if _diag_obs else ""))
+                            st.session_state.assistente_hist.append({"role": "user", "content": _resumo_dg})
+                            st.session_state.assistente_hist.append({"role": "assistant", "content": _ans_dg})
+                            _ia_salvar_conversa_atual()
+                            st.session_state["diag_foto_ver"] = _dv + 1  # limpa os campos
+                            st.rerun()
+                        else:
+                            st.error("Resposta vazia da API. Tente novamente com outra foto.")
+                    elif _r_dg.status_code == 401:
+                        st.error("❌ Chave API inválida ou expirada.")
+                    elif _r_dg.status_code == 429:
+                        st.warning("⏳ Limite de requisições. Aguarde alguns segundos e tente novamente.")
+                    else:
+                        st.error(f"Erro na API: HTTP {_r_dg.status_code}")
+                except Exception as _e_dg:
+                    st.error(f"Não consegui analisar a foto: {str(_e_dg)[:150]}")
+
         # Upload de documento para análise (PDF, imagem, planilha)
         with st.expander("📎 Anexar documento para análise (PDF, imagem, planilha)"):
             _doc_ia = st.file_uploader(
