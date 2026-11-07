@@ -21,6 +21,62 @@ import re
 import requests
 import xml.etree.ElementTree as ET
 from PIL import Image as PILImage
+
+# Guia de referência visual para o diagnóstico por foto (reduz confusões comuns)
+_GUIA_DIAG_FOTO = (
+    "\n\nMÉTODO DE DIAGNÓSTICO (siga na ordem): "
+    "(1) Primeiro descreva o que vê SEM concluir: tipo de lesão (pontos, manchas, pústulas, halos, bronzeado, "
+    "clorose), cor, tamanho, forma (angular limitada por nervuras x circular), distribuição, face da folha, "
+    "posição na planta (folhas baixeiras x ponteiro), presença de sinais (pó/esporos, teia, insetos, fezes, galerias). "
+    "(2) Considere a SAZONALIDADE e a região: no Sul do Brasil, soja em fase vegetativa/reprodutiva (nov–mar) com "
+    "pontuações marrons/avermelhadas e amarelecimento nas folhas do baixeiro → FERRUGEM-ASIÁTICA (Phakopsora pachyrhizi) "
+    "é a primeira hipótese a descartar, pois é a doença de maior impacto. "
+    "(3) Exija SINAIS COMPATÍVEIS antes de dar confiança ALTA: não dê confiança alta a ácaro sem teia, ácaros ou "
+    "bronzeamento/prateamento característico; não dê alta a deficiência sem padrão de distribuição coerente. "
+    "(4) Liste para cada hipótese 'a favor' e 'contra' o que aparece na foto. Se a face inferior/contraluz não foi "
+    "mostrada e isso é decisivo, diga e peça a foto específica — não preencha a lacuna com suposição. "
+    "GUIA DE DIFERENCIAÇÃO — SOJA: "
+    "• FERRUGEM-ASIÁTICA: inicia no baixeiro/terço inferior; face superior mostra minúsculos pontos/pontuações "
+    "marrom-claro a marrom-avermelhado ou amarelados (às vezes translúcidos contra a luz) que viram lesões "
+    "angulares limitadas pelas nervuras; na face INFERIOR surgem pústulas (uredínias) levemente salientes com poro "
+    "central que liberam pó claro (urediniósporos); com a evolução há amarelecimento intenso, queda prematura de "
+    "folhas e desfolha de baixo para cima; favorecida por folha molhada/orvalho, chuva e 18–26 °C; surge de forma "
+    "difusa na lavoura (não em reboleira de seca). Pontuações marrom-avermelhadas MUITO pequenas e numerosas + "
+    "clorose, em folha com boa turgidez e sem teia = pensar em ferrugem. "
+    "• ÁCARO (rajado/vermelho): favorecido por tempo SECO e quente; começa em reboleiras/bordas; bronzeamento ou "
+    "prateamento, pontuações cloróticas finas (picadas), teia fina e ácaros móveis na face inferior; folhas "
+    "podem ficar coriáceas/bronzeadas; sem pústulas com poro e sem pó. "
+    "• MANCHA-ALVO (Corynespora): manchas circulares marrons com anéis concêntricos e halo amarelo, grandes (>5 mm). "
+    "• MANCHA-PARDA (Septoria): pontos/manchas pardo-escuras irregulares no baixeiro, amarelecimento e queda. "
+    "• CRESTAMENTO-DE-CERCOSPORA: bronzeado/arroxeado coriáceo no topo e nas folhas expostas ao sol, "
+    "manchas pequenas púrpura. "
+    "• OÍDIO: pó branco superficial removível. • MÍLDIO: mancha clorótica na face superior e feltro "
+    "acinzentado na inferior. • MANCHA OLHO-DE-RÃ (Cercospora sojina): manchas circulares com centro cinza "
+    "e borda marrom-avermelhada. • PÚSTULA-BACTERIANA/CRESTAMENTO BACTERIANO: pontos angulares encharcados com "
+    "halo clorótico, sem esporos. • ANTRACNOSE: manchas escuras em hastes/vagens, necrose de nervuras. "
+    "• DOENÇAS DE FINAL DE CICLO (DFC): pontos marrom-escuros esparsos em folhas e vagens no fim do ciclo. "
+    "• DEFICIÊNCIAS: N/S (clorose geral; N em folha velha, S em folha nova), K (bordas queimadas em folhas "
+    "velhas), Mg (clorose internerval em folha velha), Mn (clorose internerval em folha NOVA com nervuras "
+    "verdes — comum em soja RR/cerrado e após calagem alta), Fe, B, Zn. Deficiência NÃO produz pústulas, pó ou halos "
+    "de lesão. • FITOTOXICIDADE/DERIVA: padrão em faixas/bordas, distorção, folhas encarquilhadas. "
+    "• PRAGAS: percevejos (grãos chochos, picadas), lagartas (Helicoverpa, Chrysodeixis, Spodoptera: folhas "
+    "raspadas, furos, fezes), mosca-branca (ninfas na face inferior, fumagina), tripes (prateamento), "
+    "ácaros. "
+    "MILHO: FERRUGEM-COMUM (Puccinia sorghi: pústulas alongadas marrom-ferrugem em ambas as faces), FERRUGEM-"
+    "POLYSORA (pústulas menores, mais claras, circulares, ambas as faces, evolução rápida), MANCHA-BRANCA "
+    "(Phaeosphaeria/Pantoea: manchas aquosas esbranquiçadas), CERCOSPORIOSE (manchas retangulares cinza "
+    "limitadas pelas nervuras), HELMINTOSPORIOSE (lesões elípticas longas 'charuto'), ENFEZAMENTOS (vermelhão/"
+    "pálido, transmitidos pela cigarrinha, plantas enfezadas), lagarta-do-cartucho (raspagem + fezes no cartucho). "
+    "TRIGO/CEVADA: ferrugem-da-folha (pústulas laranja redondas esparsas), ferrugem-do-colmo, oídio, mancha-"
+    "amarela, brusone (espigas esbranquiçadas/ chochas), giberela (espiguetas despigmentadas). "
+    "FEIJÃO: ferrugem, antracnose, mancha-angular, crestamento-bacteriano, mosaico-dourado (mosca-branca). "
+    "Se a foto tiver pústulas com poro/pó na face inferior em soja, o diagnóstico mais provável é ferrugem-"
+    "asiática: priorize manejo imediato (fungicida com ativos de grupos distintos — DMI/SDHI/QoI + multissítio, "
+    "conforme registro MAPA para soja), reforçando vazio sanitário, calendarização e monitoramento do "
+    "consórcio Antiferrugem."
+)
+
+
 import pdfplumber
 import pytesseract
 try:
@@ -11337,6 +11393,9 @@ elif menu == "🧠 Assistente IA":
 
         # ── DIAGNÓSTICO POR FOTO (doenças, pragas, deficiências) ──
         with st.expander("📸 Diagnóstico por foto — doenças, pragas e deficiências", expanded=False):
+            st.info("💡 Dica: para um diagnóstico melhor, envie 2–3 fotos — a **face de cima** da folha, o "
+                    "**verso** (face de baixo, bem perto/macro) e uma **contra a luz**. Fotografe folhas do "
+                    "baixeiro e do ponteiro, com foco nítido e luz natural.")
             st.caption("Tire uma foto (ou envie da galeria) da folha, vagem, espiga ou planta. "
                        "A IA identifica o provável problema, avalia a gravidade e sugere o manejo. "
                        "Conta como 1 pergunta do seu plano.")
@@ -11348,6 +11407,10 @@ elif menu == "🧠 Assistente IA":
                                         if len(_cult_ops) == 1 else []), key=f"diag_cult_{_dv}")
             _diag_fase = _dc2.text_input("Estágio da cultura (opcional)", placeholder="Ex: V6, R2, enchimento de grão",
                                          key=f"diag_fase_{_dv}")
+            _diag_face = st.selectbox("O que a foto mostra?", [
+                "Folha — face de cima", "Folha — face de baixo (verso)", "Folha contra a luz",
+                "Fotos de cima e de baixo (recomendado)", "Haste / vagem / espiga", "Planta inteira / lavoura", "Inseto / praga"],
+                index=3, key=f"diag_face_{_dv}")
             _diag_obs = st.text_area("O que você observou? (opcional)",
                                      placeholder="Ex: manchas escuras nas folhas de baixo, começou há 5 dias, ~20% da área, choveu muito...",
                                      key=f"diag_obs_{_dv}", height=80)
@@ -11389,6 +11452,7 @@ elif menu == "🧠 Assistente IA":
                             "data": _b64_dg.b64encode(_buf.getvalue()).decode()}})
                     _txt_dg = (f"Diagnóstico por foto. Cultura: {_diag_cult}. "
                                f"Estágio: {_diag_fase or 'não informado'}. "
+                               f"Fotografado: {_diag_face}. "
                                f"Observações do produtor: {_diag_obs or 'nenhuma'}. "
                                f"Número de fotos: {len(_fotos_diag)}.")
                     _conteudo_dg.append({"type": "text", "text": _txt_dg})
@@ -11415,8 +11479,8 @@ elif menu == "🧠 Assistente IA":
                         "novas fotos (qual parte, distância, luz). NUNCA afirme com certeza absoluta um diagnóstico "
                         "só por foto. NÃO invente doses nem registros: se não tiver certeza do dado atual, use a "
                         "busca na web (AGROFIT/bulas/EMBRAPA) e cite a fonte. Termine SEMPRE lembrando que a "
-                        "decisão e a receita agronômica são do engenheiro agrônomo responsável."
-                    )
+                        "decisão e a receita agronômica são do engenheiro agrônomo responsável. "
+                    ) + _GUIA_DIAG_FOTO
                     _payload_dg = {
                         "model": "claude-sonnet-4-6",
                         "max_tokens": 4000,
