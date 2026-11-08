@@ -22,6 +22,41 @@ import requests
 import xml.etree.ElementTree as ET
 from PIL import Image as PILImage
 
+# Registro técnico das respostas do Assistente IA (chat e diagnóstico por foto)
+_REGISTRO_TECNICO = (
+    "\n\nREGISTRO TÉCNICO (obrigatório): escreva como um consultor agrônomo sênior para outro profissional "
+    "técnico, mantendo clareza. Use nomenclatura correta: nome científico (Phakopsora pachyrhizi, Euschistus "
+    "heros), nome comum, fase fenológica pela escala de Fehr & Caviness (soja: VE, VC, V1–Vn, R1–R8) e "
+    "Ritchie/Ritchie-Hanway (milho: VE, V1–Vn, VT, R1–R6) e Zadoks/Feekes (trigo). Para defensivos, indique "
+    "sempre: ingrediente ativo + concentração, grupo químico, código de modo de ação (FRAC/IRAC/HRAC), dose em g "
+    "ou mL de i.a./ha e do produto comercial/ha, volume de calda, épocas/estágios, número máximo de aplicações, "
+    "intervalo de segurança, intervalo de reentrada e restrições de rotação (plantback) — marcando 'confirmar em "
+    "bula/AGROFIT' quando o dado não vier de fonte consultada. Quantifique: nível de ação/controle, nível de dano "
+    "econômico, incidência x severidade (escala diagramática Embrapa quando houver), perdas estimadas em sc/ha ou "
+    "kg/ha com a faixa e a fonte, custo x benefício do controle quando possível. Para adubação/solo use unidades "
+    "(kg/ha de N, P2O5, K2O; mg/dm³; cmolc/dm³; % de saturação) e interpretação segundo CQFS RS/SC 2016, "
+    "EMBRAPA ou Manual de Calagem e Adubação do PR, citando a tabela usada. Prefira tabelas em markdown para "
+    "doses, grupos químicos e comparações. Cite as fontes (Embrapa, Fundação MT/ABC, MAPA/AGROFIT, FRAC/IRAC/"
+    "HRAC, CQFS) e diferencie o que é dado de bula do que é recomendação de pesquisa ou boa prática. Evite "
+    "linguagem coloquial e floreios; seja denso, preciso e organizado, sem inventar números — na dúvida, "
+    "pesquise na web ou declare a incerteza."
+)
+
+_EXTRA_FOTO_TEC = (
+    " NO LAUDO DA FOTO inclua ainda: (i) uma tabela 'Hipótese | Evidências a favor | Evidências contra | "
+    "Confiança (%)' com probabilidades relativas que somem ~100%; (ii) severidade estimada (% de área foliar "
+    "lesionada ou nº de lesões/folíolo) e incidência provável, com o estágio fenológico estimado pela foto; "
+    "(iii) condições epidemiológicas favoráveis (temperatura, molhamento foliar, UR, época, inóculo) e risco de "
+    "progressão nos próximos 7–14 dias; (iv) amostragem recomendada (nº de pontos, folhas por ponto, "
+    "terço da planta, técnica), com limiares de ação publicados; (v) tabela de manejo químico com ativo, "
+    "grupo/código FRAC-IRAC-HRAC, dose i.a./ha e produto/ha, volume de calda e bicos, intervalo entre "
+    "aplicações, carência e nº máx. de aplicações; (vi) estratégia de manejo de resistência e posicionamento "
+    "do fungicida/inseticida (preventivo x curativo), mais multissítio; (vii) diagnóstico diferencial em "
+    "campo e testes confirmatórios (lupa 20x, câmara úmida, kit imunológico, PCR/lab); (viii) impacto "
+    "potencial de produtividade em sc/ha com faixa e fonte. Seja explícito sobre o que a imagem NÃO permite "
+    "concluir. Termine com a ressalva de responsabilidade técnica (receituário agronômico, Lei 14.785/2023)."
+)
+
 # Guia de referência visual para o diagnóstico por foto (reduz confusões comuns)
 _GUIA_DIAG_FOTO = (
     "\n\nMÉTODO DE DIAGNÓSTICO (siga na ordem): "
@@ -11459,7 +11494,7 @@ elif menu == "🧠 Assistente IA":
                     _system_dg = (
                         "Você é um engenheiro agrônomo fitopatologista/entomologista brasileiro, foco no Sul do "
                         "Brasil (PR, SC, RS). Analise as FOTOS enviadas pelo produtor e responda SEMPRE em português, "
-                        "de forma prática. Estruture a resposta assim: "
+                        "em linguagem técnica de laudo fitossanitário. Estruture a resposta assim: "
                         "1) **O que a foto mostra** (sintomas visíveis, parte da planta, qualidade da foto); "
                         "2) **Diagnóstico provável** — liste as 1 a 3 hipóteses mais prováveis (doença, praga, "
                         "deficiência nutricional, fitotoxicidade/deriva, estresse hídrico/térmico), com nível de "
@@ -11480,10 +11515,10 @@ elif menu == "🧠 Assistente IA":
                         "só por foto. NÃO invente doses nem registros: se não tiver certeza do dado atual, use a "
                         "busca na web (AGROFIT/bulas/EMBRAPA) e cite a fonte. Termine SEMPRE lembrando que a "
                         "decisão e a receita agronômica são do engenheiro agrônomo responsável. "
-                    ) + _GUIA_DIAG_FOTO
+                    ) + _GUIA_DIAG_FOTO + _REGISTRO_TECNICO + _EXTRA_FOTO_TEC
                     _payload_dg = {
                         "model": "claude-sonnet-4-6",
-                        "max_tokens": 4000,
+                        "max_tokens": 6000,
                         "system": [
                             {"type": "text", "text": _system_dg, "cache_control": {"type": "ephemeral"}},
                             {"type": "text", "text": f"Contexto da propriedade: {_ctx_ia}"},
@@ -11616,7 +11651,7 @@ elif menu == "🧠 Assistente IA":
 
                         _system_ia = (
                             "Você é um agrônomo especialista brasileiro com foco no Sul do Brasil (PR, SC, RS). "
-                            "Responda SEMPRE em português, de forma prática e objetiva para produtores rurais. "
+                            "Responda SEMPRE em português, com linguagem técnica e objetiva (ver REGISTRO TÉCNICO abaixo). "
                             "Use dados da EMBRAPA, CQFS RS/SC, IAPAR e boas práticas agronômicas. "
                             "Para recomendações de adubação, siga as tabelas CQFS RS/SC 2016. "
                             "Para defensivos, cite apenas produtos registrados no MAPA. "
@@ -11679,7 +11714,7 @@ elif menu == "🧠 Assistente IA":
                             "Para notas fiscais e estoque, ajude a organizar, "
                             "conferir e sugerir uso. Para planilhas de estoque, aponte itens em falta, "
                             "vencimentos, ou sugestões de compra conforme o manejo. Seja prático. "
-                        )
+                        ) + _REGISTRO_TECNICO
                         # Monta o payload. Quando há PDF/imagem anexado, NÃO usa
                         # web_search na mesma chamada (a combinação documento + tool
                         # causa HTTP 400). Para análise de documento, a busca não é
