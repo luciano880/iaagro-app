@@ -2440,7 +2440,7 @@ PLANOS = {
         "preco":   39.90,
         "areas":   10,
         "estoque": 100,
-        "ia_perguntas_mes": 125,
+        "ia_perguntas_mes": 80,
         "cor":     "#1e3a5f",
         "borda":   "#3b82f6",
         "recursos": [
@@ -2468,7 +2468,7 @@ PLANOS = {
         "preco":   99.90,
         "areas":   -1,   # ilimitado
         "estoque": -1,   # ilimitado
-        "ia_perguntas_mes": 350,   # uso justo
+        "ia_perguntas_mes": 225,   # uso justo
         "cor":     "#14532d",
         "borda":   "#22c55e",
         "recursos": [
